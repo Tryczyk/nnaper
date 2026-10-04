@@ -1,0 +1,64 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: nnaper_db
+    environment:
+      - POSTGRES_USER=nnaper
+      - POSTGRES_PASSWORD=nnaper
+      - POSTGRES_DB=nnaper_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - nnaper_pgdata:/var/lib/postgresql/data
+      - ./init_db.sql:/docker-entrypoint-initdb.d/init_db.sql:ro
+    restart: unless-stopped
+
+  tiles-downloader:
+    image: alpine:latest
+    container_name: nnaper_downloader
+    profiles: ["tools"]
+    volumes:
+      - ./geojsons:/data
+    environment:
+      - OSM_FILE_NAME=${OSM_FILE_NAME:-pomorskie.osm.pbf}
+    entrypoint: ["/bin/sh", "-c"]
+    command: >
+      "apk add --no-cache curl &&
+       if [ ! -f /data/$${OSM_FILE_NAME} ]; then
+         echo '[DOCKER] Brak pliku /data/'$${OSM_FILE_NAME}'. Pobieranie z Geofabrik...';
+         REGION=$$(echo $${OSM_FILE_NAME} | sed 's/\.osm\.pbf//' | sed 's/\.pbf//');
+         curl -L --fail https://download.geofabrik.de/europe/poland/$${REGION}-latest.osm.pbf -o /data/$${OSM_FILE_NAME} || \
+         curl -L --fail https://download.geofabrik.de/europe/poland/pomorskie-latest.osm.pbf -o /data/pomorskie.osm.pbf;
+       else
+         echo '[DOCKER] Plik /data/'$${OSM_FILE_NAME}' juz istnieje. Pomijam pobieranie.';
+       fi"
+
+  tiles-generator:
+    image: ghcr.io/onthegomap/planetiler:latest
+    container_name: nnaper_planetiler
+    profiles: ["tools"]
+    depends_on:
+      tiles-downloader:
+        condition: service_completed_successfully
+    environment:
+      - JAVA_OPTS=-Xmx4g
+    volumes:
+      - ./geojsons:/data
+    command: >
+      --osm-path=/data/${OSM_FILE_NAME:-pomorskie.osm.pbf}
+      --output=/data/pomorskie.pmtiles
+      --download
+      --force
+
+  tiles-server:
+    image: caddy:alpine
+    container_name: nnaper_tiles_server
+    ports:
+      - "8080:8080"
+    volumes:
+      - .:/usr/share/caddy
+    command: caddy file-server --root /usr/share/caddy --listen :8080 --access-log
+    restart: unless-stopped
+
+volumes:
+  nnaper_pgdata:

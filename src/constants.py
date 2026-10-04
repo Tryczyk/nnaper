@@ -65,11 +65,11 @@ MAP_LAYERS = {
         "color": RED,
         "width": AVERAGE_ROAD_WIDTH * 2,
     },
-    "driven": {
-        "path": GEOJSON_DIR_PATH / "driven.geojson",
-        "color": WHITE,
-        "width": AVERAGE_ROAD_WIDTH * 4,
-    },
+    # "driven": {
+    #     "path": GEOJSON_DIR_PATH / "driven.geojson",
+    #     "color": WHITE,
+    #     "width": AVERAGE_ROAD_WIDTH * 4,
+    # },
     "traffic_calming": {
         "path": GEOJSON_DIR_PATH / f"{OSM_FILE_NAME}_traffic_calming.geojson",
         "color": PINK,

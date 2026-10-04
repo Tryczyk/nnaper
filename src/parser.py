@@ -1,19 +1,15 @@
-from pathlib import Path
-import pickle
 from datetime import datetime
-from operator import attrgetter
+import uuid
+import psycopg
 
-import geopandas as gpd
-from shapely.geometry import Point
+from constants import DATA_FILE_PATH, STATE_FILE_PATH
+from utils import ddm_to_dd, parse_nmea_time, to_int_or_none
 
-import pandas as pd
+DB_URL = "postgresql://nnaper:nnaper@localhost:5432/nnaper_db"
 
-from constants import DATA_FILE_PATH, ENGINE_OFF_THRESHOLD, EPOCHS_FILE_PATH, PARSING_ENABLED, STATE_FILE_PATH
-from geography import ddm_to_dd, haversine_vec
-from utils import count_lines
-
-class Epoch():
+class Epoch:
     __slots__ = ['gsensord', 'gprmc', 'gpvtg', 'gpgga', 'gpgsa', 'gpgsvs', 'terminator', 'time_diff', 'distance']
+
     def __init__(self):
         self.gsensord = None
         self.gprmc = None
@@ -25,8 +21,10 @@ class Epoch():
         self.time_diff = None
         self.distance = None
 
-class Sentence():
+
+class Sentence:
     __slots__ = ['raw', 'checksum', 'parts', 'parts_count']
+
     def __init__(self, raw=None):
         self.raw = raw
         self.checksum = None
@@ -45,22 +43,27 @@ class Sentence():
     def get_part(self, index):
         if index >= self.parts_count:
             return None
-
         value = self.parts[index]
         return value if value else None
 
+
 class GSENSORD(Sentence):
     __slots__ = ['g_x', 'g_y', 'g_z']
+
     def __init__(self, raw=None):
         super().__init__(raw)
         self.g_x = self.get_part(1)
         self.g_y = self.get_part(2)
         self.g_z = self.get_part(3)
 
+
 class GPRMC(Sentence):
-    __slots__ = ['time_utc', 'status', 'latitude', 'latitude_hemisphere', 'longitude', 
-                 'longitude_hemisphere', 'speed_knots', 'course', 'date', 
-                 'magnetic_variation', 'magnetic_variation_hemisphere', 'mode', 'time']
+    __slots__ = [
+        'time_utc', 'status', 'latitude', 'latitude_hemisphere', 'longitude',
+        'longitude_hemisphere', 'speed_knots', 'course', 'date',
+        'magnetic_variation', 'magnetic_variation_hemisphere', 'mode', 'time'
+    ]
+
     def __init__(self, raw=None):
         super().__init__(raw)
         self.time_utc = self.get_part(1)
@@ -75,19 +78,26 @@ class GPRMC(Sentence):
         self.magnetic_variation = self.get_part(10)
         self.magnetic_variation_hemisphere = self.get_part(11)
         self.mode = self.get_part(12)
-        self.latitude = ddm_to_dd(self.latitude, self.latitude_hemisphere) #TODO zmienic to zeby nie nadpisywalo zmiennej
+
+        self.latitude = ddm_to_dd(self.latitude, self.latitude_hemisphere)
         self.longitude = ddm_to_dd(self.longitude, self.longitude_hemisphere)
+
         if self.date is not None and self.time_utc is not None:
-            self.time = datetime.strptime(f"{self.date}{self.time_utc}", '%d%m%y%H%M%S.%f')
+            try:
+                self.time = datetime.strptime(f"{self.date}{self.time_utc}", '%d%m%y%H%M%S.%f')
+            except ValueError:
+                self.time = None
         else:
             self.time = None
 
+
 class GPVTG(Sentence):
     __slots__ = [
-        'course_true', 'course_true_indicator', 'course_magnetic', 
-        'course_magnetic_indicator', 'speed_knots', 'speed_knots_indicator', 
+        'course_true', 'course_true_indicator', 'course_magnetic',
+        'course_magnetic_indicator', 'speed_knots', 'speed_knots_indicator',
         'speed_kmh', 'speed_kmh_indicator', 'mode'
     ]
+
     def __init__(self, raw=None):
         super().__init__(raw)
         self.course_true = self.get_part(1)
@@ -100,13 +110,15 @@ class GPVTG(Sentence):
         self.speed_kmh_indicator = self.get_part(8)
         self.mode = self.get_part(9)
 
+
 class GPGGA(Sentence):
     __slots__ = [
-        'time_utc', 'latitude', 'latitude_hemisphere', 'longitude', 
-        'longitude_hemisphere', 'fix_quality', 'satellites_used', 'hdop', 
-        'altitude', 'altitude_units', 'geoid_separation', 'geoid_separation_units', 
+        'time_utc', 'latitude', 'latitude_hemisphere', 'longitude',
+        'longitude_hemisphere', 'fix_quality', 'satellites_used', 'hdop',
+        'altitude', 'altitude_units', 'geoid_separation', 'geoid_separation_units',
         'dgps_age', 'dgps_station_id'
     ]
+
     def __init__(self, raw=None):
         super().__init__(raw)
         self.time_utc = self.get_part(1)
@@ -126,19 +138,23 @@ class GPGGA(Sentence):
         self.latitude = ddm_to_dd(self.latitude, self.latitude_hemisphere)
         self.longitude = ddm_to_dd(self.longitude, self.longitude_hemisphere)
 
+
 class GPGSA(Sentence):
     __slots__ = ['mode1', 'mode2', 'satellites', 'pdop', 'hdop', 'vdop']
+
     def __init__(self, raw=None):
         super().__init__(raw)
         self.mode1 = self.get_part(1)
-        self.mode2 = self.get_part(2)
-        self.satellites = [self.get_part(index) for index in range(3, 15)]
+        self.mode2 = to_int_or_none(self.get_part(2))
+        self.satellites = [to_int_or_none(self.get_part(i)) for i in range(3, 15)]
         self.pdop = self.get_part(15)
         self.hdop = self.get_part(16)
         self.vdop = self.get_part(17)
 
+
 class GPGSV(Sentence):
     __slots__ = ['total_messages', 'message_number', 'satellites_in_view', 'satellites']
+
     def __init__(self, raw=None):
         super().__init__(raw)
         self.total_messages = self.get_part(1)
@@ -156,13 +172,16 @@ class GPGSV(Sentence):
             ))
             satellite_index += 4
 
-class Satellite():
+
+class Satellite:
     __slots__ = ['prn', 'elevation', 'azimuth', 'snr']
+
     def __init__(self, prn=None, elevation=None, azimuth=None, snr=None):
         self.prn = prn
         self.elevation = elevation
         self.azimuth = azimuth
         self.snr = snr
+
 
 TAG_CLASSES = {
     "$GSENSORD": GSENSORD,
@@ -172,146 +191,197 @@ TAG_CLASSES = {
     "$GPGSA": GPGSA,
 }
 
-def where_did_we_stop(state_file_path = STATE_FILE_PATH,):
+def where_did_we_stop(state_file_path=STATE_FILE_PATH):
     if state_file_path.exists():
         with open(state_file_path, "r") as f:
-            return int(f.read().strip()) 
-    else:
-        print(f"Failed to open {state_file_path}!")
-        return 0
-
-def load_epochs(epochs_file_path = EPOCHS_FILE_PATH):
-    if epochs_file_path.exists():
-        with open(epochs_file_path, "rb") as file:
-            return pickle.load(file)    
-    else:
-        print(f"Failed to open {str(epochs_file_path)}!")
-        return []
-
-def save_epochs(last_line_index, original_last_line_index, epochs, epochs_file_path = EPOCHS_FILE_PATH, state_file_path = STATE_FILE_PATH,):
-    if last_line_index != original_last_line_index:
-        with open(epochs_file_path, "wb") as file:
-            pickle.dump(epochs, file, protocol=pickle.HIGHEST_PROTOCOL)
-
-        with open(state_file_path, "w") as f:
-            f.write(str(last_line_index))
-
-def epochs_to_df(epochs):
-    return pd.DataFrame([
-        {
-            "time": p.gprmc.time,
-            "lon": p.gprmc.longitude,
-            "lat": p.gprmc.latitude
-        } for p in epochs if p.gprmc is not None and p.gprmc.latitude is not None and p.gprmc.longitude is not None
-    ])
-
-def parse_data(
-    data_file_path = DATA_FILE_PATH,
-    tag_classes = TAG_CLASSES,
-    engine_off_treshold = ENGINE_OFF_THRESHOLD,
-    epochs_file_path = EPOCHS_FILE_PATH
-    ):
+            content = f.read().strip()
+            return int(content) if content.isdigit() else 0
+    return 0
 
 
+def insert_epoch_to_db(cursor, epoch):
+    epoch_id = str(uuid.uuid4())
+
+    cursor.execute(
+        """INSERT INTO epochs (epoch_id, terminator, time_diff, distance) VALUES (%s, %s, %s, %s)""",
+        (epoch_id, epoch.terminator, None, None)
+    )
+
+    def insert_sentence(obj, table_name, specific_cols, specific_vals):
+        if not obj:
+            return None
+        sentence_id = str(uuid.uuid4())
+
+        cursor.execute(
+            """INSERT INTO sentence (sentence_id, epoch_id, raw, checksum, parts_count) VALUES (%s, %s, %s, %s, %s)""",
+            (sentence_id, epoch_id, obj.raw, obj.checksum, obj.parts_count)
+        )
+
+        placeholders = ", ".join(["%s"] * (len(specific_vals) + 1))
+        cols = ", ".join(["sentence_id"] + specific_cols)
+        cursor.execute(f"""INSERT INTO {table_name} ({cols}) VALUES ({placeholders})""", [sentence_id] + specific_vals)
+
+        return sentence_id
+
+    if epoch.gsensord:
+        insert_sentence(epoch.gsensord, "gsensord", ["g_x", "g_y", "g_z"],
+                        [epoch.gsensord.g_x, epoch.gsensord.g_y, epoch.gsensord.g_z])
+
+    if epoch.gprmc:
+            gprmc_time = epoch.gprmc.time.time() if epoch.gprmc.time else parse_nmea_time(epoch.gprmc.time_utc)
+            gprmc_date = epoch.gprmc.time.date() if epoch.gprmc.time else None
+
+            sentence_id = str(uuid.uuid4())
+            cursor.execute("""
+                INSERT INTO sentence (sentence_id, epoch_id, raw, checksum, parts_count)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (sentence_id, epoch_id, epoch.gprmc.raw, epoch.gprmc.checksum, epoch.gprmc.parts_count))
+
+            cursor.execute("""
+                INSERT INTO gprmc (
+                    sentence_id, time_utc, status, latitude, latitude_hemisphere,
+                    longitude, longitude_hemisphere, speed_knots, course, date, mode
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (date, time_utc) DO NOTHING
+            """, (
+                sentence_id, gprmc_time, epoch.gprmc.status, epoch.gprmc.latitude,
+                epoch.gprmc.latitude_hemisphere, epoch.gprmc.longitude,
+                epoch.gprmc.longitude_hemisphere, epoch.gprmc.speed_knots,
+                epoch.gprmc.course, gprmc_date, epoch.gprmc.mode
+            ))
+
+    if epoch.gpvtg:
+        insert_sentence(epoch.gpvtg, "gpvtg",
+                        ["course_true", "course_true_indicator", "course_magnetic",
+                         "course_magnetic_indicator", "speed_knots", "speed_knots_indicator",
+                         "speed_kmh", "speed_kmh_indicator", "mode"],
+                        [epoch.gpvtg.course_true, epoch.gpvtg.course_true_indicator,
+                         epoch.gpvtg.course_magnetic, epoch.gpvtg.course_magnetic_indicator,
+                         epoch.gpvtg.speed_knots, epoch.gpvtg.speed_knots_indicator,
+                         epoch.gpvtg.speed_kmh, epoch.gpvtg.speed_kmh_indicator, epoch.gpvtg.mode])
+
+    if epoch.gpgga:
+        gga_time = parse_nmea_time(epoch.gpgga.time_utc)
+        insert_sentence(epoch.gpgga, "gpgga",
+                        ["time_utc", "latitude", "latitude_hemisphere", "longitude",
+                         "longitude_hemisphere", "fix_quality", "satellites_used",
+                         "hdop", "altitude", "altitude_units", "geoid_separation",
+                         "geoid_separation_units", "dgps_age", "dgps_station_id"],
+                        [gga_time, epoch.gpgga.latitude, epoch.gpgga.latitude_hemisphere,
+                         epoch.gpgga.longitude, epoch.gpgga.longitude_hemisphere, epoch.gpgga.fix_quality,
+                         epoch.gpgga.satellites_used, epoch.gpgga.hdop, epoch.gpgga.altitude,
+                         epoch.gpgga.altitude_units, epoch.gpgga.geoid_separation,
+                         epoch.gpgga.geoid_separation_units, epoch.gpgga.dgps_age, epoch.gpgga.dgps_station_id])
+
+    if epoch.gpgsa:
+            gsa_cols = [
+                "mode1", "mode2",
+                "satellite_1", "satellite_2", "satellite_3", "satellite_4",
+                "satellite_5", "satellite_6", "satellite_7", "satellite_8",
+                "satellite_9", "satellite_10", "satellite_11", "satellite_12",
+                "pdop", "hdop", "vdop"
+            ]
+            sats = getattr(epoch.gpgsa, "satellites", []) or []
+            sats_padded = [to_int_or_none(sats[i]) if i < len(sats) else None for i in range(12)]
+
+            # Bezpieczne parsowanie floatów dla DOP (zamiana pustych stringów na None)
+            def to_float_or_none(v):
+                try:
+                    return float(v) if v is not None and str(v).strip() != "" else None
+                except ValueError:
+                    return None
+
+            insert_sentence(epoch.gpgsa, "gpgsa", gsa_cols, [
+                epoch.gpgsa.mode1, 
+                to_int_or_none(epoch.gpgsa.mode2), 
+                *sats_padded,
+                to_float_or_none(epoch.gpgsa.pdop), 
+                to_float_or_none(epoch.gpgsa.hdop), 
+                to_float_or_none(epoch.gpgsa.vdop)
+            ])
+
+    if epoch.gpgsvs:
+        for gsv in epoch.gpgsvs:
+            gsv_id = insert_sentence(gsv, "gpgsv",
+                                     ["total_messages", "message_number", "satellites_in_view"],
+                                     [gsv.total_messages, gsv.message_number, gsv.satellites_in_view])
+            if gsv_id and gsv.satellites:
+                for s in gsv.satellites:
+                    cursor.execute(
+                        """INSERT INTO satellite (satellite_id, sentence_id, prn, elevation, azimuth, snr) VALUES (%s, %s, %s, %s, %s, %s)""",
+                        (str(uuid.uuid4()), gsv_id, s.prn, s.elevation, s.azimuth, s.snr)
+                    )
+
+
+def parse_data(data_file_path=DATA_FILE_PATH, batch_size=1000):
     if not data_file_path.exists():
-        print("Failed to find data file!")
+        print(f"Nie znaleziono pliku: {data_file_path}")
         return
-    
+
     last_line_index = where_did_we_stop()
-
-    if count_lines(data_file_path) == last_line_index and epochs_file_path.exists() and Path("geojsons/driven.geojson").exists():
-        print("No parsing was needed!")
-        return
-
-    original_last_line_index = last_line_index
-
-    epochs = []
-
-    if last_line_index != 0:
-        epochs = load_epochs()
+    print(f"Parsing from line: {last_line_index}")
 
     epoch = Epoch()
+    epochs_in_batch = 0
     tag = ""
 
-    with open(str(data_file_path), "r") as data_file:
-        for current_number, line in enumerate(data_file, start=1):
-            
-            if current_number <= last_line_index:
-                continue
+    with psycopg.connect(DB_URL) as conn:
+        with conn.cursor() as cur:
+            if last_line_index == 0:
+                cur.execute("TRUNCATE TABLE epochs CASCADE;")
+                conn.commit()
 
-            line = line.strip()
+            with open(str(data_file_path), "r", encoding="utf-8", errors="ignore") as data_file:
+                for current_number, line in enumerate(data_file, start=1):
+                    if current_number <= last_line_index:
+                        continue
 
-            if not line:
-                continue
+                    line = line.strip()
+                    if not line:
+                        continue
 
-            parts = line.split(",")
-            tag = parts[0]
+                    parts = line.split(",")
+                    tag = parts[0]
 
-            if tag in tag_classes:
-                sentence_class = tag_classes[tag]
-                field_name = sentence_class.__name__.lower()
+                    if tag in TAG_CLASSES:
+                        sentence_class = TAG_CLASSES[tag]
+                        field_name = sentence_class.__name__.lower()
 
-                if getattr(epoch, field_name):
-                    epoch.terminator = tag
-                    epochs.append(epoch)
-                    epoch = Epoch()
-                setattr(epoch, field_name, sentence_class(line))
+                        if getattr(epoch, field_name):
+                            epoch.terminator = tag
+                            insert_epoch_to_db(cur, epoch)
+                            epochs_in_batch += 1
+                            epoch = Epoch()
 
-            elif tag == "$GPGSV":
-                if epoch.gpgsvs:
-                    max_gpgsv = int(epoch.gpgsvs[0].total_messages)
-                    gpgsv_len = len(epoch.gpgsvs)
-                    if max_gpgsv == gpgsv_len:
-                        epoch.terminator = tag
-                        epochs.append(epoch)
-                        epoch = Epoch()
+                        setattr(epoch, field_name, sentence_class(line))
 
-                epoch.gpgsvs.append(GPGSV(line))
-            last_line_index = current_number
+                    elif tag == "$GPGSV":
+                        if epoch.gpgsvs:
+                            max_gpgsv = int(epoch.gpgsvs[0].total_messages or 0)
+                            if max_gpgsv == len(epoch.gpgsvs):
+                                epoch.terminator = tag
+                                insert_epoch_to_db(cur, epoch)
+                                epochs_in_batch += 1
+                                epoch = Epoch()
 
-    if (epoch.gprmc is not None or epoch.gpgga is not None or
-    epoch.gpgsvs or epoch.gsensord is not None or epoch.gpgsa is not None):
-        epoch.terminator = tag
-        epochs.append(epoch)
+                        epoch.gpgsvs.append(GPGSV(line))
 
-    print(f"Original Epochs amount: {len(epochs)}.")
-    epochs = [e for e in epochs if e.gprmc is not None and e.gprmc.time is not None]
-    print(f"Epochs amount after removing data with no timestamps: {len(epochs)}.")
+                    if epochs_in_batch >= batch_size:
+                        conn.commit()
+                        epochs_in_batch = 0
+                        with open(STATE_FILE_PATH, "w") as sf:
+                            sf.write(str(current_number))
+                        print(f"Parsed {current_number} lines.")
 
-    seen = set()
-    unique_epochs = []
-    for item in epochs:
-        if item is not None and getattr(item, 'gprmc', None) is not None:
-            identifier = item.gprmc.time
-        else:
-            identifier = id(item) 
-        if identifier not in seen:
-            seen.add(identifier)
-            unique_epochs.append(item)
-    epochs = unique_epochs
+                    last_line_index = current_number
 
-    print(f"Epochs amount after removing duplicates: {len(epochs)}.")
+            if epoch.gprmc or epoch.gpgga or epoch.gpgsvs or epoch.gsensord or epoch.gpgsa:
+                epoch.terminator = tag
+                insert_epoch_to_db(cur, epoch)
 
-    epochs.sort(key=attrgetter("gprmc.time"))
+            conn.commit()
+            with open(STATE_FILE_PATH, "w") as sf:
+                sf.write(str(last_line_index))
 
-    save_epochs(last_line_index, original_last_line_index, epochs)
-
-    df = epochs_to_df(epochs)
-
-    df = df.sort_values(by="time").reset_index(drop=True)
-    df['time_diff'] = df['time'].diff().dt.total_seconds()
-    df['distance'] = haversine_vec(df['lat'].shift(1), df['lon'].shift(1), df['lat'], df['lon'])
-
-    total_time = df.loc[df['time_diff'] < engine_off_treshold, 'time_diff'].sum()
-    total_distance = df['distance'].sum()
-
-    print(f"Time behind the wheel (h): {total_time/3600:.2f}")
-    print(f"Kilometers covered: {total_distance:.2f}")
-    print(f"Avg speed: {total_distance/(total_time/3600):.2f}")
-
-    geometry = [Point(xy) for xy in zip(df['lon'], df['lat'])]
-
-    gdf = gpd.GeoDataFrame(df, geometry=geometry, crs="EPSG:4326")
-
-    gdf.to_file("geojsons/driven.geojson", driver="GeoJSON")
+    print(f"Parsing finished on line: {last_line_index}")
 

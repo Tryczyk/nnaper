@@ -1,6 +1,5 @@
 import geopandas as gpd
 from lonboard import Map, ScatterplotLayer, PathLayer, SolidPolygonLayer
-from lonboard.basemap import CartoBasemap
 
 from constants import (
     MAP_LAYERS,
@@ -50,7 +49,7 @@ def create_map(
 
     m = Map(
         layers=layers, 
-        basemap_style=CartoBasemap.DarkMatter 
+        basemap_style="dark"
     )
     
     wyjsciowy_plik = str(map_dir_path / "driven.html")

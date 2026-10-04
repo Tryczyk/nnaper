@@ -1,22 +1,26 @@
+
 # NNAPER 🗺️
 
-Ten projekt służy do parsowania danych lokalizacyjnych w formacie **NMEA** i wizualizacji ich na interaktywnej mapie przy użyciu biblioteki **Lonboard**. Dodatkowo aplikacja przetwarza i wyświetla informacje przestrzenne z plików **PBF** (OpenStreetMap).
+Aplikacja do przetwarzania danych lokalizacyjnych GPS w formacie **NMEA**, bezpośredniego strumieniowania ich do bazy danych **PostgreSQL + PostGIS** oraz wizualizacji na interaktywnej mapie opartej o kafelki wektorowe **PMTiles** (OpenStreetMap).
 
 ---
 
 ## Jak to działa?
 
-1. Parsowanie NMEA (data/raw.txt):
-   - Skrypt odczytuje surowe logi NMEA z pliku data/raw.txt.
-   - Śledzi postęp i numer ostatnio sparsowanej linii w pliku data/state.txt, co pozwala na inkrementalne wznawianie pracy.
-   - Pozycje i epoki są serializowane w data/epochs.pkl w celu przyspieszenia kolejnych uruchomień.
-   - Wynikowy ślad przestrzenny GPS jest zapisywany jako geojsons/driven.geojson.
+1. **Infrastruktura kontenerowa (Docker Compose):**
+   - W tle działa baza **PostgreSQL (PostGIS)** zainicjalizowana schematem z pliku `init_db.sql` oraz lekki serwer HTTP **Caddy** serwujący kafelki i mapę na porcie `8080`.
 
-2. Przetwarzanie OpenStreetMap (PBF):
-   - Aplikacja wczytuje wskazany w konfiguracji plik źródłowy .osm.pbf (np. wyciąg dla województwa pomorskiego) i generuje z niego warstwy pomocnicze w katalogu geojsons/.
+2. **Kafelki podkładowe OpenStreetMap (PMTiles):**
+   - Profil narzędziowy w Dockerze weryfikuje obecność pliku `.osm.pbf` (w razie potrzeby pobiera go automatycznie z serwisu [Geofabrik](https://download.geofabrik.de/europe/poland.html)).
+   - Narzędzie **Planetiler** kompresuje wyciąg OSM do pojedynczego pliku kafelków wektorowych `.pmtiles` w katalogu `geojsons/`.
 
-3. Wizualizacja:
-   - Na podstawie danych z driven.geojson oraz przetworzonych danych OSM generowana jest jedna, spójna mapa maps/driven.html (oparta o Lonboard).
+3. **Parsowanie i strumieniowanie NMEA (`data/raw.txt`):**
+   - Skrypt odczytuje surowe logi NMEA linia po linii, łącząc komunikaty w spójne epoki pomiarowe.
+   - Dane są zapisywane partiami bezpośrednio do bazy PostgreSQL/PostGIS.
+   - Unikalny indeks czasowy w bazie oraz plik `data/state.txt` zapobiegają duplikatom i pozwalają na bezpieczne wznawianie pracy w dowolnym momencie.
+
+4. **Wizualizacja:**
+   - Mapa w `maps/tile_map.html` odpytuje serwer o kafelki PMTiles i renderuje warstwy za pośrednictwem biblioteki **MapLibre GL JS**.
 
 ---
 
@@ -25,24 +29,25 @@ Ten projekt służy do parsowania danych lokalizacyjnych w formacie **NMEA** i w
 ```text
 nnaper/
 ├── data/
-│   ├── raw.txt          # Surowe logi NMEA z urządzenia GPS
-│   ├── state.txt        # Numer ostatnio przetworzonej linii z raw.txt
-│   └── epochs.pkl       # Zrzut obiektów epok (pickle) dla szybkiego wznawiania
-├── geojson/             # Pliki GeoJSON wygenerowane z PBF oraz:
-│   ├── driven.geojson   # Przetworzony ślad z NMEA
-│   └── *.osm.pbf        # Pobrany wyciąg OSM (ignorowany przez Git)
+│   ├── raw.txt             # Surowe logi NMEA z urządzenia GPS (nieśledzone w Git)
+│   └── state.txt           # Numer ostatnio przetworzonej linii z raw.txt
+├── geojsons/               # Dane przestrzenne i wyjściowe kafelki:
+│   ├── *.osm.pbf           # Pobrany wyciąg OSM (np. pomorskie.osm.pbf, ignorowany w Git)
+│   └── *.pmtiles           # Wygenerowane kafelki wektorowe PMTiles (ignorowane w Git)
 ├── maps/
-│   └── driven.html      # Wyjściowa interaktywna mapa (Lonboard)
+│   └── tile_map.html       # Interfejs mapy (MapLibre GL JS)
 ├── src/
-│   ├── constants.py     # Stałe, niezmienne dane konfiguracyjne projektu
-│   ├── geography.py     # Narzędzia i funkcje pomocnicze do obliczeń geograficznych
-│   ├── main.py          # Główny punkt startowy aplikacji
-│   ├── map.py           # Tworzenie i generowanie mapy
-│   ├── osm.py           # Wyciąganie danych przestrzennych z pliku PBF
-│   ├── parser.py        # Parsowanie danych NMEA wraz z dedykowaną klasą
-│   └── utils.py         # Ogólne funkcje pomocnicze (utilsy)            
-├── .env.example         # Wzór pliku zmiennych środowiskowych
-├── pyproject.toml       # Konfiguracja środowiska i zależności
+│   ├── constants.py        # Stałe konfiguracyjne i ścieżki projektu
+│   ├── geography.py        # Narzędzia i funkcje pomocnicze do obliczeń geograficznych
+│   ├── main.py             # Główny punkt startowy aplikacji
+│   ├── map.py              # Tworzenie i konfiguracja mapy
+│   ├── osm.py              # Ekstrakcja danych przestrzennych z plików PBF
+│   ├── parser.py           # Parsowanie NMEA i zapis epok do PostgreSQL/PostGIS
+│   └── utils.py            # Ogólne funkcje pomocnicze
+├── .env.example            # Wzór zmiennych środowiskowych
+├── docker-compose.yml      # Baza PostGIS, downloader PBF, Planetiler i serwer Caddy
+├── init_db.sql             # Schemat bazy danych, relacje i unikalne indeksy
+├── pyproject.toml          # Konfiguracja środowiska i zależności (uv)
 └── README.md
 ```
 
@@ -50,67 +55,65 @@ nnaper/
 
 ## Stos technologiczny
 
-### Obecny stan:
-- Język i środowisko: Python 3.14, menedżer pakietów uv
-- Przetwarzanie danych: GeoPandas
-- Wizualizacja: Lonboard
-- Formaty danych: NMEA, PBF (OpenStreetMap), GeoJSON, Pickle
-
-### Docelowa architektura (Roadmap):
-- Baza danych: PostgreSQL + PostGIS (zastąpienie lokalnych plików GeoJSON i Pickle)
-- Serwowanie danych: Kafelki wektorowe (MVT) generowane w locie funkcją ST_AsMVT
-- Frontend / Aplikacja webowa: Interfejs webowy (np. MapLibre GL JS) z obsługą kont i edycją punktów
+- **Środowisko i język:** Python 3.14, menedżer pakietów [uv](https://docs.astral.sh/uv/)
+- **Baza danych przestrzennych:** PostgreSQL 16 + PostGIS 3.4
+- **Sterownik bazy danych:** `psycopg` (binary)
+- **Generowanie kafelków:** [Planetiler](https://github.com/onthegomap/planetiler) (Docker)
+- **Format kafelków:** PMTiles (OpenMapTiles schema)
+- **Frontend / Wizualizacja:** MapLibre GL JS, Caddy Server
+- **Formaty danych:** NMEA, PBF (OpenStreetMap), GeoJSON
 
 ---
 
 ## Wymagania wstępne
 
-- Python 3.14+
-- Zainstalowane narzędzie uv (https://docs.astral.sh/uv/)
+- Zainstalowany **Python 3.14+**
+- Zainstalowane narzędzie **[uv](https://docs.astral.sh/uv/)**
+- Zainstalowany **Docker Desktop** (wraz z obsługą Docker Compose)
 
 ---
 
 ## Konfiguracja i uruchomienie
 
-1. Przygotowanie repozytorium:
-   ```bash
-   git clone https://github.com/Tryczyk/naper.git
-   cd naper
-   ```
+### 1. Przygotowanie repozytorium
+```bash
+git clone https://github.com/Tryczyk/naper.git
+cd naper
+```
 
-2. Konfiguracja zmiennych środowiskowych:
-   Skopiuj wzorzec konfiguracji:
-   ```bash
-   cp .env.example .env
-   ```
+### 2. Konfiguracja zmiennych środowiskowych
+Skopiuj wzorzec pliku konfiguracyjnego:
+```bash
+cp .env.example .env
+```
 
-   W pliku `.env` wskaż nazwę pliku wyciągu regionalnego (np. pobranego z serwisu [Geofabrik](https://download.geofabrik.de/europe/poland.html), domyślnie `pomorskie.osm.pbf`):
-   ```env
-   OSM_FILE_NAME=pomorskie.osm.pbf
-   ```
+W pliku `.env` wskaż nazwę pliku regionalnego OSM (domyślnie `pomorskie.osm.pbf`):
+```env
+OSM_FILE_NAME=pomorskie.osm.pbf
+```
 
-   > **Uwaga:** Pliki `.pbf`, `.pmtiles`, archiwa `.pkl`, wyjściowe mapy HTML oraz duże logi `raw.txt` nie powinny być commitowane do repozytorium Git ze względu na swój rozmiar.
+> **Uwaga:** Pliki `.pbf`, `.pmtiles`, wolumeny baz danych oraz duże pliki `data/raw.txt` są wykluczone z repozytorium Git przez `.gitignore`.
 
-3. Przetwarzanie danych lokalizacyjnych (Python):
-   Projekt wykorzystuje narzędzie `uv` do automatycznego zarządzania środowiskiem wirtualnym i zależnościami:
-   ```bash
-   uv run src/main.py
-   ```
+### 3. Uruchomienie infrastruktury (Docker Compose)
+Uruchom bazę danych PostGIS oraz serwer plików w tle:
+```bash
+docker compose up -d
+```
+*Kontener bazy automatycznie utworzy tabele i indeksy na podstawie pliku `init_db.sql`.*
 
-   Skrypt przetwarza surowe logi NMEA z pliku `data/raw.txt` i generuje ślad przestrzenny w katalogu `geojsons/driven.geojson`.
+### 4. Generowanie kafelków wektorowych (.pmtiles)
+Uruchom profil narzędziowy, który sprawdzi obecność pliku OSM (w razie potrzeby pobierze go z [Geofabrik](https://download.geofabrik.de/europe/poland.html)) i wygeneruje kafelki za pomocą Planetilera:
+```bash
+docker compose --profile tools run --rm tiles-generator
+```
 
-4. Generowanie kafelków wektorowych i podgląd mapy (.bat):
-   Skrypt `.bat` automatycznie weryfikuje konfigurację w `.env`, w razie potrzeby pobiera dane OSM z Geofabrik, generuje kafelki `.pmtiles` za pomocą narzędzia Planetiler w Dockerze oraz uruchamia lokalny serwer HTTP.
+### 5. Przetwarzanie danych lokalizacyjnych (Python)
+Umieść surowy plik z logami GPS w `data/raw.txt`, a następnie uruchom proces parsowania:
+```bash
+uv run src/main.py
+```
+*Skrypt strumieniuje odczytane epoki bezpośrednio do bazy PostgreSQL, logując postęp przetwarzania w konsoli i pliku `data/state.txt`.*
 
-   Uruchomienie skryptu w terminalu:
-   - **PowerShell / Terminal VS Code:**
-     ```powershell
-     .\generate_tiles.bat
-     ```
-   - **Wiersz poleceń (CMD):**
-     ```cmd
-     generate_tiles.bat
-     ```
-
-   Po uruchomieniu serwera otwórz mapę w przeglądarce pod adresem:
-   `http://localhost:8080/maps/tile_map.html`
+### 6. Podgląd mapy
+Otwórz przeglądarkę pod adresem:
+[http://localhost:8080/maps/tile_map.html](http://localhost:8080/maps/tile_map.html)
