@@ -75,7 +75,7 @@ class GPRMC(Sentence):
         self.magnetic_variation = self.get_part(10)
         self.magnetic_variation_hemisphere = self.get_part(11)
         self.mode = self.get_part(12)
-        self.latitude = ddm_to_dd(self.latitude, self.latitude_hemisphere)
+        self.latitude = ddm_to_dd(self.latitude, self.latitude_hemisphere) #TODO zmienic to zeby nie nadpisywalo zmiennej
         self.longitude = ddm_to_dd(self.longitude, self.longitude_hemisphere)
         if self.date is not None and self.time_utc is not None:
             self.time = datetime.strptime(f"{self.date}{self.time_utc}", '%d%m%y%H%M%S.%f')
