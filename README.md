@@ -77,7 +77,7 @@ nnaper/
 
 ### 1. Przygotowanie repozytorium
 ```bash
-git clone https://github.com/Tryczyk/naper.git
+git clone https://github.com/Tryczyk/nnaper.git
 cd naper
 ```
 
