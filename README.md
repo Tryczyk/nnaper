@@ -78,7 +78,7 @@ nnaper/
 ### 1. Przygotowanie repozytorium
 ```bash
 git clone https://github.com/Tryczyk/nnaper.git
-cd naper
+cd nnaper
 ```
 
 ### 2. Konfiguracja zmiennych środowiskowych
