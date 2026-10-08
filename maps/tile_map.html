@@ -4,9 +4,9 @@
   <meta charset="utf-8" />
   <title>Naper - Studio Map Pomorskie 3D</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
-  <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet" />
-  <script src="https://unpkg.com/pmtiles@2.11.0/dist/index.js"></script>
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+  <script src="https://unpkg.com/pmtiles@3.0.7/dist/pmtiles.js"></script>
   <style>
     body, html { margin: 0; padding: 0; width: 100%; height: 100%; font-family: system-ui, -apple-system, sans-serif; background: #090d16; }
     #map { width: 100%; height: 100%; }
@@ -54,6 +54,20 @@
       margin-right: 8px;
       flex-shrink: 0;
     }
+    #err-box {
+      display: none;
+      position: absolute;
+      bottom: 20px;
+      left: 20px;
+      z-index: 100;
+      background: #ef4444;
+      color: #ffffff;
+      padding: 10px 14px;
+      border-radius: 6px;
+      font-size: 12px;
+      max-width: 400px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    }
   </style>
 </head>
 <body>
@@ -62,23 +76,23 @@
   <h4>Warstwy Mapy</h4>
   <label class="item">
     <input type="checkbox" id="t-cycle" checked />
-    <span class="color-bullet" style="background: #10b981;"></span> Drogi dla rowerów (zawsze)
+    <span class="color-bullet" style="background: #10b981;"></span> Drogi dla rowerów
   </label>
   <label class="item">
     <input type="checkbox" id="t-pedestrian" checked />
-    <span class="color-bullet" style="background: #a855f7;"></span> Ciągi piesze / chodniki
+    <span class="color-bullet" style="background: #a855f7;"></span> Ciągi piesze
   </label>
   <label class="item">
     <input type="checkbox" id="t-dirt" checked />
-    <span class="color-bullet" style="background: #f59e0b;"></span> Drogi gruntowe (leśne / polne)
+    <span class="color-bullet" style="background: #f59e0b;"></span> Drogi gruntowe
   </label>
   <label class="item">
     <input type="checkbox" id="t-fast" checked />
-    <span class="color-bullet" style="background: #ef4444;"></span> Drogi powyżej 50 km/h
+    <span class="color-bullet" style="background: #ef4444;"></span> Drogi główne
   </label>
   <label class="item">
     <input type="checkbox" id="t-slow" checked />
-    <span class="color-bullet" style="background: #94a3b8;"></span> Drogi do 50 km/h (utwardzone)
+    <span class="color-bullet" style="background: #94a3b8;"></span> Drogi
   </label>
   <label class="item">
     <input type="checkbox" id="t-rail" checked />
@@ -90,10 +104,11 @@
   </label>
   <label class="item">
     <input type="checkbox" id="t-marine" checked />
-    <span class="color-bullet" style="background: #38bdf8; border: 1px dashed #fff;"></span> Szlaki morskie / promowe
+    <span class="color-bullet" style="background: #38bdf8; border: 1px dashed #fff;"></span> Szlaki morskie
   </label>
 </div>
 
+<div id="err-box"></div>
 <div id="map"></div>
 
 <script>
@@ -106,26 +121,21 @@
     zoom: 13,
     minZoom: 9.5,
     maxZoom: 18,
-    pitch: 58,                  // Kąt pochylenia kamery dla efektu 3D
-    bearing: -18,               // Lekki obrót widoku
-    maxPitch: 85,
-    fadeDuration: 300,
+    pitch: 45,
+    bearing: -18,
+    maxPitch: 50,
+    fadeDuration: 0,
     maxBounds: [
       [16.5, 53.4],
       [19.8, 55.0]
     ],
     style: {
       version: 8,
-      transition: {
-        duration: 300,
-        delay: 0
-      },
       sources: {
         'pomorskie-tiles': {
           type: 'vector',
           url: 'pmtiles://http://localhost:8080/geojsons/pomorskie.pmtiles'
         },
-        // ŹRÓDŁO WYSOKOŚCI TERENU (DEM)
         'terrain-dem': {
           type: 'raster-dem',
           tiles: [
@@ -141,7 +151,6 @@
           type: 'background',
           paint: { 'background-color': '#090d16' }
         },
-        // 1. ZBIORNIKI WODNE
         {
           id: 'l-water',
           source: 'pomorskie-tiles',
@@ -149,7 +158,6 @@
           type: 'fill',
           paint: { 'fill-color': '#0284c7', 'fill-opacity': 0.85 }
         },
-        // 2. SZLAKI MORSKIE
         {
           id: 'l-marine',
           source: 'pomorskie-tiles',
@@ -163,31 +171,25 @@
             'line-dasharray': [3, 2]
           }
         },
-        // 3. BUDYNKI 3D (fill-extrusion wyciągające bryły w górę)
         {
           id: 'l-buildings',
           source: 'pomorskie-tiles',
           'source-layer': 'building',
           type: 'fill-extrusion',
-          minzoom: 12.5,
+          minzoom: 13,
           paint: {
             'fill-extrusion-color': '#1e293b',
-            // Wysokość budynku: jeśli brak w OSM, dajemy bezpieczne 7-10 metrów
             'fill-extrusion-height': [
               'interpolate', ['linear'], ['zoom'],
               13, 0,
-              13.5, ['coalesce', ['get', 'render_height'], 8]
+              14, ['*', ['coalesce', ['get', 'render_height'], 4.5], 0.7],
+              16, ['coalesce', ['get', 'render_height'], 4.5]
             ],
-            // Twardo wymuszone 0 = stopa budynku ZAWSZE przyklejona do siatki 3D terenu
             'fill-extrusion-base': 0,
-            'fill-extrusion-opacity': [
-              'interpolate', ['linear'], ['zoom'],
-              12.5, 0.0,
-              13.5, 0.95
-            ]
+            'fill-extrusion-opacity': 0.92,
+            'fill-extrusion-vertical-gradient': true
           }
         },
-        // 4. LINIE KOLEJOWE I TRAMWAJOWE
         {
           id: 'l-rail',
           source: 'pomorskie-tiles',
@@ -211,7 +213,6 @@
             ]
           }
         },
-        // 5. DROGI DLA ROWERÓW
         {
           id: 'l-cycle',
           source: 'pomorskie-tiles',
@@ -240,7 +241,6 @@
             ]
           }
         },
-        // 6. CIĄGI PIESZE
         {
           id: 'l-pedestrian',
           source: 'pomorskie-tiles',
@@ -273,7 +273,6 @@
             ]
           }
         },
-        // 7. DROGI GRUNTOWE
         {
           id: 'l-dirt',
           source: 'pomorskie-tiles',
@@ -309,7 +308,6 @@
             ]
           }
         },
-        // 8. DROGI POWYŻEJ 50 KM/H
         {
           id: 'l-fast',
           source: 'pomorskie-tiles',
@@ -332,7 +330,6 @@
             ]
           }
         },
-        // 9. DROGI DO 50 KM/H
         {
           id: 'l-slow',
           source: 'pomorskie-tiles',
@@ -368,18 +365,28 @@
   map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
 
   const setupToggle = (checkboxId, layerId) => {
-    document.getElementById(checkboxId).addEventListener('change', (e) => {
+    const el = document.getElementById(checkboxId);
+    if (!el) return;
+    el.addEventListener('change', (e) => {
       if (map.getLayer(layerId)) {
         map.setLayoutProperty(layerId, 'visibility', e.target.checked ? 'visible' : 'none');
       }
     });
   };
 
+  map.on('error', (e) => {
+    console.error("MapLibre Error:", e);
+    const box = document.getElementById("err-box");
+    if (box) {
+      box.style.display = "block";
+      box.innerText = "Błąd mapy: " + (e.error ? e.error.message : "sprawdź konsolę (F12)");
+    }
+  });
+
   map.on('load', () => {
-    // AKTYWACJA RZEŹBY TERENU 3D (exaggeration: 1.6 uwydatnia wzniesienia morenowe Trójmiasta i Kaszub)
     map.setTerrain({
-    source: 'terrain-dem',
-    exaggeration: 1.0 // Zmień z 1.6 na 1.0 (przy 1.0 siatka idealnie styka się ze stopami budynków)
+      source: 'terrain-dem',
+      exaggeration: 0.85
     });
 
     setupToggle('t-cycle', 'l-cycle');
