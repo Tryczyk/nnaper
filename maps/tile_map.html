@@ -2,7 +2,7 @@
 <html lang="pl">
 <head>
   <meta charset="utf-8" />
-  <title>Naper - Studio Map Pomorskie 3D</title>
+  <title>NNAPER</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
@@ -22,6 +22,12 @@
   </div>
 
   <div class="menu-body">
+    <!-- Przejście do dedykowanego trybu odtwarzacza trasy -->
+    <button onclick="window.location.href='playback.html'" 
+            style="width: 100%; margin-bottom: 10px; background: #0284c7; color: #fff; border: 1px solid #38bdf8; padding: 8px 12px; border-radius: 6px; font-weight: bold; cursor: pointer;">
+      🎬 Przejdź do Odtwarzacza Trasy
+    </button>
+
     <div id="tree-container"></div>
   </div>
 </div>

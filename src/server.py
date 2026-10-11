@@ -1,8 +1,9 @@
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import psycopg
 from psycopg.rows import dict_row
 import os
+import logging
 
 app = FastAPI(title="nnaper API")
 
@@ -116,3 +117,73 @@ def get_epoch_details(epoch_id: str):
             if not row or not row["full_data"] or not row["full_data"]["epoch"]:
                 return {"error": "Epoch not found"}
             return row["full_data"]
+
+
+@app.get("/api/playback-day")
+def get_playback_day(day: str = Query(...)):
+    """Pobiera uporządkowaną listę epok telemetrycznych dla wybranego dnia z satelitami."""
+    query = """
+    SELECT 
+        e.epoch_id,
+        to_char(e.timestamp, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS timestamp,
+        e.latitude::float AS lat,
+        e.longitude::float AS lon,
+        COALESCE(
+            (
+                SELECT (v.speed_kmh)::float
+                FROM sentence s
+                JOIN gpvtg v ON v.sentence_id = s.sentence_id
+                WHERE s.epoch_id = e.epoch_id
+                LIMIT 1
+            ),
+            (
+                SELECT (r.speed_knots * 1.852)::float
+                FROM sentence s
+                JOIN gprmc r ON r.sentence_id = s.sentence_id
+                WHERE s.epoch_id = e.epoch_id
+                LIMIT 1
+            ),
+            0.0
+        ) AS speed_kmh,
+        COALESCE(
+            (
+                SELECT (v.course_true)::float
+                FROM sentence s
+                JOIN gpvtg v ON v.sentence_id = s.sentence_id
+                WHERE s.epoch_id = e.epoch_id
+                LIMIT 1
+            ),
+            (
+                SELECT (r.course)::float
+                FROM sentence s
+                JOIN gprmc r ON r.sentence_id = s.sentence_id
+                WHERE s.epoch_id = e.epoch_id
+                LIMIT 1
+            ),
+            0.0
+        ) AS course,
+        COALESCE(
+            (
+                SELECT json_agg(json_build_object(
+                    'prn', sat.prn,
+                    'elevation', sat.elevation,
+                    'azimuth', sat.azimuth,
+                    'snr', sat.snr
+                ))
+                FROM sentence s
+                JOIN satellite sat ON sat.sentence_id = s.sentence_id
+                WHERE s.epoch_id = e.epoch_id
+            ),
+            '[]'::json
+        ) AS satellites
+    FROM epochs e
+    WHERE e.is_active = TRUE 
+      AND e.geom IS NOT NULL 
+      AND e.timestamp >= %s::date
+      AND e.timestamp < (%s::date + INTERVAL '1 day')
+    ORDER BY e.timestamp ASC;
+    """
+    with psycopg.connect(DB_URL) as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(query, (day, day))
+            return cur.fetchall()

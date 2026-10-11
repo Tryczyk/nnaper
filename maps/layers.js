@@ -12,6 +12,7 @@ const MAP_STYLE = {
       type: 'raster-dem',
       tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
       tileSize: 256,
+      maxzoom: 15,
       encoding: 'terrarium'
     }
   },
