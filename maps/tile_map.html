@@ -10,50 +10,164 @@
   <style>
     body, html { margin: 0; padding: 0; width: 100%; height: 100%; font-family: system-ui, -apple-system, sans-serif; background: #090d16; }
     #map { width: 100%; height: 100%; }
-    
+
     #menu {
       position: absolute;
       top: 15px;
-      left: 15px;
       z-index: 10;
-      background: rgba(15, 23, 42, 0.94);
+      background: rgba(15, 23, 42, 0.95);
       border: 1px solid #334155;
       border-radius: 8px;
-      padding: 14px 16px;
+      padding: 12px 14px;
       color: #f8fafc;
       font-size: 13px;
-      box-shadow: 0 6px 16px rgba(0,0,0,0.5);
-      max-width: 280px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+      width: 360px;
+      max-height: 88vh;
+      display: flex;
+      flex-direction: column;
+      transition: left 0.25s ease, right 0.25s ease;
     }
-    #menu h4 {
-      margin: 0 0 12px 0;
+    #menu.dock-left { left: 15px; right: auto; }
+    #menu.dock-right { right: 15px; left: auto; }
+    #menu.minimized { max-height: 48px; width: 250px; overflow: hidden; }
+
+    .menu-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 6px;
+      border-bottom: 1px solid #334155;
+      margin-bottom: 8px;
+      user-select: none;
+    }
+    .menu-header h3 {
+      margin: 0;
       font-size: 12px;
       text-transform: uppercase;
-      letter-spacing: 0.05em;
+      letter-spacing: 0.06em;
       color: #94a3b8;
-      border-bottom: 1px solid #334155;
-      padding-bottom: 6px;
     }
-    .item {
+    .panel-actions { display: flex; gap: 5px; }
+    .action-btn {
+      background: #1e293b;
+      border: 1px solid #475569;
+      color: #cbd5e1;
+      border-radius: 4px;
+      width: 24px;
+      height: 24px;
+      cursor: pointer;
       display: flex;
       align-items: center;
-      margin-bottom: 8px;
+      justify-content: center;
+      font-size: 13px;
+      line-height: 1;
+      transition: background 0.15s, color 0.15s;
+    }
+    .action-btn:hover { background: #334155; color: #ffffff; }
+
+    .menu-body {
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    #menu.minimized .menu-body { display: none; }
+
+    .tree-node { margin-bottom: 8px; }
+    .node-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 5px 8px;
+      border-radius: 4px;
+      background: #1e293b;
       cursor: pointer;
       user-select: none;
     }
-    .item input {
-      margin-right: 10px;
-      accent-color: #38bdf8;
+    .node-header:hover { background: #334155; }
+    .node-label {
+      display: flex;
+      align-items: center;
+      font-weight: 600;
+      color: #e2e8f0;
+      font-size: 12.5px;
       cursor: pointer;
     }
-    .color-bullet {
-      display: inline-block;
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      margin-right: 8px;
-      flex-shrink: 0;
+    .node-label input { margin-right: 8px; accent-color: #38bdf8; }
+    .arrow { font-size: 10px; color: #94a3b8; transition: transform 0.2s; }
+    .arrow.collapsed { transform: rotate(-90deg); }
+    .node-children {
+      margin-left: 14px;
+      padding-left: 8px;
+      border-left: 2px solid #334155;
+      margin-top: 4px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
     }
+    .node-children.collapsed { display: none; }
+
+    .leaf-container {
+      background: rgba(30, 41, 59, 0.45);
+      border-radius: 4px;
+      padding: 6px 8px;
+    }
+    .leaf-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      user-select: none;
+      font-size: 12px;
+      color: #cbd5e1;
+    }
+    .leaf-left { display: flex; align-items: center; gap: 8px; }
+    .leaf-left input[type=checkbox] { accent-color: #38bdf8; cursor: pointer; }
+
+    .color-picker {
+      -webkit-appearance: none;
+      -moz-appearance: none;
+      appearance: none;
+      border: 1px solid #475569;
+      width: 20px;
+      height: 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      background: transparent;
+      padding: 0;
+    }
+    .color-picker::-webkit-color-swatch-wrapper { padding: 0; }
+    .color-picker::-webkit-color-swatch { border: none; border-radius: 3px; }
+
+    .leaf-controls {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 6px;
+      padding-top: 4px;
+      border-top: 1px dashed #334155;
+      font-size: 11px;
+      color: #94a3b8;
+    }
+    .control-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .leaf-controls input[type="range"] {
+      width: 65px;
+      accent-color: #38bdf8;
+    }
+    .leaf-controls select {
+      background: #0f172a;
+      border: 1px solid #334155;
+      color: #e2e8f0;
+      border-radius: 3px;
+      font-size: 10px;
+      padding: 2px 4px;
+    }
+
     #err-box {
       display: none;
       position: absolute;
@@ -72,40 +186,18 @@
 </head>
 <body>
 
-<div id="menu">
-  <h4>Warstwy Mapy</h4>
-  <label class="item">
-    <input type="checkbox" id="t-cycle" checked />
-    <span class="color-bullet" style="background: #10b981;"></span> Drogi dla rowerów
-  </label>
-  <label class="item">
-    <input type="checkbox" id="t-pedestrian" checked />
-    <span class="color-bullet" style="background: #a855f7;"></span> Ciągi piesze
-  </label>
-  <label class="item">
-    <input type="checkbox" id="t-dirt" checked />
-    <span class="color-bullet" style="background: #f59e0b;"></span> Drogi gruntowe
-  </label>
-  <label class="item">
-    <input type="checkbox" id="t-fast" checked />
-    <span class="color-bullet" style="background: #ef4444;"></span> Drogi główne
-  </label>
-  <label class="item">
-    <input type="checkbox" id="t-slow" checked />
-    <span class="color-bullet" style="background: #94a3b8;"></span> Drogi
-  </label>
-  <label class="item">
-    <input type="checkbox" id="t-rail" checked />
-    <span class="color-bullet" style="background: #cbd5e1; border: 1px dashed #475569;"></span> Kolej / tramwaje
-  </label>
-  <label class="item">
-    <input type="checkbox" id="t-buildings" checked />
-    <span class="color-bullet" style="background: #334155;"></span> Budynki (3D)
-  </label>
-  <label class="item">
-    <input type="checkbox" id="t-marine" checked />
-    <span class="color-bullet" style="background: #38bdf8; border: 1px dashed #fff;"></span> Szlaki morskie
-  </label>
+<div id="menu" class="dock-left">
+  <div class="menu-header">
+    <h3>Sterowanie Warstwami</h3>
+    <div class="panel-actions">
+      <button class="action-btn" id="btn-switch-side" title="Przerzuć panel na drugą stronę">⇄</button>
+      <button class="action-btn" id="btn-minimize" title="Zwiń / Rozwiń panel">–</button>
+    </div>
+  </div>
+
+  <div class="menu-body">
+    <div id="tree-container"></div>
+  </div>
 </div>
 
 <div id="err-box"></div>
@@ -115,264 +207,566 @@
   const protocol = new pmtiles.Protocol();
   maplibregl.addProtocol("pmtiles", protocol.tile);
 
+  const PMTILES_URL = 'pmtiles://http://localhost:8080/geojsons/pomorskie.pmtiles';
+
   const map = new maplibregl.Map({
     container: 'map',
-    center: [18.6466, 54.3520], // Gdańsk
+    center: [18.6466, 54.3520],
     zoom: 13,
-    minZoom: 9.5,
+    minZoom: 8,
     maxZoom: 18,
-    pitch: 45,
-    bearing: -18,
-    maxPitch: 50,
+    pitch: 42,
+    bearing: -15,
+    maxPitch: 60,
     fadeDuration: 0,
-    maxBounds: [
-      [16.5, 53.4],
-      [19.8, 55.0]
-    ],
+    maxBounds: [[16.5, 53.4], [19.8, 55.0]],
     style: {
       version: 8,
+      glyphs: "https://fonts.openmaptiles.org/{fontstack}/{range}.pbf",
       sources: {
         'pomorskie-tiles': {
           type: 'vector',
-          url: 'pmtiles://http://localhost:8080/geojsons/pomorskie.pmtiles'
+          url: PMTILES_URL
         },
         'terrain-dem': {
           type: 'raster-dem',
-          tiles: [
-            'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
-          ],
+          tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
           tileSize: 256,
           encoding: 'terrarium'
         }
       },
       layers: [
+        { id: 'bg', type: 'background', paint: { 'background-color': '#090d16' } },
+        
+        // 1. OBSZARY I TEREN
         {
-          id: 'bg',
-          type: 'background',
-          paint: { 'background-color': '#090d16' }
+          id: 'Przyroda/Lasy',
+          source: 'pomorskie-tiles',
+          'source-layer': 'landcover',
+          filter: ['==', 'class', 'wood'],
+          type: 'fill',
+          paint: { 'fill-color': '#064e3b', 'fill-opacity': 0.6 }
         },
         {
-          id: 'l-water',
+          id: 'Przyroda/Parki',
+          source: 'pomorskie-tiles',
+          'source-layer': 'park',
+          type: 'fill',
+          paint: { 'fill-color': '#15803d', 'fill-opacity': 0.4 }
+        },
+        {
+          id: 'Przyroda/Trawy',
+          source: 'pomorskie-tiles',
+          'source-layer': 'landcover',
+          filter: ['in', 'class', 'grass', 'scrub'],
+          type: 'fill',
+          paint: { 'fill-color': '#166534', 'fill-opacity': 0.3 }
+        },
+        {
+          id: 'Przyroda/Wydmy i plaże',
+          source: 'pomorskie-tiles',
+          'source-layer': 'landcover',
+          filter: ['==', 'class', 'sand'],
+          type: 'fill',
+          paint: { 'fill-color': '#eab308', 'fill-opacity': 0.3 }
+        },
+        {
+          id: 'Przyroda/Tereny zabudowane',
+          source: 'pomorskie-tiles',
+          'source-layer': 'landuse',
+          filter: ['in', 'class', 'residential', 'commercial', 'industrial'],
+          type: 'fill',
+          paint: { 'fill-color': '#111827', 'fill-opacity': 0.7 }
+        },
+
+        // 2. WODA
+        {
+          id: 'Woda/Morza i jeziora',
           source: 'pomorskie-tiles',
           'source-layer': 'water',
           type: 'fill',
           paint: { 'fill-color': '#0284c7', 'fill-opacity': 0.85 }
         },
         {
-          id: 'l-marine',
+          id: 'Woda/Rzeki i potoki',
+          source: 'pomorskie-tiles',
+          'source-layer': 'waterway',
+          type: 'line',
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: { 'line-color': '#38bdf8', 'line-width': 1.6 }
+        },
+
+        // 3. TRANSPORT LĄDOWY I WODNY
+        {
+          id: 'Drogi/Autostrady i ekspresówki',
           source: 'pomorskie-tiles',
           'source-layer': 'transportation',
-          filter: ['==', 'class', 'ferry'],
+          filter: ['all', ['!=', 'surface', 'unpaved'], ['in', 'class', 'motorway', 'trunk', 'primary']],
+          type: 'line',
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: { 'line-color': '#ef4444', 'line-width': 3.2 }
+        },
+        {
+          id: 'Drogi/Drogi główne',
+          source: 'pomorskie-tiles',
+          'source-layer': 'transportation',
+          filter: ['all', ['!=', 'surface', 'unpaved'], ['in', 'class', 'secondary', 'tertiary']],
+          type: 'line',
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: { 'line-color': '#f97316', 'line-width': 2.2 }
+        },
+        {
+          id: 'Drogi/Ulice osiedlowe',
+          source: 'pomorskie-tiles',
+          'source-layer': 'transportation',
+          filter: [
+            'all',
+            ['!=', 'surface', 'unpaved'],
+            ['!in', 'class', 'track', 'path', 'pedestrian', 'footway', 'steps', 'cycleway', 'motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'rail', 'transit', 'ferry']
+          ],
+          type: 'line',
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: { 'line-color': '#94a3b8', 'line-width': 1.4 }
+        },
+        {
+          id: 'Drogi/Drogi gruntowe',
+          source: 'pomorskie-tiles',
+          'source-layer': 'transportation',
+          filter: ['all', ['!in', 'class', 'rail', 'transit', 'ferry'], ['any', ['==', 'class', 'track'], ['==', 'surface', 'unpaved']]],
+          type: 'line',
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: { 'line-color': '#f59e0b', 'line-width': 1.8, 'line-dasharray': [2, 1.5] }
+        },
+        {
+          id: 'Ruch alternatywny/Drogi rowerowe',
+          source: 'pomorskie-tiles',
+          'source-layer': 'transportation',
+          filter: ['any', ['==', 'subclass', 'cycleway'], ['==', 'class', 'cycleway'], ['==', 'bicycle', 'designated']],
           type: 'line',
           layout: { 'line-join': 'round', 'line-cap': 'round' },
           paint: {
-            'line-color': '#38bdf8',
-            'line-width': 1.5,
-            'line-dasharray': [3, 2]
+            'line-color': '#10b981',
+            'line-width': 2.5
           }
         },
         {
-          id: 'l-buildings',
+          id: 'Ruch alternatywny/Chodniki i deptaki',
           source: 'pomorskie-tiles',
-          'source-layer': 'building',
-          type: 'fill-extrusion',
-          minzoom: 13,
-          paint: {
-            'fill-extrusion-color': '#1e293b',
-            'fill-extrusion-height': [
-              'interpolate', ['linear'], ['zoom'],
-              13, 0,
-              14, ['*', ['coalesce', ['get', 'render_height'], 4.5], 0.7],
-              16, ['coalesce', ['get', 'render_height'], 4.5]
-            ],
-            'fill-extrusion-base': 0,
-            'fill-extrusion-opacity': 0.92,
-            'fill-extrusion-vertical-gradient': true
-          }
+          'source-layer': 'transportation',
+          filter: ['in', 'class', 'path', 'pedestrian', 'footway', 'steps'],
+          type: 'line',
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: { 'line-color': '#a855f7', 'line-width': 1.5, 'line-dasharray': [1.5, 1.5] }
         },
         {
-          id: 'l-rail',
+          id: 'Ruch alternatywny/Kolej i tramwaje',
           source: 'pomorskie-tiles',
           'source-layer': 'transportation',
           filter: ['in', 'class', 'rail', 'transit'],
           type: 'line',
           layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: { 'line-color': '#cbd5e1', 'line-width': 1.8, 'line-dasharray': [3, 2] }
+        },
+        {
+          id: 'Ruch alternatywny/Szlaki morskie',
+          source: 'pomorskie-tiles',
+          'source-layer': 'transportation',
+          filter: ['==', 'class', 'ferry'],
+          type: 'line',
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: { 'line-color': '#67e8f9', 'line-width': 1.5, 'line-dasharray': [3, 2] }
+        },
+
+        // 4. BUDYNKI 3D
+        {
+          id: 'Budynki/Bryły 3D',
+          source: 'pomorskie-tiles',
+          'source-layer': 'building',
+          type: 'fill-extrusion',
           paint: {
-            'line-color': '#cbd5e1',
-            'line-width': [
-              'interpolate', ['linear'], ['zoom'],
-              10.0, 0.8,
-              13.0, 1.5,
-              16.0, 2.5
-            ],
-            'line-dasharray': [3, 2],
-            'line-opacity': [
-              'interpolate', ['linear'], ['zoom'],
-              9.5, 0.4,
-              11.0, 0.9
-            ]
+            'fill-extrusion-color': '#1e293b',
+            'fill-extrusion-height': ['coalesce', ['get', 'render_height'], 6],
+            'fill-extrusion-base': 0,
+            'fill-extrusion-opacity': 0.92,
+            'fill-extrusion-vertical-gradient': true
+          }
+        },
+
+        // 5. PUNKTY POI (właściwości w paint, renderowane na wierzchu)
+        {
+          id: 'Punkty POI/Miejsca kultu',
+          source: 'pomorskie-tiles',
+          'source-layer': 'poi',
+          filter: ['==', 'subclass', 'place_of_worship'],
+          type: 'circle',
+          paint: {
+            'circle-color': '#facc15',
+            'circle-radius': 4.5,
+            'circle-stroke-width': 1,
+            'circle-stroke-color': '#000000',
+            'circle-pitch-alignment': 'map',
+            'circle-pitch-scale': 'viewport'
           }
         },
         {
-          id: 'l-cycle',
+          id: 'Punkty POI/Gastronomia',
           source: 'pomorskie-tiles',
-          'source-layer': 'transportation',
-          filter: [
-            'any',
-            ['==', 'subclass', 'cycleway'],
-            ['==', 'class', 'cycleway'],
-            ['==', 'bicycle', 'designated']
-          ],
-          type: 'line',
-          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          'source-layer': 'poi',
+          filter: ['in', 'class', 'restaurant', 'cafe', 'fast_food', 'bar', 'pub'],
+          type: 'circle',
           paint: {
-            'line-color': '#10b981',
-            'line-width': [
-              'interpolate', ['linear'], ['zoom'],
-              9.5,  0.9,
-              12.0, 1.8,
-              15.0, 3.2,
-              17.0, 4.5
-            ],
-            'line-opacity': [
-              'interpolate', ['linear'], ['zoom'],
-              9.5,  0.55,
-              11.5, 0.95
-            ]
+            'circle-color': '#fb923c',
+            'circle-radius': 4.0,
+            'circle-stroke-width': 1,
+            'circle-stroke-color': '#000000',
+            'circle-pitch-alignment': 'map',
+            'circle-pitch-scale': 'viewport'
           }
         },
         {
-          id: 'l-pedestrian',
+          id: 'Punkty POI/Opieka zdrowotna',
           source: 'pomorskie-tiles',
-          'source-layer': 'transportation',
-          filter: [
-            'all',
-            ['!=', 'subclass', 'cycleway'],
-            ['!=', 'class', 'cycleway'],
-            ['!=', 'bicycle', 'designated'],
-            ['!in', 'class', 'rail', 'transit'],
-            ['in', 'class', 'path', 'pedestrian', 'footway', 'steps']
-          ],
-          type: 'line',
-          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          'source-layer': 'poi',
+          filter: ['in', 'class', 'hospital', 'pharmacy', 'doctors'],
+          type: 'circle',
           paint: {
-            'line-color': '#a855f7',
-            'line-width': [
-              'interpolate', ['exponential', 1.4], ['zoom'],
-              11.8, 0.0,
-              12.4, 0.7,
-              14.0, 1.8,
-              17.0, 3.0
-            ],
-            'line-dasharray': [1.5, 1.5],
-            'line-opacity': [
-              'interpolate', ['exponential', 1.4], ['zoom'],
-              11.8, 0.0,
-              12.6, 0.35,
-              13.5, 0.9
-            ]
+            'circle-color': '#f43f5e',
+            'circle-radius': 4.5,
+            'circle-stroke-width': 1,
+            'circle-stroke-color': '#ffffff',
+            'circle-pitch-alignment': 'map',
+            'circle-pitch-scale': 'viewport'
           }
         },
+
+        // 6. GRANICE I ETYKIETY
         {
-          id: 'l-dirt',
+          id: 'Granice i Etykiety/Granice administracyjne',
           source: 'pomorskie-tiles',
-          'source-layer': 'transportation',
-          filter: [
-            'all',
-            ['!=', 'subclass', 'cycleway'],
-            ['!=', 'class', 'cycleway'],
-            ['!in', 'class', 'path', 'pedestrian', 'footway', 'steps', 'rail', 'transit'],
-            [
-              'any',
-              ['==', 'class', 'track'],
-              ['==', 'surface', 'unpaved']
-            ]
-          ],
+          'source-layer': 'boundary',
           type: 'line',
-          layout: { 'line-join': 'round', 'line-cap': 'round' },
-          paint: {
-            'line-color': '#f59e0b',
-            'line-width': [
-              'interpolate', ['exponential', 1.3], ['zoom'],
-              10.0, 0.0,
-              11.0, 0.8,
-              13.0, 1.8,
-              17.0, 3.5
-            ],
-            'line-dasharray': [2, 1.5],
-            'line-opacity': [
-              'interpolate', ['exponential', 1.3], ['zoom'],
-              10.0, 0.0,
-              11.2, 0.4,
-              12.5, 0.85
-            ]
-          }
+          paint: { 'line-color': '#ec4899', 'line-width': 1.5, 'line-dasharray': [4, 2], 'line-opacity': 0.6 }
         },
         {
-          id: 'l-fast',
+          id: 'Granice i Etykiety/Nazwy ulic',
           source: 'pomorskie-tiles',
-          'source-layer': 'transportation',
-          filter: [
-            'all',
-            ['!=', 'surface', 'unpaved'],
-            ['!in', 'class', 'track', 'path', 'pedestrian', 'footway', 'steps', 'cycleway', 'ferry', 'rail', 'transit'],
-            ['in', 'class', 'motorway', 'trunk', 'primary']
-          ],
-          type: 'line',
-          layout: { 'line-join': 'round', 'line-cap': 'round' },
-          paint: {
-            'line-color': '#ef4444',
-            'line-width': [
-              'interpolate', ['linear'], ['zoom'],
-              9.5,  1.2,
-              13.0, 2.8,
-              17.0, 6.0
-            ]
-          }
+          'source-layer': 'transportation_name',
+          type: 'symbol',
+          layout: { 'symbol-placement': 'line', 'text-field': ['get', 'name'], 'text-size': 11, 'text-font': ['Open Sans Regular'] },
+          paint: { 'text-color': '#cbd5e1', 'text-halo-color': '#0f172a', 'text-halo-width': 1.5 }
         },
         {
-          id: 'l-slow',
+          id: 'Granice i Etykiety/Miejscowości',
           source: 'pomorskie-tiles',
-          'source-layer': 'transportation',
-          filter: [
-            'all',
-            ['!=', 'surface', 'unpaved'],
-            ['!in', 'class', 'track', 'path', 'pedestrian', 'footway', 'steps', 'cycleway', 'motorway', 'trunk', 'primary', 'ferry', 'rail', 'transit']
-          ],
-          type: 'line',
-          layout: { 'line-join': 'round', 'line-cap': 'round' },
-          paint: {
-            'line-color': '#94a3b8',
-            'line-width': [
-              'interpolate', ['exponential', 1.3], ['zoom'],
-              9.8,  0.0,
-              10.8, 0.7,
-              13.0, 1.8,
-              17.0, 4.0
-            ],
-            'line-opacity': [
-              'interpolate', ['exponential', 1.3], ['zoom'],
-              9.8,  0.0,
-              10.8, 0.4,
-              12.0, 0.85
-            ]
-          }
+          'source-layer': 'place',
+          filter: ['in', 'class', 'town', 'village', 'hamlet', 'suburb'],
+          type: 'symbol',
+          layout: { 'text-field': ['get', 'name'], 'text-size': 12, 'text-font': ['Open Sans Regular'] },
+          paint: { 'text-color': '#e2e8f0', 'text-halo-color': '#020617', 'text-halo-width': 2 }
+        },
+        {
+          id: 'Granice i Etykiety/Miasta',
+          source: 'pomorskie-tiles',
+          'source-layer': 'place',
+          filter: ['==', 'class', 'city'],
+          type: 'symbol',
+          layout: { 'text-field': ['get', 'name'], 'text-size': 15, 'text-font': ['Open Sans Bold'] },
+          paint: { 'text-color': '#ffffff', 'text-halo-color': '#000000', 'text-halo-width': 2.5 }
         }
       ]
     }
   });
 
-  map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
+  let navControl = new maplibregl.NavigationControl({ visualizePitch: true });
+  map.addControl(navControl, 'top-right');
 
-  const setupToggle = (checkboxId, layerId) => {
-    const el = document.getElementById(checkboxId);
-    if (!el) return;
-    el.addEventListener('change', (e) => {
-      if (map.getLayer(layerId)) {
-        map.setLayoutProperty(layerId, 'visibility', e.target.checked ? 'visible' : 'none');
-      }
+  function getLayerColor(layer) {
+    if (!layer.paint) return '#94a3b8';
+    const c = layer.paint['fill-color'] || layer.paint['line-color'] || layer.paint['circle-color'] || layer.paint['fill-extrusion-color'] || layer.paint['text-color'];
+    return (typeof c === 'string' && c.startsWith('#')) ? c : '#94a3b8';
+  }
+
+  function autoBuildTree() {
+    const container = document.getElementById('tree-container');
+    container.innerHTML = '';
+
+    const layers = map.getStyle().layers || [];
+    const groups = {};
+
+    layers.forEach(layer => {
+      if (layer.id === 'bg' || layer.id.endsWith('-outline-line')) return;
+
+      const parts = layer.id.split('/');
+      const groupName = parts.length > 1 ? parts[0] : 'Inne';
+      const leafTitle = parts.length > 1 ? parts[1] : layer.id;
+
+      if (!groups[groupName]) groups[groupName] = [];
+      groups[groupName].push({ id: layer.id, title: leafTitle, raw: JSON.parse(JSON.stringify(layer)) });
     });
-  };
+
+    Object.keys(groups).forEach(groupName => {
+      const childList = groups[groupName];
+      const node = document.createElement('div');
+      node.className = 'tree-node';
+
+      const header = document.createElement('div');
+      header.className = 'node-header';
+
+      const label = document.createElement('label');
+      label.className = 'node-label';
+
+      const pCheckbox = document.createElement('input');
+      pCheckbox.type = 'checkbox';
+      pCheckbox.checked = true;
+
+      const pTitle = document.createElement('span');
+      pTitle.innerText = groupName;
+
+      label.appendChild(pCheckbox);
+      label.appendChild(pTitle);
+
+      const arrow = document.createElement('span');
+      arrow.className = 'arrow';
+      arrow.innerHTML = '&#9660;';
+
+      header.appendChild(label);
+      header.appendChild(arrow);
+
+      const childrenBox = document.createElement('div');
+      childrenBox.className = 'node-children';
+
+      header.addEventListener('click', (e) => {
+        if (e.target === pCheckbox) return;
+        childrenBox.classList.toggle('collapsed');
+        arrow.classList.toggle('collapsed');
+      });
+
+      const childInputs = [];
+
+      childList.forEach(child => {
+        const leafBox = document.createElement('div');
+        leafBox.className = 'leaf-container';
+
+        const leaf = document.createElement('div');
+        leaf.className = 'leaf-item';
+
+        const leftDiv = document.createElement('div');
+        leftDiv.className = 'leaf-left';
+
+        const cCheckbox = document.createElement('input');
+        cCheckbox.type = 'checkbox';
+        cCheckbox.checked = true;
+        childInputs.push(cCheckbox);
+
+        const initialColor = getLayerColor(child.raw);
+
+        const mainColorPicker = document.createElement('input');
+        mainColorPicker.type = 'color';
+        mainColorPicker.className = 'color-picker';
+        mainColorPicker.value = initialColor;
+        mainColorPicker.title = 'Kolor obiektu';
+
+        mainColorPicker.addEventListener('input', (e) => {
+          const col = e.target.value;
+          if (child.raw.type === 'line') map.setPaintProperty(child.id, 'line-color', col);
+          else if (child.raw.type === 'fill') map.setPaintProperty(child.id, 'fill-color', col);
+          else if (child.raw.type === 'circle') map.setPaintProperty(child.id, 'circle-color', col);
+          else if (child.raw.type === 'fill-extrusion') map.setPaintProperty(child.id, 'fill-extrusion-color', col);
+          else if (child.raw.type === 'symbol') map.setPaintProperty(child.id, 'text-color', col);
+        });
+
+        const cTitle = document.createElement('span');
+        cTitle.innerText = child.title;
+
+        leftDiv.appendChild(cCheckbox);
+        leftDiv.appendChild(mainColorPicker);
+        leftDiv.appendChild(cTitle);
+        leaf.appendChild(leftDiv);
+        leafBox.appendChild(leaf);
+
+        const ctrlDiv = document.createElement('div');
+        ctrlDiv.className = 'leaf-controls';
+
+        if (child.raw.type === 'line' || child.raw.type === 'circle') {
+          const row = document.createElement('div');
+          row.className = 'control-row';
+          const sizeLabel = document.createElement('span');
+          sizeLabel.innerText = child.raw.type === 'line' ? 'Grubość:' : 'Rozmiar:';
+
+          const sizeInput = document.createElement('input');
+          sizeInput.type = 'range';
+          sizeInput.min = '0.5';
+          sizeInput.max = '15';
+          sizeInput.step = '0.5';
+          sizeInput.value = child.raw.type === 'line' ? '2.5' : '4';
+
+          sizeInput.addEventListener('input', (e) => {
+            const val = parseFloat(e.target.value);
+            if (child.raw.type === 'line') map.setPaintProperty(child.id, 'line-width', val);
+            else map.setPaintProperty(child.id, 'circle-radius', val);
+          });
+
+          row.appendChild(sizeLabel);
+          row.appendChild(sizeInput);
+          ctrlDiv.appendChild(row);
+        }
+
+        if (child.raw.type === 'fill') {
+          const outlineLayerId = `${child.id}-outline-line`;
+
+          if (!map.getLayer(outlineLayerId)) {
+            map.addLayer({
+              id: outlineLayerId,
+              source: child.raw.source,
+              'source-layer': child.raw['source-layer'],
+              type: 'line',
+              filter: child.raw.filter || ['all'],
+              paint: {
+                'line-color': initialColor,
+                'line-width': 0.0,
+                'line-opacity': 0.0
+              }
+            });
+          }
+
+          const row = document.createElement('div');
+          row.className = 'control-row';
+
+          const outlineLabel = document.createElement('span');
+          outlineLabel.innerText = 'Obwódka:';
+
+          const outlineColor = document.createElement('input');
+          outlineColor.type = 'color';
+          outlineColor.className = 'color-picker';
+          outlineColor.value = initialColor;
+          outlineColor.title = 'Kolor obwódki';
+          outlineColor.addEventListener('input', (e) => {
+            map.setPaintProperty(outlineLayerId, 'line-color', e.target.value);
+          });
+
+          const outlineWidth = document.createElement('input');
+          outlineWidth.type = 'range';
+          outlineWidth.min = '0';
+          outlineWidth.max = '8';
+          outlineWidth.step = '0.5';
+          outlineWidth.value = '0';
+          outlineWidth.title = 'Szerokość obwódki';
+          outlineWidth.addEventListener('input', (e) => {
+            const val = parseFloat(e.target.value);
+            map.setPaintProperty(outlineLayerId, 'line-width', val);
+            map.setPaintProperty(outlineLayerId, 'line-opacity', val > 0 ? 1.0 : 0.0);
+          });
+
+          row.appendChild(outlineLabel);
+          row.appendChild(outlineColor);
+          row.appendChild(outlineWidth);
+          ctrlDiv.appendChild(row);
+        }
+
+        if (child.raw.type === 'symbol') {
+          const rowSize = document.createElement('div');
+          rowSize.className = 'control-row';
+          const sizeLabel = document.createElement('span');
+          sizeLabel.innerText = 'Wielkość:';
+
+          const textSizeInput = document.createElement('input');
+          textSizeInput.type = 'range';
+          textSizeInput.min = '8';
+          textSizeInput.max = '28';
+          textSizeInput.step = '1';
+          textSizeInput.value = (child.raw.layout && child.raw.layout['text-size']) ? child.raw.layout['text-size'] : '12';
+
+          textSizeInput.addEventListener('input', (e) => {
+            map.setLayoutProperty(child.id, 'text-size', parseFloat(e.target.value));
+          });
+
+          rowSize.appendChild(sizeLabel);
+          rowSize.appendChild(textSizeInput);
+          ctrlDiv.appendChild(rowSize);
+
+          const rowFont = document.createElement('div');
+          rowFont.className = 'control-row';
+          const fontLabel = document.createElement('span');
+          fontLabel.innerText = 'Czcionka:';
+
+          const fontSelect = document.createElement('select');
+          const fonts = [
+            'Open Sans Regular',
+            'Open Sans Bold',
+            'Open Sans Italic',
+            'Klokantech Noto Sans Regular',
+            'Klokantech Noto Sans Bold'
+          ];
+          fonts.forEach(f => {
+            const opt = document.createElement('option');
+            opt.value = f;
+            opt.innerText = f;
+            fontSelect.appendChild(opt);
+          });
+
+          fontSelect.addEventListener('change', (e) => {
+            map.setLayoutProperty(child.id, 'text-font', [e.target.value]);
+          });
+
+          rowFont.appendChild(fontLabel);
+          rowFont.appendChild(fontSelect);
+          ctrlDiv.appendChild(rowFont);
+        }
+
+        leafBox.appendChild(ctrlDiv);
+        childrenBox.appendChild(leafBox);
+
+        cCheckbox.addEventListener('change', () => {
+          const vis = cCheckbox.checked ? 'visible' : 'none';
+          if (map.getLayer(child.id)) map.setLayoutProperty(child.id, 'visibility', vis);
+          if (map.getLayer(`${child.id}-outline-line`)) {
+            map.setLayoutProperty(`${child.id}-outline-line`, 'visibility', vis);
+          }
+          const checkedCount = childInputs.filter(i => i.checked).length;
+          pCheckbox.checked = checkedCount === childInputs.length;
+          pCheckbox.indeterminate = checkedCount > 0 && checkedCount < childInputs.length;
+        });
+      });
+
+      pCheckbox.addEventListener('change', () => {
+        const isChecked = pCheckbox.checked;
+        pCheckbox.indeterminate = false;
+        childInputs.forEach((ci, idx) => {
+          ci.checked = isChecked;
+          const targetId = childList[idx].id;
+          const vis = isChecked ? 'visible' : 'none';
+          if (map.getLayer(targetId)) map.setLayoutProperty(targetId, 'visibility', vis);
+          if (map.getLayer(`${targetId}-outline-line`)) {
+            map.setLayoutProperty(`${targetId}-outline-line`, 'visibility', vis);
+          }
+        });
+      });
+
+      node.appendChild(header);
+      node.appendChild(childrenBox);
+      container.appendChild(node);
+    });
+  }
+
+  const menuEl = document.getElementById('menu');
+  const btnMin = document.getElementById('btn-minimize');
+
+  btnMin.addEventListener('click', () => {
+    menuEl.classList.toggle('minimized');
+    btnMin.innerText = menuEl.classList.contains('minimized') ? '+' : '–';
+  });
+
+  const btnSwitch = document.getElementById('btn-switch-side');
+
+  btnSwitch.addEventListener('click', () => {
+    const isLeft = menuEl.classList.contains('dock-left');
+    menuEl.classList.toggle('dock-left', !isLeft);
+    menuEl.classList.toggle('dock-right', isLeft);
+
+    map.removeControl(navControl);
+    navControl = new maplibregl.NavigationControl({ visualizePitch: true });
+    map.addControl(navControl, isLeft ? 'top-left' : 'top-right');
+  });
 
   map.on('error', (e) => {
     console.error("MapLibre Error:", e);
@@ -389,14 +783,7 @@
       exaggeration: 0.85
     });
 
-    setupToggle('t-cycle', 'l-cycle');
-    setupToggle('t-pedestrian', 'l-pedestrian');
-    setupToggle('t-dirt', 'l-dirt');
-    setupToggle('t-fast', 'l-fast');
-    setupToggle('t-slow', 'l-slow');
-    setupToggle('t-rail', 'l-rail');
-    setupToggle('t-buildings', 'l-buildings');
-    setupToggle('t-marine', 'l-marine');
+    autoBuildTree();
   });
 </script>
 </body>
