@@ -119,7 +119,7 @@ Otwórz przeglądarkę pod adresem:
 
 1. **Uruchomienie skryptu:**
    ```bash
-   uv run src/stats_and_plots.py
+   uv run src/plots.py
    ```
    Wykresy interaktywne HTML zostaną zapisane w katalogu `plots/`.
 
