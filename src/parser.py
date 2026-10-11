@@ -9,6 +9,33 @@ from utils import ddm_to_dd, parse_nmea_time, to_int_or_none
 DB_URL = "postgresql://nnaper:nnaper@localhost:5432/nnaper_db"
 
 
+def get_or_create_default_profile(cur, username="admin", profile_name="samochód") -> str:
+    # 1. Pobierz lub stwórz użytkownika
+    cur.execute(
+        """
+        INSERT INTO users (username, email, password_hash)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (username) DO UPDATE SET username = EXCLUDED.username
+        RETURNING user_id;
+        """,
+        (username, f"{username}@local.dev", "placeholder_hash"),
+    )
+    user_id = cur.fetchone()[0]
+
+    # 2. Pobierz lub stwórz profil
+    cur.execute(
+        """
+        INSERT INTO profiles (user_id, name)
+        VALUES (%s, %s)
+        ON CONFLICT (user_id, name) DO UPDATE SET name = EXCLUDED.name
+        RETURNING profile_id;
+        """,
+        (user_id, profile_name),
+    )
+    profile_id = str(cur.fetchone()[0])
+    return profile_id
+
+
 def to_float_or_none(v):
     if v is None:
         return None
@@ -50,7 +77,8 @@ class RawEpoch:
 
 
 class CopyBatchBuffer:
-    def __init__(self):
+    def __init__(self, profile_id: str):
+        self.profile_id = profile_id
         self.epochs = []
         self.sentences = []
         self.gsensord = []
@@ -63,7 +91,7 @@ class CopyBatchBuffer:
 
     def add_epoch(self, epoch: RawEpoch):
         epoch_id = str(uuid.uuid4())
-        self.epochs.append((epoch_id, epoch.terminator, None, None))
+        self.epochs.append((epoch_id, self.profile_id, epoch.terminator, None, None))
 
         if epoch.gsensord:
             s_raw, s_chk, s_cnt, gx, gy, gz = epoch.gsensord
@@ -115,7 +143,7 @@ class CopyBatchBuffer:
 
     def flush(self, cur):
         if self.epochs:
-            with cur.copy("COPY epochs (epoch_id, terminator, time_diff, distance) FROM STDIN") as copy:
+            with cur.copy("COPY epochs (epoch_id, profile_id, terminator, time_diff, distance) FROM STDIN") as copy:
                 for row in self.epochs:
                     copy.write_row(row)
 
@@ -217,20 +245,24 @@ def parse_data(data_file_path=DATA_FILE_PATH, batch_size=10000):
 
     print(f"Parsing from line: {last_line_index}")
 
-    epoch = RawEpoch()
-    epochs_in_batch = 0
-    tag = ""
-    buffer = CopyBatchBuffer()
-
     with psycopg.connect(DB_URL) as conn:
         with conn.cursor() as cur:
             cur.execute("SET synchronous_commit = OFF;")
             cur.execute("SET work_mem = '64MB';")
 
+            # Pobieramy lub tworzymy konto admin i profil "samochód"
+            profile_id = get_or_create_default_profile(cur, username="admin", profile_name="samochód")
+            conn.commit()
+
             if last_line_index == 0:
                 print("State is 0 — truncating tables...")
                 cur.execute("TRUNCATE TABLE epochs CASCADE;")
                 conn.commit()
+
+            epoch = RawEpoch()
+            epochs_in_batch = 0
+            tag = ""
+            buffer = CopyBatchBuffer(profile_id=profile_id)
 
             with open(str(data_file_path), "r", encoding="utf-8", errors="ignore") as data_file:
                 for current_number, line in enumerate(data_file, start=1):
