@@ -1,12 +1,36 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS postgis;
 
+CREATE TABLE IF NOT EXISTS "users" (
+    "user_id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    "username" VARCHAR(64) NOT NULL UNIQUE,
+    "email" VARCHAR(255) NOT NULL UNIQUE,
+    "password_hash" VARCHAR(255) NOT NULL,
+    "avatar_url" TEXT,
+    "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS "profiles" (
+    "profile_id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    "user_id" UUID NOT NULL REFERENCES "users"("user_id") ON DELETE CASCADE,
+    "name" VARCHAR(64) NOT NULL,
+    "avatar_url" TEXT,
+    "created_at" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_user_profile_name UNIQUE ("user_id", "name")
+);
+
+CREATE INDEX IF NOT EXISTS idx_profiles_user_id ON "profiles"("user_id");
+
 CREATE TABLE IF NOT EXISTS "epochs" (
     "epoch_id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    "profile_id" UUID NOT NULL REFERENCES "profiles"("profile_id") ON DELETE CASCADE,
     "terminator" VARCHAR(16),
     "time_diff" NUMERIC(8, 3),
     "distance" NUMERIC(10, 4)
 );
+
+CREATE INDEX IF NOT EXISTS idx_epochs_profile_id ON "epochs"("profile_id");
 
 CREATE TABLE IF NOT EXISTS "sentence" (
     "sentence_id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
