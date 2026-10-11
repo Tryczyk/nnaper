@@ -115,15 +115,18 @@ Otwórz przeglądarkę pod adresem:
 
 ---
 
-## 6. Generowanie wykresów telemetrycznych i statystyk
+## 6. Generowanie wykresów
 
-Aplikacja umożliwia wygenerowanie kompletnego zestawu interaktywnych wykresów w formacie HTML (Plotly) oraz raportu statystycznego z danych zapisanych w bazie PostgreSQL.
+1. **Uruchomienie skryptu:**
+   ```bash
+   uv run src/stats_and_plots.py
+   ```
+   Wykresy interaktywne HTML zostaną zapisane w katalogu `plots/`.
 
-### Krok 1: Instalacja zależności
-Upewnij się, że w środowisku zainstalowane są pakiety do obsługi wykresów i bazy danych:
-```bash
-uv add plotly psycopg pandas numpy
-```
+2. **Podgląd w przeglądarce:**
+     ```powershell
+     Get-ChildItem -Path "plots\*.html" | ForEach-Object { Start-Process $_.FullName }
+     ```
 
 ## Przy pracy nad bazą lub parserem
 
