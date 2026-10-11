@@ -3,11 +3,8 @@ from pathlib import Path
 import uuid
 import psycopg
 
-from constants import DATA_FILE_PATH, STATE_FILE_PATH
+from constants import DATA_FILE_PATH, STATE_FILE_PATH, DB_URL
 from utils import ddm_to_dd, parse_nmea_time, to_int_or_none
-
-DB_URL = "postgresql://nnaper:nnaper@localhost:5432/nnaper_db"
-
 
 def get_or_create_default_profile(cur, username="admin", profile_name="samochód") -> str:
     # 1. Pobierz lub stwórz użytkownika
