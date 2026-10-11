@@ -7,10 +7,6 @@ def any_none(arguments):
             return True
     return False
 
-def save_geojson(filename, features):
-    with open(filename, "w", encoding="utf-8") as f:
-        json.dump({"type": "FeatureCollection", "features": features}, f)
-
 def ddm_to_dd(ddm_str, hemisphere):
     if any_none([ddm_str, hemisphere]):
         return
