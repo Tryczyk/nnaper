@@ -2,8 +2,6 @@
   <img src="assets/header.png" alt="Naper Logo" width="100%" />
 </p>
 
-# NNAPER 🗺️
-
 Aplikacja do przetwarzania danych lokalizacyjnych GPS w formacie **NMEA**, bezpośredniego strumieniowania ich do bazy danych **PostgreSQL + PostGIS** oraz wizualizacji na interaktywnej mapie opartej o kafelki wektorowe **PMTiles** (OpenStreetMap).
 
 ---
