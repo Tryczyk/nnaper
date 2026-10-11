@@ -7,3 +7,4 @@
 *.gz
 *.zip
 osm_data/
+/plots
