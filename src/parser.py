@@ -1,4 +1,5 @@
-from datetime import datetime
+from datetime import datetime, timezone
+import json
 from pathlib import Path
 import uuid
 import psycopg
@@ -6,8 +7,8 @@ import psycopg
 from constants import DATA_FILE_PATH, STATE_FILE_PATH, DB_URL
 from utils import ddm_to_dd, parse_nmea_time, to_int_or_none
 
+
 def get_or_create_default_profile(cur, username="admin", profile_name="samochód") -> str:
-    # 1. Pobierz lub stwórz użytkownika
     cur.execute(
         """
         INSERT INTO users (username, email, password_hash)
@@ -19,7 +20,6 @@ def get_or_create_default_profile(cur, username="admin", profile_name="samochód
     )
     user_id = cur.fetchone()[0]
 
-    # 2. Pobierz lub stwórz profil
     cur.execute(
         """
         INSERT INTO profiles (user_id, name)
@@ -73,6 +73,75 @@ class RawEpoch:
         self.gpgsvs = []
 
 
+def resolve_and_qualify_epoch(epoch: RawEpoch, max_hdop: float = 5.0):
+    reasons = []
+
+    # Odczyt danych z GPRMC:
+    # (s_raw, s_chk, s_cnt, time_val, status, lat, lat_hem, lon, lon_hem, spd, crs, date_val, mode)
+    rmc_time = epoch.gprmc[3] if epoch.gprmc else None
+    rmc_status = epoch.gprmc[4] if epoch.gprmc else None
+    rmc_lat = epoch.gprmc[5] if epoch.gprmc else None
+    rmc_lon = epoch.gprmc[7] if epoch.gprmc else None
+    rmc_date = epoch.gprmc[11] if epoch.gprmc else None
+
+    # Odczyt danych z GPGGA:
+    # (s_raw, s_chk, s_cnt, gga_time, lat, lat_hem, lon, lon_hem, fix_q, sats_u, hdop, ...)
+    gga_time = epoch.gpgga[3] if epoch.gpgga else None
+    gga_lat = epoch.gpgga[4] if epoch.gpgga else None
+    gga_lon = epoch.gpgga[6] if epoch.gpgga else None
+    gga_fix_q = epoch.gpgga[8] if epoch.gpgga else None
+    gga_hdop = epoch.gpgga[10] if epoch.gpgga else None
+
+    # 1. Złożenie i walidacja dokładnej daty oraz godziny
+    chosen_time = rmc_time or gga_time
+    epoch_timestamp = None
+    if rmc_date and chosen_time:
+        epoch_timestamp = datetime.combine(rmc_date, chosen_time).replace(tzinfo=timezone.utc)
+
+    if epoch_timestamp is None:
+        if not rmc_date:
+            reasons.append("date")
+        if not chosen_time:
+            reasons.append("time_utc")
+
+    # 2. Walidacja statusu GPRMC
+    if epoch.gprmc and rmc_status != 'A':
+        reasons.append("gprmc.status")
+
+    # 3. Walidacja szerokości i długości geograficznej
+    if rmc_lat is None and gga_lat is None:
+        reasons.append("latitude")
+
+    if rmc_lon is None and gga_lon is None:
+        reasons.append("longitude")
+
+    # 4. Walidacja jakości fixa i współczynnika HDOP
+    if gga_fix_q is None or gga_fix_q <= 0:
+        reasons.append("gpgga.fix_quality")
+
+    if gga_hdop is None or gga_hdop > max_hdop:
+        reasons.append("gpgga.hdop")
+
+    is_active = (len(reasons) == 0)
+
+    # 5. Wybór optymalnej pozycji
+    chosen_lat = None
+    chosen_lon = None
+
+    if gga_lat is not None and gga_lon is not None and (gga_fix_q and gga_fix_q > 0) and (gga_hdop is None or gga_hdop <= 3.0):
+        chosen_lat, chosen_lon = gga_lat, gga_lon
+    elif rmc_lat is not None and rmc_lon is not None and rmc_status == 'A':
+        chosen_lat, chosen_lon = rmc_lat, rmc_lon
+    elif gga_lat is not None and gga_lon is not None:
+        chosen_lat, chosen_lon = gga_lat, gga_lon
+    elif rmc_lat is not None and rmc_lon is not None:
+        chosen_lat, chosen_lon = rmc_lat, rmc_lon
+
+    geom_wkt = f"SRID=4326;POINT({chosen_lon} {chosen_lat})" if chosen_lat is not None and chosen_lon is not None else None
+
+    return is_active, reasons, chosen_lat, chosen_lon, geom_wkt, epoch_timestamp
+
+
 class CopyBatchBuffer:
     def __init__(self, profile_id: str):
         self.profile_id = profile_id
@@ -88,7 +157,13 @@ class CopyBatchBuffer:
 
     def add_epoch(self, epoch: RawEpoch):
         epoch_id = str(uuid.uuid4())
-        self.epochs.append((epoch_id, self.profile_id, epoch.terminator, None, None))
+        
+        is_active, reasons, lat, lon, geom_wkt, epoch_ts = resolve_and_qualify_epoch(epoch)
+
+        self.epochs.append((
+            epoch_id, self.profile_id, epoch.terminator, None, None,
+            is_active, reasons, lat, lon, geom_wkt, epoch_ts
+        ))
 
         if epoch.gsensord:
             s_raw, s_chk, s_cnt, gx, gy, gz = epoch.gsensord
@@ -97,11 +172,11 @@ class CopyBatchBuffer:
             self.gsensord.append((s_id, gx, gy, gz))
 
         if epoch.gprmc:
-            s_raw, s_chk, s_cnt, time_val, status, lat, lat_hem, lon, lon_hem, spd, crs, date_val, mode = epoch.gprmc
+            s_raw, s_chk, s_cnt, time_val, status, lat_v, lat_hem, lon_v, lon_hem, spd, crs, date_val, mode = epoch.gprmc
             s_id = str(uuid.uuid4())
             self.sentences.append((s_id, epoch_id, s_raw, s_chk, s_cnt))
             self.gprmc.append((
-                s_id, time_val, status, lat, lat_hem, lon, lon_hem, spd, crs, date_val, mode
+                s_id, time_val, status, lat_v, lat_hem, lon_v, lon_hem, spd, crs, date_val, mode
             ))
 
         if epoch.gpvtg:
@@ -113,11 +188,11 @@ class CopyBatchBuffer:
             ))
 
         if epoch.gpgga:
-            s_raw, s_chk, s_cnt, gga_time, lat, lat_hem, lon, lon_hem, fix_q, sats_u, hdop, alt, alt_u, geo_sep, geo_sep_u, dgps_a, dgps_id = epoch.gpgga
+            s_raw, s_chk, s_cnt, gga_time, lat_v, lat_hem, lon_v, lon_hem, fix_q, sats_u, hdop, alt, alt_u, geo_sep, geo_sep_u, dgps_a, dgps_id = epoch.gpgga
             s_id = str(uuid.uuid4())
             self.sentences.append((s_id, epoch_id, s_raw, s_chk, s_cnt))
             self.gpgga.append((
-                s_id, gga_time, lat, lat_hem, lon, lon_hem, fix_q, sats_u, hdop,
+                s_id, gga_time, lat_v, lat_hem, lon_v, lon_hem, fix_q, sats_u, hdop,
                 alt, alt_u, geo_sep, geo_sep_u, dgps_a, dgps_id
             ))
 
@@ -134,13 +209,18 @@ class CopyBatchBuffer:
                 s_raw, s_chk, s_cnt, tot_m, msg_n, sats_view, sats_list = gsv_item
                 s_id = str(uuid.uuid4())
                 self.sentences.append((s_id, epoch_id, s_raw, s_chk, s_cnt))
+                
                 self.gpgsv.append((s_id, tot_m, msg_n, sats_view))
+                
                 for sat in sats_list:
                     self.satellite.append((str(uuid.uuid4()), s_id, sat[0], sat[1], sat[2], sat[3]))
 
     def flush(self, cur):
         if self.epochs:
-            with cur.copy("COPY epochs (epoch_id, profile_id, terminator, time_diff, distance) FROM STDIN") as copy:
+            with cur.copy("""COPY epochs (
+                epoch_id, profile_id, terminator, time_diff, distance,
+                is_active, inactive_reasons, latitude, longitude, geom, timestamp
+            ) FROM STDIN""") as copy:
                 for row in self.epochs:
                     copy.write_row(row)
 
@@ -247,7 +327,6 @@ def parse_data(data_file_path=DATA_FILE_PATH, batch_size=10000):
             cur.execute("SET synchronous_commit = OFF;")
             cur.execute("SET work_mem = '64MB';")
 
-            # Pobieramy lub tworzymy konto admin i profil "samochód"
             profile_id = get_or_create_default_profile(cur, username="admin", profile_name="samochód")
             conn.commit()
 

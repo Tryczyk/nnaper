@@ -1,4 +1,5 @@
 services:
+  # 1. Baza danych PostGIS z healthcheckiem
   db:
     image: postgis/postgis:16-3.4
     container_name: nnaper_db
@@ -11,12 +12,37 @@ services:
     volumes:
       - nnaper_pgdata:/var/lib/postgresql/data
       - ./init_db.sql:/docker-entrypoint-initdb.d/init_db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nnaper -d nnaper_db"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
     restart: unless-stopped
 
+  # 2. Backend API serwujący punkty trasy z PostGIS
+  api:
+    image: python:3.14-slim
+    container_name: nnaper_api
+    working_dir: /app
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    environment:
+      - DB_URL=postgresql://nnaper:nnaper@db:5432/nnaper_db
+      - PYTHONPATH=/app
+    command: >
+      sh -c "pip install --no-cache-dir fastapi uvicorn 'psycopg[binary]' python-dotenv &&
+             uvicorn server:app --app-dir src --host 0.0.0.0 --port 8000 --reload"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # 3. Sprawdzanie i ewentualne pobieranie pliku PBF
   tiles-downloader:
     image: alpine:latest
     container_name: nnaper_downloader
-    profiles: ["tools"]
     volumes:
       - ./osm_data:/data
     environment:
@@ -24,19 +50,19 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command: >
       "apk add --no-cache curl &&
-       if [ ! -f /data/$${OSM_FILE_NAME} ]; then
-         echo '[DOCKER] Brak pliku /data/'$${OSM_FILE_NAME}'. Pobieranie z Geofabrik...';
+       if [ ! -f /data/pomorskie.pmtiles ] && [ ! -f /data/$${OSM_FILE_NAME} ]; then
+         echo '[DOCKER] Brak kafelkow i pliku /data/'$${OSM_FILE_NAME}'. Pobieranie PBF z Geofabrik...';
          REGION=$$(echo $${OSM_FILE_NAME} | sed 's/\.osm\.pbf//' | sed 's/\.pbf//');
          curl -L --fail https://download.geofabrik.de/europe/poland/$${REGION}-latest.osm.pbf -o /data/$${OSM_FILE_NAME} || \
          curl -L --fail https://download.geofabrik.de/europe/poland/pomorskie-latest.osm.pbf -o /data/pomorskie.osm.pbf;
        else
-         echo '[DOCKER] Plik /data/'$${OSM_FILE_NAME}' juz istnieje. Pomijam pobieranie.';
+         echo '[DOCKER] PBF lub kafelki juz istnieja. Pomijam pobieranie.';
        fi"
 
+  # 4. Automatyczna kompilacja PMTiles (tylko jesli nie istnieja)
   tiles-generator:
     image: ghcr.io/onthegomap/planetiler:latest
     container_name: nnaper_planetiler
-    profiles: ["tools"]
     depends_on:
       tiles-downloader:
         condition: service_completed_successfully
@@ -44,21 +70,46 @@ services:
       - JAVA_OPTS=-Xmx4g
     volumes:
       - ./osm_data:/data
+    entrypoint: ["/bin/sh", "-c"]
     command: >
-      --osm-path=/data/${OSM_FILE_NAME:-pomorskie.osm.pbf}
-      --output=/data/pomorskie.pmtiles
-      --download
-      --force
+      "if [ ! -f /data/pomorskie.pmtiles ]; then
+         echo '[DOCKER] Generowanie kafelkow pomorskie.pmtiles...';
+         java -Xmx4g -jar /planetiler.jar --osm-path=/data/${OSM_FILE_NAME:-pomorskie.osm.pbf} --output=/data/pomorskie.pmtiles --download --force;
+       else
+         echo '[DOCKER] Kafelki pomorskie.pmtiles juz istnieja. Pomijam kompilacje.';
+       fi"
 
+  # 5. Serwer HTTP Caddy (startuje po weryfikacji kafelkow)
   tiles-server:
     image: caddy:alpine
     container_name: nnaper_tiles_server
+    depends_on:
+      tiles-generator:
+        condition: service_completed_successfully
     ports:
       - "8080:8080"
     volumes:
       - .:/usr/share/caddy
     command: caddy file-server --root /usr/share/caddy --listen :8080 --access-log
     restart: unless-stopped
+
+  # 6. Automatyczne otwarcie przeglądarki z poziomu hosta przez WSL/Docker socket
+  open-browser:
+    image: alpine:latest
+    container_name: nnaper_browser_launcher
+    depends_on:
+      tiles-server:
+        condition: service_started
+    entrypoint: ["/bin/sh", "-c"]
+    command: >
+      "apk add --no-cache curl &&
+       echo '[DOCKER] Oczekiwanie na serwer mapy...' &&
+       until curl -s -f http://tiles-server:8080/maps/tile_map.html > /dev/null; do
+         sleep 1;
+       done &&
+       echo '========================================================' &&
+       echo '  MAPA GOTOWA: http://localhost:8080/maps/tile_map.html ' &&
+       echo '========================================================'"
 
 volumes:
   nnaper_pgdata:

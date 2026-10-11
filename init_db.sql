@@ -27,10 +27,19 @@ CREATE TABLE IF NOT EXISTS "epochs" (
     "profile_id" UUID NOT NULL REFERENCES "profiles"("profile_id") ON DELETE CASCADE,
     "terminator" VARCHAR(16),
     "time_diff" NUMERIC(8, 3),
-    "distance" NUMERIC(10, 4)
+    "distance" NUMERIC(10, 4),
+    "is_active" BOOLEAN NOT NULL DEFAULT TRUE,
+    "inactive_reasons" TEXT[] NOT NULL DEFAULT '{}',
+    "latitude" NUMERIC(10, 6),
+    "longitude" NUMERIC(11, 6),
+    "geom" GEOMETRY(Point, 4326),
+    "timestamp" TIMESTAMPTZ
 );
 
 CREATE INDEX IF NOT EXISTS idx_epochs_profile_id ON "epochs"("profile_id");
+CREATE INDEX IF NOT EXISTS idx_epochs_is_active ON "epochs"("is_active") WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_epochs_geom ON "epochs" USING GIST ("geom");
+CREATE INDEX IF NOT EXISTS idx_epochs_timestamp ON "epochs"("timestamp");
 
 CREATE TABLE IF NOT EXISTS "sentence" (
     "sentence_id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -39,6 +48,8 @@ CREATE TABLE IF NOT EXISTS "sentence" (
     "checksum" CHAR(2),
     "parts_count" SMALLINT
 );
+
+CREATE INDEX IF NOT EXISTS idx_sentence_epoch_id ON "sentence"("epoch_id");
 
 CREATE TABLE IF NOT EXISTS "gsensord" (
     "sentence_id" UUID PRIMARY KEY REFERENCES "sentence"("sentence_id") ON DELETE CASCADE,
@@ -128,5 +139,4 @@ CREATE TABLE IF NOT EXISTS "satellite" (
     "snr" SMALLINT
 );
 
-CREATE INDEX IF NOT EXISTS idx_sentence_epoch_id ON "sentence"("epoch_id");
 CREATE INDEX IF NOT EXISTS idx_satellite_sentence_id ON "satellite"("sentence_id");
