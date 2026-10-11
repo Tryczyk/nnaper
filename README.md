@@ -21,7 +21,7 @@ Aplikacja do przetwarzania danych lokalizacyjnych GPS w formacie **NMEA**, bezpo
    - Unikalny indeks czasowy w bazie oraz plik `data/state.txt` zapobiegają duplikatom i pozwalają na bezpieczne wznawianie pracy w dowolnym momencie.
 
 4. **Wizualizacja:**
-   - Mapa w `maps/tile_map.html` odpytuje serwer o kafelki PMTiles i renderuje warstwy za pośrednictwem biblioteki **MapLibre GL JS**.
+   - Mapa w `maps/tile_map.html` odpytuje serwer o kafelki PMTiles i dynamiczne kafelki wektorowe MVT ze śladem GPS, a następnie renderuje warstwy za pośrednictwem biblioteki **MapLibre GL JS**.
 
 ---
 
@@ -112,6 +112,12 @@ uv run src/parser.py
 ### 5. Podgląd mapy
 Otwórz przeglądarkę pod adresem:
 [http://localhost:8080/maps/tile_map.html](http://localhost:8080/maps/tile_map.html)
+
+Ślad GPS jest dostarczany dynamicznie z PostGIS przez endpoint
+`/api/track/{z}/{x}/{y}.pbf`. Frontend tworzy osobne źródło i warstwę MVT dla
+każdego miesiąca (`?days=YYYY-MM-DD,...`), a poszczególne dni są filtrowane
+lokalnie w MapLibre. Zmiana zaznaczenia miesiąca lub dnia przełącza widoczność
+bez regenerowania ani przeładowywania kafelków pozostałych miesięcy.
 
 ---
 

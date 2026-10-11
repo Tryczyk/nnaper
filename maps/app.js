@@ -1,6 +1,10 @@
 const protocol = new pmtiles.Protocol();
 maplibregl.addProtocol("pmtiles", protocol.tile);
 
+const TRACK_TILES_URL = 'http://localhost:8000/api/track/{z}/{x}/{y}.pbf';
+const trackMonthLayers = new Map();
+const trackLayerIds = new Set(['GPS / Ślad trasy']);
+
 const map = new maplibregl.Map({
   container: 'map',
   center: [18.6466, 54.3520],
@@ -143,24 +147,86 @@ function syncFilterCheckbox(parentCheckbox, childCheckboxes) {
   parentCheckbox.indeterminate = checked > 0 && checked < childCheckboxes.length;
 }
 
-function applyTrackDateFilter(dayCheckboxes, isEverythingActive) {
-  const source = map.getSource('gps-track');
-  if (!source) return;
+function setTrackLayerVisibility(visibleDays) {
+  trackMonthLayers.forEach(({ layerId, days }) => {
+    if (map.getLayer(layerId)) {
+      const activeDays = days.filter(day => visibleDays.has(day));
+      map.setLayoutProperty(layerId, 'visibility', activeDays.length ? 'visible' : 'none');
+      map.setFilter(layerId, [
+        'match',
+        ['get', 'day'],
+        activeDays,
+        true,
+        false
+      ]);
+    }
+  });
+}
 
+function applyTrackDateFilter(dayCheckboxes, isEverythingActive) {
   if (!isEverythingActive) {
-    if (map.getLayer('GPS / Ślad trasy')) map.setLayoutProperty('GPS / Ślad trasy', 'visibility', 'none');
-    source.setData({ type: 'FeatureCollection', features: [] });
+    setTrackLayerVisibility(new Set());
     return;
   }
 
   const selectedDays = dayCheckboxes.filter(c => c.checked).map(c => c.value);
-  if (selectedDays.length === 0) {
-    if (map.getLayer('GPS / Ślad trasy')) map.setLayoutProperty('GPS / Ślad trasy', 'visibility', 'none');
-    source.setData({ type: 'FeatureCollection', features: [] });
-  } else {
-    if (map.getLayer('GPS / Ślad trasy')) map.setLayoutProperty('GPS / Ślad trasy', 'visibility', 'visible');
-    source.setData(`http://localhost:8000/api/track?days=${selectedDays.join(',')}`);
-  }
+  setTrackLayerVisibility(new Set(selectedDays));
+}
+
+function buildTrackTilesUrl(days) {
+  return `${TRACK_TILES_URL}?days=${encodeURIComponent(days)}`;
+}
+
+function updateTrackPaintProperty(property, value) {
+  trackLayerIds.forEach(layerId => {
+    if (map.getLayer(layerId)) map.setPaintProperty(layerId, property, value);
+  });
+}
+
+function bindTrackLayerInteractions(layerId) {
+  map.on('click', layerId, (e) => {
+    const feat = e.features && e.features[0];
+    if (feat && feat.properties && feat.properties.epoch_id) {
+      loadPointFullDetails(feat.properties.epoch_id);
+    }
+  });
+  map.on('mouseenter', layerId, () => { map.getCanvas().style.cursor = 'pointer'; });
+  map.on('mouseleave', layerId, () => { map.getCanvas().style.cursor = ''; });
+}
+
+function addTrackMonthLayers(months) {
+  months.forEach(({ key, days }) => {
+    if (trackMonthLayers.has(key)) return;
+
+    const suffix = key.replaceAll('-', '_');
+    const sourceId = `gps-track-${suffix}`;
+    const layerId = `GPS / Ślad trasy / ${key}`;
+
+    map.addSource(sourceId, {
+      type: 'vector',
+      tiles: [buildTrackTilesUrl(days.join(','))],
+      minzoom: 0,
+      maxzoom: 18
+    });
+    map.addLayer({
+      id: layerId,
+      source: sourceId,
+      'source-layer': 'gps-track',
+      type: 'circle',
+      layout: { visibility: 'none' },
+      paint: {
+        'circle-color': '#06b6d4',
+        'circle-radius': 4.5,
+        'circle-stroke-width': 0,
+        'circle-stroke-color': '#06b6d4',
+        'circle-pitch-alignment': 'map',
+        'circle-pitch-scale': 'viewport'
+      }
+    });
+    trackMonthLayers.set(key, { layerId, days });
+    trackLayerIds.add(layerId);
+    bindTrackLayerInteractions(layerId);
+  });
 }
 
 async function buildInlineTimeFilter(container) {
@@ -173,6 +239,17 @@ async function buildInlineTimeFilter(container) {
       container.innerHTML = '<span style="color:#64748b;font-size:11px;">Brak danych czasowych.</span>';
       return;
     }
+
+    const months = [];
+    Object.keys(data).forEach(year => {
+      Object.keys(data[year]).forEach(month => {
+        months.push({
+          key: `${year}-${month}`,
+          days: data[year][month].map(day => `${year}-${month}-${day}`)
+        });
+      });
+    });
+    addTrackMonthLayers(months);
 
     container.innerHTML = '';
     const allDayCheckboxes = [];
@@ -288,6 +365,7 @@ async function buildInlineTimeFilter(container) {
     rootNode.appendChild(rootHeader.element);
     rootNode.appendChild(rootChildren);
     container.appendChild(rootNode);
+    applyTrackDateFilter(allDayCheckboxes, true);
 
   } catch (err) {
     container.innerHTML = `<span style="color:#ef4444;font-size:11px;">Brak połączenia z API dat.</span>`;
@@ -303,7 +381,12 @@ function autoBuildTree() {
   const groups = {};
 
   layers.forEach(layer => {
-    if (layer.id === 'bg' || layer.id.endsWith('-outline-line') || layer.id.startsWith('sat-')) return;
+    if (
+      layer.id === 'bg' ||
+      layer.id.endsWith('-outline-line') ||
+      layer.id.startsWith('sat-') ||
+      layer.id.startsWith('GPS / Ślad trasy / ')
+    ) return;
 
     const parts = layer.id.split('/');
     const groupName = parts.length > 1 ? parts[0] : 'Inne';
@@ -390,7 +473,10 @@ function autoBuildTree() {
         const col = e.target.value;
         if (child.raw.type === 'line') map.setPaintProperty(child.id, 'line-color', col);
         else if (child.raw.type === 'fill') map.setPaintProperty(child.id, 'fill-color', col);
-        else if (child.raw.type === 'circle') map.setPaintProperty(child.id, 'circle-color', col);
+        else if (child.raw.type === 'circle') {
+          if (child.id === 'GPS / Ślad trasy') updateTrackPaintProperty('circle-color', col);
+          else map.setPaintProperty(child.id, 'circle-color', col);
+        }
         else if (child.raw.type === 'fill-extrusion') map.setPaintProperty(child.id, 'fill-extrusion-color', col);
         else if (child.raw.type === 'symbol') map.setPaintProperty(child.id, 'text-color', col);
       });
@@ -409,7 +495,9 @@ function autoBuildTree() {
       // Linie
       if (child.raw.type === 'line') {
         const lineOutlineId = `${child.id}-outline-line`;
-        if (!map.getLayer(lineOutlineId)) {
+        if (!map.getLayer(lineOutlineId) &&
+            typeof child.raw.source === 'string' &&
+            typeof child.raw['source-layer'] === 'string') {
           map.addLayer({
             id: lineOutlineId,
             source: child.raw.source,
@@ -467,7 +555,11 @@ function autoBuildTree() {
         const sizeInput = document.createElement('input');
         sizeInput.type = 'range'; sizeInput.min = '1'; sizeInput.max = '20'; sizeInput.step = '0.5';
         sizeInput.value = (child.raw.paint && typeof child.raw.paint['circle-radius'] === 'number') ? child.raw.paint['circle-radius'] : '4.5';
-        sizeInput.addEventListener('input', (e) => map.setPaintProperty(child.id, 'circle-radius', parseFloat(e.target.value)));
+        sizeInput.addEventListener('input', (e) => {
+          const value = parseFloat(e.target.value);
+          if (child.id === 'GPS / Ślad trasy') updateTrackPaintProperty('circle-radius', value);
+          else map.setPaintProperty(child.id, 'circle-radius', value);
+        });
         rowSize.appendChild(sizeLabel); rowSize.appendChild(sizeInput);
         ctrlDiv.appendChild(rowSize);
 
@@ -475,9 +567,16 @@ function autoBuildTree() {
         rowStroke.className = 'control-row';
         const strokeLabel = document.createElement('span'); strokeLabel.innerText = 'Obwódka:';
         const strokeColorPicker = document.createElement('input'); strokeColorPicker.type = 'color'; strokeColorPicker.className = 'color-picker'; strokeColorPicker.value = getLayerStrokeColor(child.raw);
-        strokeColorPicker.addEventListener('input', (e) => map.setPaintProperty(child.id, 'circle-stroke-color', e.target.value));
+        strokeColorPicker.addEventListener('input', (e) => {
+          if (child.id === 'GPS / Ślad trasy') updateTrackPaintProperty('circle-stroke-color', e.target.value);
+          else map.setPaintProperty(child.id, 'circle-stroke-color', e.target.value);
+        });
         const strokeWidthInput = document.createElement('input'); strokeWidthInput.type = 'range'; strokeWidthInput.min = '0'; strokeWidthInput.max = '8'; strokeWidthInput.step = '0.5'; strokeWidthInput.value = '0';
-        strokeWidthInput.addEventListener('input', (e) => map.setPaintProperty(child.id, 'circle-stroke-width', parseFloat(e.target.value)));
+        strokeWidthInput.addEventListener('input', (e) => {
+          const value = parseFloat(e.target.value);
+          if (child.id === 'GPS / Ślad trasy') updateTrackPaintProperty('circle-stroke-width', value);
+          else map.setPaintProperty(child.id, 'circle-stroke-width', value);
+        });
         rowStroke.appendChild(strokeLabel); rowStroke.appendChild(strokeColorPicker); rowStroke.appendChild(strokeWidthInput);
         ctrlDiv.appendChild(rowStroke);
 
@@ -499,7 +598,9 @@ function autoBuildTree() {
       // Obszary
       if (child.raw.type === 'fill') {
         const outlineLayerId = `${child.id}-outline-line`;
-        if (!map.getLayer(outlineLayerId)) {
+        if (!map.getLayer(outlineLayerId) &&
+            typeof child.raw.source === 'string' &&
+            typeof child.raw['source-layer'] === 'string') {
           map.addLayer({
             id: outlineLayerId,
             source: child.raw.source,
@@ -934,12 +1035,19 @@ map.on('load', () => {
   });
 
   // Ślad GPS
-  map.addSource('gps-track', { type: 'geojson', data: 'http://localhost:8000/api/track' });
+  map.addSource('gps-track', {
+    type: 'vector',
+    tiles: [buildTrackTilesUrl('none')],
+    minzoom: 0,
+    maxzoom: 18
+  });
 
   map.addLayer({
     id: 'GPS / Ślad trasy',
     source: 'gps-track',
+    'source-layer': 'gps-track',
     type: 'circle',
+    layout: { visibility: 'none' },
     paint: {
       'circle-color': '#06b6d4',
       'circle-radius': 4.5,

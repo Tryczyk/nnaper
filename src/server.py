@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Query, HTTPException
+from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 import psycopg
 from psycopg.rows import dict_row
@@ -9,7 +10,7 @@ app = FastAPI(title="nnaper API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:8080", "http://127.0.0.1:8080"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -60,6 +61,7 @@ def get_track(days: str = Query(None)):
                     'geometry', ST_AsGeoJSON(geom)::json,
                     'properties', json_build_object(
                         'epoch_id', epoch_id,
+                        'day', timestamp::date,
                         'timestamp', timestamp,
                         'latitude', latitude,
                         'longitude', longitude,
@@ -76,6 +78,78 @@ def get_track(days: str = Query(None)):
             cur.execute(query, params)
             row = cur.fetchone()
             return row["geojson"]
+
+
+@app.get("/api/track/{z}/{x}/{y}.pbf")
+def get_track_tile(z: int, x: int, y: int, days: str = Query(None)):
+    """Zwraca dynamiczny kafelek Mapbox Vector Tile dla śladu GPS."""
+    if z < 0 or x < 0 or y < 0 or x >= 2 ** z or y >= 2 ** z:
+        raise HTTPException(status_code=400, detail="Nieprawidłowe współrzędne kafelka")
+
+    day_list = None
+    if days and days != "none":
+        day_list = [day.strip() for day in days.split(",") if day.strip()]
+        if not day_list:
+            day_list = None
+
+    where_clauses = [
+        "e.is_active = TRUE",
+        "e.geom IS NOT NULL",
+        "e.geom && ST_Transform(ST_TileEnvelope(%s, %s, %s), 4326)",
+    ]
+    params = [z, x, y]
+    if days == "none":
+        where_clauses.append("FALSE")
+    elif day_list:
+        where_clauses.append("e.timestamp::date = ANY(%s::date[])")
+        where_clauses.extend([
+            "e.timestamp >= %s::date",
+            "e.timestamp < (%s::date + INTERVAL '1 day')",
+        ])
+        params.extend([day_list, min(day_list), max(day_list)])
+
+    query = f"""
+        WITH bounds AS (
+            SELECT ST_TileEnvelope(%s, %s, %s) AS geom
+        ),
+        tile_features AS (
+            SELECT
+                e.epoch_id::text AS epoch_id,
+                e.timestamp::date::text AS day,
+                to_char(e.timestamp, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS timestamp,
+                e.latitude::float AS latitude,
+                e.longitude::float AS longitude,
+                e.terminator,
+                ST_AsMVTGeom(
+                    ST_Transform(e.geom, 3857),
+                    bounds.geom,
+                    4096,
+                    64,
+                    TRUE
+                ) AS geom
+            FROM epochs e
+            CROSS JOIN bounds
+            WHERE {' AND '.join(where_clauses)}
+        )
+        SELECT ST_AsMVT(tile_features, 'gps-track', 4096, 'geom')
+        FROM tile_features
+        WHERE geom IS NOT NULL;
+    """
+    # ST_TileEnvelope is used once for the CTE and once for the index-friendly
+    # bounding-box predicate, so both sets of placeholders are intentional.
+    params = [z, x, y] + params
+    with psycopg.connect(DB_URL) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SET LOCAL max_parallel_workers_per_gather = 0")
+            cur.execute(query, params)
+            tile = cur.fetchone()[0] or b""
+
+    return Response(
+        content=bytes(tile),
+        media_type="application/vnd.mapbox-vector-tile",
+        headers={"Cache-Control": "no-store"},
+    )
+
 
 @app.get("/api/epoch/{epoch_id}")
 def get_epoch_details(epoch_id: str):
