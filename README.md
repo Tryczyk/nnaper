@@ -1,3 +1,6 @@
+<p align="center">
+  <img src="assets/header.jpg" alt="Naper Logo" width="100%" />
+</p>
 
 # NNAPER 🗺️
 
