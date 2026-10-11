@@ -13,7 +13,7 @@ Aplikacja do przetwarzania danych lokalizacyjnych GPS w formacie **NMEA**, bezpo
 
 2. **Kafelki podkładowe OpenStreetMap (PMTiles):**
    - Profil narzędziowy w Dockerze weryfikuje obecność pliku `.osm.pbf` (w razie potrzeby pobiera go automatycznie z serwisu [Geofabrik](https://download.geofabrik.de/europe/poland.html)).
-   - Narzędzie **Planetiler** kompresuje wyciąg OSM do pojedynczego pliku kafelków wektorowych `.pmtiles` w katalogu `geojsons/`.
+   - Narzędzie **Planetiler** kompresuje wyciąg OSM do pojedynczego pliku kafelków wektorowych `.pmtiles` w katalogu `osm_data/`.
 
 3. **Parsowanie i strumieniowanie NMEA (`data/raw.txt`):**
    - Skrypt odczytuje surowe logi NMEA linia po linii, łącząc komunikaty w spójne epoki pomiarowe.
@@ -32,7 +32,7 @@ nnaper/
 ├── data/
 │   ├── raw.txt             # Surowe logi NMEA z urządzenia GPS (nieśledzone w Git)
 │   └── state.txt           # Numer ostatnio przetworzonej linii z raw.txt
-├── geojsons/               # Dane przestrzenne i wyjściowe kafelki:
+├── osm_data/               # Dane przestrzenne i wyjściowe kafelki:
 │   ├── *.osm.pbf           # Pobrany wyciąg OSM (np. pomorskie.osm.pbf, ignorowany w Git)
 │   └── *.pmtiles           # Wygenerowane kafelki wektorowe PMTiles (ignorowane w Git)
 ├── maps/

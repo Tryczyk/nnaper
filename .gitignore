@@ -1,4 +1,3 @@
-*.geojson
 *.txt
 *.pkl
 *.pyc
@@ -7,4 +6,4 @@
 *.pmtiles
 *.gz
 *.zip
-geojsons/
+osm_data/

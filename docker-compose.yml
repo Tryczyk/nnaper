@@ -18,7 +18,7 @@ services:
     container_name: nnaper_downloader
     profiles: ["tools"]
     volumes:
-      - ./geojsons:/data
+      - ./osm_data:/data
     environment:
       - OSM_FILE_NAME=${OSM_FILE_NAME:-pomorskie.osm.pbf}
     entrypoint: ["/bin/sh", "-c"]
@@ -43,7 +43,7 @@ services:
     environment:
       - JAVA_OPTS=-Xmx4g
     volumes:
-      - ./geojsons:/data
+      - ./osm_data:/data
     command: >
       --osm-path=/data/${OSM_FILE_NAME:-pomorskie.osm.pbf}
       --output=/data/pomorskie.pmtiles
