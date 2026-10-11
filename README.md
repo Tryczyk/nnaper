@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/header.jpg" alt="Naper Logo" width="100%" />
+  <img src="assets/header.png" alt="Naper Logo" width="100%" />
 </p>
 
 # NNAPER 🗺️
