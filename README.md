@@ -12,7 +12,7 @@ Aplikacja do przetwarzania danych lokalizacyjnych GPS w formacie **NMEA**, bezpo
    - W tle działa baza **PostgreSQL (PostGIS)** zainicjalizowana schematem z pliku `init_db.sql` oraz lekki serwer HTTP **Caddy** serwujący kafelki i mapę na porcie `8080`.
 
 2. **Kafelki podkładowe OpenStreetMap (PMTiles):**
-   - Profil narzędziowy w Dockerze weryfikuje obecność pliku `.osm.pbf` (w razie potrzeby pobiera go automatycznie z serwisu [Geofabrik](https://download.geofabrik.de/europe/poland.html)).
+   - Docker sam weryfikuje obecność pliku `.pmtiles` i `.osm.pbf` (w razie potrzeby pobiera go automatycznie z serwisu [Geofabrik](https://download.geofabrik.de/europe/poland.html)).
    - Narzędzie **Planetiler** kompresuje wyciąg OSM do pojedynczego pliku kafelków wektorowych `.pmtiles` w katalogu `osm_data/`.
 
 3. **Parsowanie i strumieniowanie NMEA (`data/raw.txt`):**
@@ -96,25 +96,40 @@ OSM_FILE_NAME=pomorskie.osm.pbf
 > **Uwaga:** Pliki `.pbf`, `.pmtiles`, wolumeny baz danych oraz duże pliki `data/raw.txt` są wykluczone z repozytorium Git przez `.gitignore`.
 
 ### 3. Uruchomienie infrastruktury (Docker Compose)
-Uruchom bazę danych PostGIS oraz serwer plików w tle:
+Uruchom całe środowisko w tle:
 ```bash
 docker compose up -d
 ```
-*Kontener bazy automatycznie utworzy tabele i indeksy na podstawie pliku `init_db.sql`.*
+> Kontenery automatycznie sprawdzą obecność kafelków `.pmtiles` i pliku `.osm.pbf` (pobiorą go z Geofabrik i wygenerują kafelki, jeśli ich brakuje), postawią bazę PostGIS i zainicjalizują schemat z `init_db.sql` oraz uruchomią serwer HTTP.
 
-### 4. Generowanie kafelków wektorowych (.pmtiles)
-Uruchom profil narzędziowy, który sprawdzi obecność pliku OSM (w razie potrzeby pobierze go z [Geofabrik](https://download.geofabrik.de/europe/poland.html)) i wygeneruje kafelki za pomocą Planetilera:
-```bash
-docker compose --profile tools run --rm tiles-generator
-```
-
-### 5. Przetwarzanie danych lokalizacyjnych (Python)
+### 4. Przetwarzanie danych lokalizacyjnych (Python)
 Umieść surowy plik z logami GPS w `data/raw.txt`, a następnie uruchom proces parsowania:
 ```bash
-uv run src/main.py
+uv run src/parser.py
 ```
 *Skrypt strumieniuje odczytane epoki bezpośrednio do bazy PostgreSQL, logując postęp przetwarzania w konsoli i pliku `data/state.txt`.*
 
-### 6. Podgląd mapy
+### 5. Podgląd mapy
 Otwórz przeglądarkę pod adresem:
 [http://localhost:8080/maps/tile_map.html](http://localhost:8080/maps/tile_map.html)
+
+---
+
+## Przy pracy nad bazą lub parserem
+
+W trakcie rozwijania schematu SQL (`init_db.sql`) lub modyfikacji logiki w parserze (`parser.py`), najszybszym sposobem na zresetowanie środowiska, wyczyszczenie wolumenu i załadowanie danych od nowa jest sekwencja:
+
+### Pełny reset bazy i ponowne sparsowanie logów
+```powershell
+# 1. Zatrzymanie kontenerów i usunięcie starego wolumenu danych
+docker compose down -v
+
+# 2. Uruchomienie bazy na czysto (z załadowaniem aktualnego init_db.sql)
+docker compose up -d
+
+# 3. Zresetowanie wskaźnika przetworzonych linii do zera
+Set-Content -Path "data/state.txt" -Value "0"
+
+# 4. Ponowne uruchomienie parsera
+uv run src/parser.py
+```
