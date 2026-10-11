@@ -115,6 +115,16 @@ Otwórz przeglądarkę pod adresem:
 
 ---
 
+## 6. Generowanie wykresów telemetrycznych i statystyk
+
+Aplikacja umożliwia wygenerowanie kompletnego zestawu interaktywnych wykresów w formacie HTML (Plotly) oraz raportu statystycznego z danych zapisanych w bazie PostgreSQL.
+
+### Krok 1: Instalacja zależności
+Upewnij się, że w środowisku zainstalowane są pakiety do obsługi wykresów i bazy danych:
+```bash
+uv add plotly psycopg pandas numpy
+```
+
 ## Przy pracy nad bazą lub parserem
 
 W trakcie rozwijania schematu SQL (`init_db.sql`) lub modyfikacji logiki w parserze (`parser.py`), najszybszym sposobem na zresetowanie środowiska, wyczyszczenie wolumenu i załadowanie danych od nowa jest sekwencja:
