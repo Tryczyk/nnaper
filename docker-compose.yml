@@ -1,5 +1,4 @@
 services:
-  # 1. Baza danych PostGIS z healthcheckiem
   db:
     image: postgis/postgis:16-3.4
     container_name: nnaper_db
@@ -19,7 +18,6 @@ services:
       retries: 10
     restart: unless-stopped
 
-  # 2. Backend API serwujący punkty trasy z PostGIS
   api:
     image: python:3.14-slim
     container_name: nnaper_api
@@ -39,7 +37,6 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # 3. Sprawdzanie i ewentualne pobieranie pliku PBF
   tiles-downloader:
     image: alpine:latest
     container_name: nnaper_downloader
@@ -59,7 +56,6 @@ services:
          echo '[DOCKER] PBF lub kafelki juz istnieja. Pomijam pobieranie.';
        fi"
 
-  # 4. Automatyczna kompilacja PMTiles (tylko jesli nie istnieja)
   tiles-generator:
     image: ghcr.io/onthegomap/planetiler:latest
     container_name: nnaper_planetiler
@@ -70,16 +66,12 @@ services:
       - JAVA_OPTS=-Xmx4g
     volumes:
       - ./osm_data:/data
-    entrypoint: ["/bin/sh", "-c"]
     command: >
-      "if [ ! -f /data/pomorskie.pmtiles ]; then
-         echo '[DOCKER] Generowanie kafelkow pomorskie.pmtiles...';
-         java -Xmx4g -jar /planetiler.jar --osm-path=/data/${OSM_FILE_NAME:-pomorskie.osm.pbf} --output=/data/pomorskie.pmtiles --download --force;
-       else
-         echo '[DOCKER] Kafelki pomorskie.pmtiles juz istnieja. Pomijam kompilacje.';
-       fi"
+      --osm-path=/data/${OSM_FILE_NAME:-pomorskie.osm.pbf}
+      --output=/data/pomorskie.pmtiles
+      --download
+      --force
 
-  # 5. Serwer HTTP Caddy (startuje po weryfikacji kafelkow)
   tiles-server:
     image: caddy:alpine
     container_name: nnaper_tiles_server
@@ -93,7 +85,6 @@ services:
     command: caddy file-server --root /usr/share/caddy --listen :8080 --access-log
     restart: unless-stopped
 
-  # 6. Automatyczne otwarcie przeglądarki z poziomu hosta przez WSL/Docker socket
   open-browser:
     image: alpine:latest
     container_name: nnaper_browser_launcher
