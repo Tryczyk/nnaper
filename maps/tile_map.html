@@ -11,18 +11,18 @@
 </head>
 <body>
 
-<!-- GŁÓWNY PANEL WARSTW -->
 <div id="menu" class="dock-left">
   <div class="menu-header">
     <h3>Sterowanie Warstwami</h3>
     <div class="panel-actions">
       <button class="action-btn" id="btn-switch-side" title="Przerzuć panel na drugą stronę">⇄</button>
       <button class="action-btn" id="btn-minimize" title="Zwiń / Rozwiń panel">–</button>
+      <button class="action-btn" id="btn-back-location" title="Wróć do poprzedniego widoku">←</button>
+      <button class="action-btn" id="btn-close-location" title="Zamknij lokalizację">✕</button>
     </div>
   </div>
 
   <div class="menu-body">
-    <!-- Przejście do dedykowanego trybu odtwarzacza trasy -->
     <button onclick="window.location.href='playback.html'" 
             style="width: 100%; margin-bottom: 10px; background: #0284c7; color: #fff; border: 1px solid #38bdf8; padding: 8px 12px; border-radius: 6px; font-weight: bold; cursor: pointer;">
       🎬 Przejdź do Odtwarzacza Trasy
@@ -32,7 +32,6 @@
   </div>
 </div>
 
-<!-- PANEL DETALI EPOKI (PEŁNE DANE I SATELITY) -->
 <div id="point-panel" class="dock-right">
   <div class="point-header">
     <h3>Pełne Dane Epoki & Satelity</h3>
@@ -45,10 +44,37 @@
   </div>
 </div>
 
+<div id="search-container">
+  <input type="text" id="search-input" placeholder="Szukaj adresu lub miejsca..." autocomplete="off" />
+  <div id="search-suggestions"></div>
+</div>
+
+<div id="route-planner-panel" class="route-planner-panel" aria-hidden="true">
+  <div class="route-planner-header">
+    <h3>Planowanie trasy</h3>
+    <button class="route-action-btn route-planner-back-original" id="btn-route-back-to-original" title="Wróć do pierwotnej lokalizacji" aria-label="Wróć do pierwotnej lokalizacji">←</button>
+  </div>
+  <div id="inline-route-context-menu" class="inline-route-context-menu">
+    <button id="inline-context-stop">Dodaj punkt trasy</button>
+    <button id="inline-context-avoid">Dodaj punkt unikania</button>
+  </div>
+  <div class="route-planner-navigation">
+    <button class="route-action-btn" id="btn-route-back-to-location">Wróć do poprzedniej lokalizacji</button>
+  </div>
+  <div id="route-start-suggestions" class="route-start-suggestions"></div>
+  <div id="route-planner-hint">Użyj + między punktami albo kliknij prawym przyciskiem mapę.</div>
+  <div class="route-list-section">
+    <ul id="route-planner-stops" class="route-planner-list"></ul>
+    <ul id="route-planner-avoids" class="route-planner-list route-avoid-list"></ul>
+  </div>
+  <button class="route-action-btn" id="btn-calculate-inline-route">Wyznacz trasę</button>
+  <div id="route-planner-stats"></div>
+</div>
+
 <div id="map"></div>
 
-<!-- SKRYPTY APLIKACJI -->
 <script src="layers.js"></script>
 <script src="app.js"></script>
+<script src="route-inline.js"></script>
 </body>
 </html>

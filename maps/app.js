@@ -15,10 +15,11 @@ const map = new maplibregl.Map({
   bearing: -15,
   maxPitch: 60,
   fadeDuration: 0,
+  attributionControl: false,
   style: MAP_STYLE
 });
 
-let navControl = new maplibregl.NavigationControl({ visualizePitch: true });
+let navControl = new maplibregl.NavigationControl({ showCompass: true });
 map.addControl(navControl, 'top-right');
 
 function getLayerColor(layer) {
@@ -685,6 +686,25 @@ const menuEl = document.getElementById('menu');
 const btnMin = document.getElementById('btn-minimize');
 const pointPanelEl = document.getElementById('point-panel');
 const btnClosePoint = document.getElementById('btn-close-point');
+const btnBackLocation = document.getElementById('btn-back-location');
+const btnCloseLocation = document.getElementById('btn-close-location');
+const menuTitle = menuEl.querySelector('.menu-header h3');
+const menuBody = menuEl.querySelector('.menu-body');
+const layerMenuBodyHTML = menuBody.innerHTML;
+const layerMenuTitle = menuTitle.innerText;
+let previousSearchCamera = null;
+btnBackLocation.style.display = 'none';
+btnCloseLocation.style.display = 'none';
+
+function restoreLayerMenu() {
+  menuTitle.innerText = layerMenuTitle;
+  menuBody.innerHTML = layerMenuBodyHTML;
+  btnSwitch.style.display = '';
+  btnMin.style.display = '';
+  btnBackLocation.style.display = 'none';
+  btnCloseLocation.style.display = 'none';
+  autoBuildTree();
+}
 
 function minimizeMenu() {
   menuEl.classList.add('minimized');
@@ -711,9 +731,31 @@ btnSwitch.addEventListener('click', () => {
   pointPanelEl.classList.toggle('dock-right', !isLeft);
 
   map.removeControl(navControl);
-  navControl = new maplibregl.NavigationControl({ visualizePitch: true });
+  navControl = new maplibregl.NavigationControl({ showCompass: true });
   map.addControl(navControl, isLeft ? 'top-left' : 'top-right');
 });
+
+function closeLocation(restoreCamera) {
+  restoreLayerMenu();
+  if (searchMarker) {
+    searchMarker.remove();
+    searchMarker = null;
+  }
+  if (restoreCamera && previousSearchCamera) {
+    map.easeTo(previousSearchCamera);
+  }
+  previousSearchCamera = null;
+  searchInput.value = '';
+  searchCompleted = false;
+  searchResults = [];
+  suggestionsBox.innerHTML = '';
+  suggestionsBox.style.display = 'none';
+}
+
+window.restoreOriginalSearchLocation = () => closeLocation(true);
+
+btnBackLocation.addEventListener('click', () => closeLocation(true));
+btnCloseLocation.addEventListener('click', () => closeLocation(false));
 
 btnClosePoint.addEventListener('click', () => {
   pointPanelEl.classList.remove('active');
@@ -1072,3 +1114,254 @@ map.on('load', () => {
 
   autoBuildTree();
 });
+
+/* ------------------- WYSZUKIWARKA MIEJSC I GEODECODROWANIE ------------------- */
+const searchInput = document.getElementById('search-input');
+const suggestionsBox = document.getElementById('search-suggestions');
+let searchMarker = null;
+let searchTimeout = null;
+let searchRequestId = 0;
+let searchAbortController = null;
+let searchResults = [];
+let highlightedSearchIndex = -1;
+let searchCompleted = false;
+
+function getPolishPlaceLabel(value) {
+  if (!value) return value;
+  return String(value)
+    .replace(/\bPomeranian Voivodeship\b/gi, 'Pomorskie')
+    .replace(/\bPomeranian Province\b/gi, 'Pomorskie')
+    .replace(/\bwojewództwo pomorskie\b/gi, 'Pomorskie')
+    .replace(/\bPoland\b/gi, 'Polska');
+}
+
+function renderSearchResults(results) {
+  suggestionsBox.innerHTML = '';
+  searchResults = results.slice(0, 6);
+  highlightedSearchIndex = -1;
+
+  searchResults.forEach((place, index) => {
+    const div = document.createElement('div');
+    div.className = 'suggestion-item';
+    div.innerText = place.display_name;
+    div.addEventListener('click', () => selectPlace(place));
+    div.addEventListener('mouseenter', () => {
+      highlightedSearchIndex = index;
+      updateHighlightedSearchResult();
+    });
+    suggestionsBox.appendChild(div);
+  });
+
+  suggestionsBox.style.display = searchResults.length ? 'block' : 'none';
+}
+
+function updateHighlightedSearchResult() {
+  [...suggestionsBox.children].forEach((item, index) => {
+    item.classList.toggle('active', index === highlightedSearchIndex);
+  });
+}
+
+searchInput.addEventListener('focus', () => {
+  if (searchCompleted) {
+    searchInput.value = '';
+    suggestionsBox.innerHTML = '';
+    suggestionsBox.style.display = 'none';
+    searchResults = [];
+    highlightedSearchIndex = -1;
+    searchCompleted = false;
+    restoreLayerMenu();
+  }
+});
+
+searchInput.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    if (!searchResults.length) return;
+    e.preventDefault();
+    const direction = e.key === 'ArrowDown' ? 1 : -1;
+    highlightedSearchIndex = (highlightedSearchIndex + direction + searchResults.length) % searchResults.length;
+    updateHighlightedSearchResult();
+    suggestionsBox.children[highlightedSearchIndex].scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'Enter' && searchResults.length) {
+    e.preventDefault();
+    selectPlace(searchResults[highlightedSearchIndex >= 0 ? highlightedSearchIndex : 0]);
+  } else if (e.key === 'Escape') {
+    suggestionsBox.style.display = 'none';
+  }
+});
+
+// Debounce dla podpowiedzi (żeby nie odpytywać API przy każdym wciśnięciu klawisza)
+searchInput.addEventListener('input', (e) => {
+  clearTimeout(searchTimeout);
+  const requestId = ++searchRequestId;
+  if (searchAbortController) searchAbortController.abort();
+  const query = e.target.value.trim();
+
+  if (query.length < 1) {
+    suggestionsBox.style.display = 'none';
+    suggestionsBox.innerHTML = '';
+    return;
+  }
+
+  searchTimeout = setTimeout(async () => {
+    try {
+      const query = searchInput.value.trim();
+      if (query.length < 1) {
+        suggestionsBox.style.display = 'none';
+        suggestionsBox.innerHTML = '';
+        return;
+      }
+
+      const pomorskieBbox = '14.1,53.9,19.9,55.9';
+      const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=50&bbox=${pomorskieBbox}`;
+      searchAbortController = new AbortController();
+      const response = await fetch(url, { signal: searchAbortController.signal });
+      if (!response.ok) throw new Error(`Błąd wyszukiwania: ${response.status}`);
+      const data = await response.json();
+      if (requestId !== searchRequestId) return;
+      const uniqueResults = new Map();
+      (Array.isArray(data.features) ? data.features : []).forEach(feature => {
+        const properties = feature.properties || {};
+        const coordinates = feature.geometry && feature.geometry.coordinates;
+        if (!Array.isArray(coordinates) || coordinates.length < 2) return;
+        const addressParts = [
+          properties.street && `${properties.street}${properties.housenumber ? ` ${properties.housenumber}` : ''}`,
+          properties.city || properties.town || properties.village,
+          getPolishPlaceLabel(properties.state),
+          getPolishPlaceLabel(properties.country)
+        ].filter(Boolean);
+
+        const place = {
+          ...properties,
+          state: getPolishPlaceLabel(properties.state),
+          country: getPolishPlaceLabel(properties.country),
+          name: properties.name || '',
+          display_name: [properties.name, ...addressParts]
+            .filter((value, index, values) => value && values.indexOf(value) === index)
+            .join(', '),
+          lon: coordinates[0],
+          lat: coordinates[1],
+          address: {
+            road: properties.street,
+            house_number: properties.housenumber,
+            city: properties.city || properties.town || properties.village,
+            state: getPolishPlaceLabel(properties.state),
+            country: getPolishPlaceLabel(properties.country),
+            postcode: properties.postcode
+          }
+        };
+        const key = `${place.osm_type || ''}/${place.osm_id || ''}/${place.lat}/${place.lon}`;
+        uniqueResults.set(key, place);
+      });
+      const exactQueryParts = query.toLocaleLowerCase('pl-PL').split(/\s+/).filter(Boolean);
+      const results = [...uniqueResults.values()].filter(place =>
+        String(place.countrycode || place.country_code || '').toLocaleUpperCase('pl-PL') === 'PL' &&
+        /pomorsk|pomeranian/.test(String(place.state || '').toLocaleLowerCase('pl-PL')) &&
+        exactQueryParts.every(part => place.display_name.toLocaleLowerCase('pl-PL').includes(part))
+      );
+
+      if (results.length === 0) {
+        searchResults = [];
+        suggestionsBox.style.display = 'none';
+        return;
+      }
+
+      renderSearchResults(results);
+    } catch (err) {
+      if (err.name === 'AbortError') return;
+      console.error('Błąd wyszukiwania miejsca:', err);
+    }
+  }, 300);
+});
+
+// Ukrywanie podpowiedzi po kliknięciu poza wyszukiwarkę
+document.addEventListener('click', (e) => {
+  if (!document.getElementById('search-container').contains(e.target)) {
+    suggestionsBox.style.display = 'none';
+    searchCompleted = Boolean(searchInput.value.trim());
+  }
+});
+
+function selectPlace(place) {
+  searchInput.value = place.display_name;
+  suggestionsBox.style.display = 'none';
+  searchCompleted = true;
+
+  const lon = parseFloat(place.lon);
+  const lat = parseFloat(place.lat);
+
+  if (!previousSearchCamera) {
+    previousSearchCamera = {
+      center: map.getCenter().toArray(),
+      zoom: map.getZoom(),
+      bearing: map.getBearing(),
+      pitch: map.getPitch(),
+      duration: 1200
+    };
+  }
+
+  // Przesunięcie kamery na wybrane miejsce
+  map.flyTo({
+    center: [lon, lat],
+    zoom: 16,
+    duration: 1200
+  });
+
+  // Dodanie lub aktualizacja pinezki wyszukiwania
+  if (searchMarker) {
+    searchMarker.setLngLat([lon, lat]);
+  } else {
+    searchMarker = new maplibregl.Marker({ color: '#f59e0b' })
+      .setLngLat([lon, lat])
+      .addTo(map);
+  }
+
+  // Wyświetlenie pełnych informacji w panelu bocznym (wykorzystujemy ten sam panel detali)
+  displayPlaceDetails(place);
+}
+
+function displayPlaceDetails(place) {
+  const addr = place.address || {};
+  const street = addr.road || addr.street || addr.pedestrian;
+  const streetAddress = street && `${street}${addr.house_number ? ` ${addr.house_number}` : ''}`;
+  const locationName = streetAddress || place.name || place.display_name;
+  const city = addr.city || addr.town || addr.village || addr.municipality;
+  const details = [
+    ['Miejscowość', city],
+    ['Województwo', addr.state || addr.province],
+    ['Państwo', addr.country],
+    ['Kod pocztowy', addr.postcode],
+    ['Szerokość', place.lat],
+    ['Długość', place.lon],
+    ['Typ obiektu', place.type || place.osm_value],
+    ['OSM ID', place.osm_id]
+  ].filter(([, value]) => {
+    if (value === undefined || value === null || value === '') return false;
+    return !/^(brak|nieznany|unknown|n\/a)$/i.test(String(value).trim());
+  });
+
+  menuTitle.innerText = locationName;
+  menuBody.innerHTML = '';
+  btnSwitch.style.display = 'none';
+  btnMin.style.display = 'none';
+  btnBackLocation.style.display = '';
+  btnCloseLocation.style.display = '';
+  const table = document.createElement('table');
+  table.className = 'kv-table';
+  details.forEach(([label, value]) => {
+    const row = table.insertRow();
+    row.insertCell().innerText = label;
+    row.insertCell().innerText = String(value);
+  });
+  menuBody.appendChild(table);
+  const routeButton = document.createElement('button');
+  routeButton.className = 'route-action-btn';
+  routeButton.innerText = 'Wyznacz trasę';
+  routeButton.addEventListener('click', () => {
+    localStorage.setItem('nnaper-route-destination', JSON.stringify(place));
+    menuEl.classList.add('route-planner-open');
+    window.dispatchEvent(new CustomEvent('nnaper-route-destination-selected', { detail: place }));
+  });
+  menuBody.appendChild(routeButton);
+  pointPanelEl.classList.remove('active');
+  expandMenu();
+}

@@ -37,6 +37,31 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  osrm:
+    image: ghcr.io/project-osrm/osrm-backend:latest
+    container_name: nnaper_osrm
+    volumes:
+      - ./osm_data:/data
+    ports:
+      - "5000:5000"
+    environment:
+      - OSM_FILE_NAME=${OSM_FILE_NAME:-pomorskie.osm.pbf}
+    entrypoint: ["/bin/sh", "-c"]
+    command: >
+      "set -e;
+       PBF=/data/$${OSM_FILE_NAME};
+       BASE=$${PBF%.osm.pbf};
+       if [ ! -f $${BASE}.osrm.mldgr ]; then
+         osrm-extract -p /opt/car.lua $${PBF};
+         osrm-partition $${BASE}.osrm;
+         osrm-customize $${BASE}.osrm;
+       fi;
+       osrm-routed --algorithm mld $${BASE}.osrm"
+    depends_on:
+      tiles-downloader:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
   tiles-downloader:
     image: alpine:latest
     container_name: nnaper_downloader

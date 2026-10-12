@@ -119,6 +119,10 @@ każdego miesiąca (`?days=YYYY-MM-DD,...`), a poszczególne dni są filtrowane
 lokalnie w MapLibre. Zmiana zaznaczenia miesiąca lub dnia przełącza widoczność
 bez regenerowania ani przeładowywania kafelków pozostałych miesięcy.
 
+Po wybraniu lokalizacji można przejść do planera trasy. Planer korzysta z
+lokalnej usługi OSRM uruchamianej przez Docker Compose (`localhost:5000`) i
+pozwala ustawić punkt startowy, cel oraz punkty pośrednie.
+
 ---
 
 ## 6. Generowanie wykresów
