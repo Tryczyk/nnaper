@@ -133,7 +133,6 @@ async function searchInlinePoint(input, point, suggestions) {
         input.value = place.display_name;
         suggestions.innerHTML = '';
         routePlannerHint.innerText = 'Punkt wybrany.';
-        map.flyTo({ center: [place.lon, place.lat], zoom: 14 });
         renderInlineRouteLists();
         renderInlineRouteMarkers();
         scheduleInlineRouteCalculation();
@@ -459,7 +458,6 @@ async function calculateInlineRoute() {
   routePlannerStats.innerText = 'Wyznaczanie trasy...';
   clearInlineRouteLayer();
   const routePoints = inlineRouteState.points.filter(point => point.place);
-  const bounds = new maplibregl.LngLatBounds();
   const segmentRoutes = [];
 
   for (let index = 0; index < points.length - 1; index += 1) {
@@ -522,7 +520,6 @@ async function calculateInlineRoute() {
         }
       });
 
-      route.geometry.coordinates.forEach(coord => bounds.extend(coord));
       bringInlineRouteLayersToFront();
 
       const distance = segmentRoutes.reduce((total, item) => total + Number(item.distance || 0), 0);
@@ -537,9 +534,6 @@ async function calculateInlineRoute() {
     }
   }
 
-  if (segmentRoutes.length > 0 && !bounds.isEmpty()) {
-    map.fitBounds(bounds, { padding: 90, duration: 800, maxZoom: 16 });
-  }
 }
 
 const storedInlineDestination = JSON.parse(localStorage.getItem('nnaper-route-destination') || 'null');
