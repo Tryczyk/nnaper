@@ -51,6 +51,7 @@ function closeInlineRoutePlanner() {
   document.getElementById('menu').classList.remove('route-planner-open');
   if (routeStartSuggestions) routeStartSuggestions.innerHTML = '';
   clearInlineRouteLayer();
+  clearInlineRouteMarkers();
 }
 
 window.addEventListener('nnaper-route-destination-selected', event => {
@@ -288,7 +289,7 @@ function moveInlinePoint(index, offset) {
 }
 
 function renderInlineRouteMarkers() {
-  document.querySelectorAll('.inline-route-marker').forEach(marker => marker.remove());
+  clearInlineRouteMarkers();
   const routePoints = inlineRouteState.points.filter(point => point.place);
   const markerPlaces = [
     ...inlineRouteState.points.filter(point => point.place).map(point => ({ place: point.place, type: point.type })),
@@ -307,6 +308,10 @@ function renderInlineRouteMarkers() {
       : type === 'start' ? 'Start' : type === 'destination' ? 'Cel' : 'Punkt trasy';
     marker.getElement().style.cursor = 'default';
   });
+}
+
+function clearInlineRouteMarkers() {
+  document.querySelectorAll('.inline-route-marker').forEach(marker => marker.remove());
 }
 
 function clearInlineRouteLayer() {
