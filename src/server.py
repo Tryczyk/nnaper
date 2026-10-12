@@ -4,7 +4,6 @@ from fastapi.middleware.cors import CORSMiddleware
 import psycopg
 from psycopg.rows import dict_row
 import os
-import logging
 
 app = FastAPI(title="nnaper API")
 
@@ -63,7 +62,9 @@ def get_track(days: str = Query(None)):
                         'day', timestamp::date,
                         'timestamp', timestamp,
                         'latitude', round(ST_Y(geom)::numeric, 6),
-                        'longitude', round(ST_X(geom)::numeric, 6)
+                        'longitude', round(ST_X(geom)::numeric, 6),
+                        'altitude', altitude,
+                        'speed_kmh', speed_kmh
                     )
                 )
             ), '[]'::json)
@@ -150,53 +151,37 @@ def get_track_tile(z: int, x: int, y: int, days: str = Query(None)):
 def get_epoch_details(epoch_id: str):
     query = """
     SELECT json_build_object(
-        'epoch', (
-            SELECT json_build_object(
-                'epoch_id', e.epoch_id,
-                'profile_id', e.profile_id,
-                'timestamp', e.timestamp,
-                'latitude', round(ST_Y(e.geom)::numeric, 6),
-                'longitude', round(ST_X(e.geom)::numeric, 6),
-                'geom', ST_AsGeoJSON(e.geom)::json
-            )
-            FROM epochs e
-            WHERE e.epoch_id = %(eid)s
-        ),
-        'profile', (SELECT to_jsonb(p) FROM epochs e JOIN profiles p ON p.profile_id = e.profile_id WHERE e.epoch_id = %(eid)s),
-        'user', (SELECT json_build_object('user_id', u.user_id, 'username', u.username, 'email', u.email, 'created_at', u.created_at)
-                 FROM epochs e JOIN profiles p ON p.profile_id = e.profile_id JOIN users u ON u.user_id = p.user_id WHERE e.epoch_id = %(eid)s),
-        'sentences', COALESCE((
-            SELECT json_agg(
-                json_build_object(
-                    'sentence_id', s.sentence_id,
-                    'raw', s.raw,
-                    'checksum', s.checksum,
-                    'parts_count', s.parts_count,
-                    'gsensord', (SELECT to_jsonb(g) FROM gsensord g WHERE g.sentence_id = s.sentence_id),
-                    'gprmc', (SELECT to_jsonb(r) FROM gprmc r WHERE r.sentence_id = s.sentence_id),
-                    'gpvtg', (SELECT to_jsonb(v) FROM gpvtg v WHERE v.sentence_id = s.sentence_id),
-                    'gpgga', (SELECT to_jsonb(gga) FROM gpgga gga WHERE gga.sentence_id = s.sentence_id),
-                    'gpgsa', (SELECT to_jsonb(gsa) FROM gpgsa gsa WHERE gsa.sentence_id = s.sentence_id),
-                    'gpgsv', (
-                        SELECT json_build_object(
-                            'meta', to_jsonb(gsv),
-                            'satellites', COALESCE((SELECT json_agg(to_jsonb(sat)) FROM satellite sat WHERE sat.sentence_id = s.sentence_id), '[]'::json)
-                        )
-                        FROM gpgsv gsv WHERE gsv.sentence_id = s.sentence_id
-                    )
-                )
-            )
-            FROM sentence s WHERE s.epoch_id = %(eid)s
-        ), '[]'::json)
-    ) AS full_data;
+        'epoch_id', e.epoch_id,
+        'profile_id', e.profile_id,
+        'timestamp', e.timestamp,
+        'latitude', round(ST_Y(e.geom)::numeric, 6),
+        'longitude', round(ST_X(e.geom)::numeric, 6),
+        'altitude', e.altitude,
+        'speed_kmh', e.speed_kmh,
+        'g_x', e.g_x,
+        'g_y', e.g_y,
+        'g_z', e.g_z,
+        'satellites', COALESCE(
+            (SELECT json_agg(json_build_object(
+                'prn', sat.prn,
+                'elevation', sat.elevation,
+                'azimuth', sat.azimuth
+            ) ORDER BY sat.prn)
+             FROM satellite sat
+             WHERE sat.epoch_id = e.epoch_id),
+            '[]'::json
+        )
+    ) AS epoch
+    FROM epochs e
+    WHERE e.epoch_id = %(eid)s;
     """
     with psycopg.connect(DB_URL) as conn:
         with conn.cursor(row_factory=dict_row) as cur:
             cur.execute(query, {"eid": epoch_id})
             row = cur.fetchone()
-            if not row or not row["full_data"] or not row["full_data"]["epoch"]:
+            if not row or not row["epoch"]:
                 return {"error": "Epoch not found"}
-            return row["full_data"]
+            return row["epoch"]
 
 
 @app.get("/api/playback-day")
@@ -208,54 +193,9 @@ def get_playback_day(day: str = Query(...)):
         to_char(e.timestamp, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS timestamp,
         round(ST_Y(e.geom)::numeric, 6) AS lat,
         round(ST_X(e.geom)::numeric, 6) AS lon,
-        COALESCE(
-            (
-                SELECT (v.speed_kmh)::float
-                FROM sentence s
-                JOIN gpvtg v ON v.sentence_id = s.sentence_id
-                WHERE s.epoch_id = e.epoch_id
-                LIMIT 1
-            ),
-            (
-                SELECT (r.speed_knots * 1.852)::float
-                FROM sentence s
-                JOIN gprmc r ON r.sentence_id = s.sentence_id
-                WHERE s.epoch_id = e.epoch_id
-                LIMIT 1
-            ),
-            0.0
-        ) AS speed_kmh,
-        COALESCE(
-            (
-                SELECT (v.course_true)::float
-                FROM sentence s
-                JOIN gpvtg v ON v.sentence_id = s.sentence_id
-                WHERE s.epoch_id = e.epoch_id
-                LIMIT 1
-            ),
-            (
-                SELECT (r.course)::float
-                FROM sentence s
-                JOIN gprmc r ON r.sentence_id = s.sentence_id
-                WHERE s.epoch_id = e.epoch_id
-                LIMIT 1
-            ),
-            0.0
-        ) AS course,
-        COALESCE(
-            (
-                SELECT json_agg(json_build_object(
-                    'prn', sat.prn,
-                    'elevation', sat.elevation,
-                    'azimuth', sat.azimuth,
-                    'snr', sat.snr
-                ))
-                FROM sentence s
-                JOIN satellite sat ON sat.sentence_id = s.sentence_id
-                WHERE s.epoch_id = e.epoch_id
-            ),
-            '[]'::json
-        ) AS satellites
+        e.altitude,
+        e.speed_kmh,
+        COALESCE((SELECT json_agg(to_jsonb(sat)) FROM satellite sat WHERE sat.epoch_id = e.epoch_id), '[]'::json) AS satellites
     FROM epochs e
     WHERE e.timestamp >= %s::date
       AND e.timestamp < (%s::date + INTERVAL '1 day')

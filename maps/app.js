@@ -826,7 +826,7 @@ function renderSatelliteRays() {
       const dist = RAY_DISTANCE_DEG_LOCAL * Math.cos((el * Math.PI) / 180.0);
       satLon = pointLon + dist * Math.sin(azRad) * 1.5;
       satLat = pointLat + dist * Math.cos(azRad);
-      label = `PRN ${sat.prn}\n(${sat.elevation || 0}°, ${sat.snr || 0}dB)`;
+      label = `PRN ${sat.prn}\n(${sat.elevation || 0}°)`;
     } else {
       const sub = computeSubSatellitePoint(pointLon, pointLat, sat.azimuth, sat.elevation || 0);
       satLon = sub.lon;
@@ -842,7 +842,7 @@ function renderSatelliteRays() {
         type: 'LineString',
         coordinates: [[pointLon, pointLat], [satLon, satLat]]
       },
-      properties: { prn: sat.prn, snr: sat.snr, elevation: sat.elevation }
+      properties: { prn: sat.prn, elevation: sat.elevation }
     });
 
     pointFeatures.push({
@@ -851,7 +851,7 @@ function renderSatelliteRays() {
         type: 'Point',
         coordinates: [satLon, satLat]
       },
-      properties: { label, prn: sat.prn, snr: sat.snr }
+      properties: { label, prn: sat.prn }
     });
   });
 
@@ -882,21 +882,8 @@ async function loadPointFullDetails(epochId) {
     const data = await res.json();
     if (data.error) throw new Error(data.error);
 
-    const e = data.epoch || {};
-    const p = data.profile || {};
-    const u = data.user || {};
-    const sentences = data.sentences || [];
-
-    const allSatellites = [];
-    sentences.forEach(s => {
-      if (s.gpgsv && s.gpgsv.satellites) {
-        s.gpgsv.satellites.forEach(sat => {
-          if (!allSatellites.some(item => item.prn === sat.prn)) {
-            allSatellites.push(sat);
-          }
-        });
-      }
-    });
+    const e = data;
+    const allSatellites = data.satellites || [];
 
     if (e.longitude && e.latitude) {
       activeSatelliteContext = {
@@ -922,6 +909,9 @@ async function loadPointFullDetails(epochId) {
           <tr><td>epoch_id</td><td>${e.epoch_id}</td></tr>
           <tr><td>timestamp</td><td>${e.timestamp || 'NULL'}</td></tr>
           <tr><td>latitude / longitude</td><td>${Number(e.latitude).toFixed(6)}, ${Number(e.longitude).toFixed(6)}</td></tr>
+          <tr><td>altitude</td><td>${e.altitude ?? 'NULL'} m</td></tr>
+          <tr><td>speed_kmh</td><td>${e.speed_kmh ?? '0'} km/h</td></tr>
+          <tr><td>gsensord</td><td>X: ${e.g_x ?? 'NULL'}, Y: ${e.g_y ?? 'NULL'}, Z: ${e.g_z ?? 'NULL'}</td></tr>
         </table>
       </div>
 
@@ -934,7 +924,7 @@ async function loadPointFullDetails(epochId) {
       allSatellites.forEach(sat => {
         html += `
           <span class="sat-badge">
-            <strong style="color:#38bdf8;">PRN ${sat.prn}:</strong> El: ${sat.elevation}°, Az: ${sat.azimuth}°, SNR: ${sat.snr}dB
+            <strong style="color:#38bdf8;">PRN ${sat.prn}:</strong> El: ${sat.elevation}°, Az: ${sat.azimuth}°
           </span>
         `;
       });
@@ -946,60 +936,7 @@ async function loadPointFullDetails(epochId) {
         </div>
       </div>
 
-      <div class="section-box">
-        <h4>Tabela PROFILES & USERS</h4>
-        <table class="kv-table">
-          <tr><td>profile_id / Nazwa</td><td>${p.profile_id} (<strong>${p.name}</strong>)</td></tr>
-          <tr><td>user_id / Użytkownik</td><td>${u.user_id} (<strong>${u.username}</strong>)</td></tr>
-          <tr><td>Email</td><td>${u.email}</td></tr>
-        </table>
-      </div>
     `;
-
-    if (sentences.length > 0) {
-      html += `<div class="section-box"><h4>Ramki NMEA i Sensory (${sentences.length})</h4>`;
-      sentences.forEach((s, idx) => {
-        html += `
-          <div style="margin-bottom:8px; border-bottom:1px dashed #334155; padding-bottom:6px;">
-            <div style="font-family:monospace; color:#38bdf8; font-size:11px; word-break:break-all;">#${idx+1}: ${s.raw || ''}</div>
-            <div style="font-size:10px; color:#64748b;">Checksum: ${s.checksum} | Parts: ${s.parts_count} | sentence_id: ${s.sentence_id}</div>
-        `;
-
-        if (s.gsensord) {
-          html += `<table class="kv-table">
-            <tr><td>GSENSORD</td><td>X: ${s.gsensord.g_x}, Y: ${s.gsensord.g_y}, Z: ${s.gsensord.g_z}</td></tr>
-          </table>`;
-        }
-        if (s.gprmc) {
-          html += `<table class="kv-table">
-            <tr><td>GPRMC</td><td>Date: ${s.gprmc.date}, Time: ${s.gprmc.time_utc}, Status: ${s.gprmc.status}, Speed: ${s.gprmc.speed_knots}kt, Course: ${s.gprmc.course}°, Mode: ${s.gprmc.mode}</td></tr>
-          </table>`;
-        }
-        if (s.gpgga) {
-          html += `<table class="kv-table">
-            <tr><td>GPGGA</td><td>Time: ${s.gpgga.time_utc}, Fix: ${s.gpgga.fix_quality}, Sats: ${s.gpgga.satellites_used}, HDOP: ${s.gpgga.hdop}, Alt: ${s.gpgga.altitude}${s.gpgga.altitude_units}, Geoid: ${s.gpgga.geoid_separation}${s.gpgga.geoid_separation_units}</td></tr>
-          </table>`;
-        }
-        if (s.gpvtg) {
-          html += `<table class="kv-table">
-            <tr><td>GPVTG</td><td>True: ${s.gpvtg.course_true}°, Mag: ${s.gpvtg.course_magnetic}°, Spd: ${s.gpvtg.speed_kmh}km/h (${s.gpvtg.speed_knots}kt), Mode: ${s.gpvtg.mode}</td></tr>
-          </table>`;
-        }
-        if (s.gpgsa) {
-          html += `<table class="kv-table">
-            <tr><td>GPGSA</td><td>Mode1: ${s.gpgsa.mode1}, Mode2: ${s.gpgsa.mode2}, PDOP: ${s.gpgsa.pdop}, HDOP: ${s.gpgsa.hdop}, VDOP: ${s.gpgsa.vdop}</td></tr>
-          </table>`;
-        }
-        if (s.gpgsv && s.gpgsv.meta) {
-          html += `<table class="kv-table">
-            <tr><td>GPGSV</td><td>Msg ${s.gpgsv.meta.message_number}/${s.gpgsv.meta.total_messages}, In view: ${s.gpgsv.meta.satellites_in_view}</td></tr>
-          </table>`;
-        }
-
-        html += `</div>`;
-      });
-      html += `</div>`;
-    }
 
     content.innerHTML = html;
 

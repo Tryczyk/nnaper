@@ -71,7 +71,6 @@
 <div id="hud-panel">
   <div class="hud-row"><span>Godzina:</span><span id="hud-time" class="hud-val">--:--:--</span></div>
   <div class="hud-row"><span>Prędkość:</span><span id="hud-speed" class="hud-val">0.0 km/h</span></div>
-  <div class="hud-row"><span>Kurs:</span><span id="hud-course" class="hud-val">0°</span></div>
   <div class="hud-row"><span>Dystans dnia:</span><span id="hud-dist" class="hud-val">0.0 km</span></div>
   <div class="hud-row"><span>Średnia prędkość:</span><span id="hud-avg-speed" class="hud-val">0.0 km/h</span></div>
   <div class="hud-row"><span>Satelity:</span><span id="hud-sats" class="hud-val">0</span></div>
@@ -303,12 +302,9 @@
     }
 
     const markerEl = carMarker.getElement();
-    markerEl.style.transform = `rotate(${pt.course - 90}deg)`;
-
     const d = new Date(pt.timestamp);
     document.getElementById('hud-time').innerText = d.toTimeString().split(' ')[0];
     document.getElementById('hud-speed').innerText = `${(pt.speed_kmh || 0).toFixed(1)} km/h`;
-    document.getElementById('hud-course').innerText = `${Math.round(pt.course || 0)}°`;
     document.getElementById('hud-sats').innerText = pt.satellites ? pt.satellites.length : 0;
     document.getElementById('hud-progress-info').innerText = `${index + 1} / ${trackData.length} epok`;
     document.getElementById('timeline-slider').value = index;

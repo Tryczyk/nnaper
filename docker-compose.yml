@@ -91,11 +91,14 @@ services:
       - JAVA_OPTS=-Xmx4g
     volumes:
       - ./osm_data:/data
+    entrypoint: ["/bin/sh", "-c"]
     command: >
-      --osm-path=/data/${OSM_FILE_NAME:-pomorskie.osm.pbf}
-      --output=/data/pomorskie.pmtiles
-      --download
-      --force
+      "if [ -f /data/pomorskie.pmtiles ] && [ \"$(head -c 7 /data/pomorskie.pmtiles)\" = 'PMTiles' ]; then
+         echo '[DOCKER] Poprawne archiwum /data/pomorskie.pmtiles juz istnieje. Pomijam Planetiler.';
+         exit 0;
+       fi;
+       echo '[DOCKER] Brak poprawnego archiwum PMTiles. Uruchamiam Planetiler.';
+       exec java -cp @/app/jib-classpath-file com.onthegomap.planetiler.Main --osm-path=/data/$${OSM_FILE_NAME:-pomorskie.osm.pbf} --output=/data/pomorskie.pmtiles --download"
 
   tiles-server:
     image: caddy:alpine

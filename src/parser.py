@@ -1,7 +1,5 @@
 from datetime import datetime, timezone
-import json
 import math
-from pathlib import Path
 import uuid
 import psycopg
 
@@ -47,12 +45,7 @@ def to_float_or_none(v):
 
 
 def split_line(raw_line: str):
-    checksum = None
-    cleaned = raw_line
-    if "*" in raw_line:
-        cleaned, checksum = raw_line.split("*", 1)
-    parts = cleaned.split(",")
-    return parts, checksum, len(parts)
+    return raw_line.split("*", 1)[0].split(",")
 
 
 def get_part(parts, index):
@@ -62,15 +55,12 @@ def get_part(parts, index):
 
 
 class RawEpoch:
-    __slots__ = ['terminator', 'gsensord', 'gprmc', 'gpvtg', 'gpgga', 'gpgsa', 'gpgsvs']
+    __slots__ = ['gsensord', 'gprmc', 'gpgga', 'gpgsvs']
 
     def __init__(self):
-        self.terminator = None
         self.gsensord = None
         self.gprmc = None
-        self.gpvtg = None
         self.gpgga = None
-        self.gpgsa = None
         self.gpgsvs = []
 
 
@@ -81,21 +71,8 @@ def resolve_and_qualify_epoch(
     max_speed_kmh: float = 500.0,
 ):
 
-    # Odczyt danych z GPRMC:
-    # (s_raw, s_chk, s_cnt, time_val, status, lat, lat_hem, lon, lon_hem, spd, crs, date_val, mode)
-    rmc_time = epoch.gprmc[3] if epoch.gprmc else None
-    rmc_status = epoch.gprmc[4] if epoch.gprmc else None
-    rmc_lat = epoch.gprmc[5] if epoch.gprmc else None
-    rmc_lon = epoch.gprmc[7] if epoch.gprmc else None
-    rmc_date = epoch.gprmc[11] if epoch.gprmc else None
-
-    # Odczyt danych z GPGGA:
-    # (s_raw, s_chk, s_cnt, gga_time, lat, lat_hem, lon, lon_hem, fix_q, sats_u, hdop, ...)
-    gga_time = epoch.gpgga[3] if epoch.gpgga else None
-    gga_lat = epoch.gpgga[4] if epoch.gpgga else None
-    gga_lon = epoch.gpgga[6] if epoch.gpgga else None
-    gga_fix_q = epoch.gpgga[8] if epoch.gpgga else None
-    gga_hdop = epoch.gpgga[10] if epoch.gpgga else None
+    rmc_time, rmc_status, rmc_lat, rmc_lon, rmc_date = epoch.gprmc or (None,) * 5
+    gga_time, gga_lat, gga_lon, gga_fix_q, gga_hdop, altitude = epoch.gpgga or (None,) * 6
 
     # 1. Złożenie i walidacja dokładnej daty oraz godziny
     chosen_time = rmc_time or gga_time
@@ -107,7 +84,7 @@ def resolve_and_qualify_epoch(
         return None
 
     # 2. Walidacja statusu GPRMC
-    if epoch.gprmc and rmc_status != 'A':
+    if rmc_status is not None and rmc_status != 'A':
         return None
 
     # 3. Walidacja szerokości i długości geograficznej
@@ -140,6 +117,7 @@ def resolve_and_qualify_epoch(
     if chosen_lat is None or chosen_lon is None:
         return None
 
+    speed_kmh = 0.0
     if previous_point is not None:
         previous_timestamp, previous_lat, previous_lon = previous_point
         elapsed_seconds = (epoch_timestamp - previous_timestamp).total_seconds()
@@ -167,25 +145,18 @@ def resolve_and_qualify_epoch(
     chosen_lon = round(chosen_lon, 6)
     geom_wkt = f"SRID=4326;POINT({chosen_lon} {chosen_lat})"
 
-    return chosen_lat, chosen_lon, geom_wkt, epoch_timestamp
+    return chosen_lat, chosen_lon, geom_wkt, epoch_timestamp, altitude, speed_kmh
 
 
 class CopyBatchBuffer:
-    def __init__(self, profile_id: str, existing_timestamps=()):
+    def __init__(self, profile_id: str, existing_timestamps=(), previous_point=None):
         self.profile_id = profile_id
         self.seen_epoch_keys = {
             (profile_id, timestamp) for timestamp in existing_timestamps
         }
         self.epochs = []
-        self.sentences = []
-        self.gsensord = []
-        self.gprmc = []
-        self.gpvtg = []
-        self.gpgga = []
-        self.gpgsa = []
-        self.gpgsv = []
         self.satellite = []
-        self.last_point = None
+        self.last_point = previous_point
 
     def add_epoch(self, epoch: RawEpoch):
         result = resolve_and_qualify_epoch(epoch, previous_point=self.last_point)
@@ -193,7 +164,7 @@ class CopyBatchBuffer:
         if result is None:
             return
 
-        lat, lon, geom_wkt, epoch_ts = result
+        lat, lon, geom_wkt, epoch_ts, altitude, speed_kmh = result
         epoch_key = (self.profile_id, epoch_ts)
         if epoch_key in self.seen_epoch_keys:
             return
@@ -206,147 +177,33 @@ class CopyBatchBuffer:
             self.profile_id,
             epoch_ts,
             geom_wkt,
+            altitude,
+            round(speed_kmh, 2),
+            to_float_or_none(epoch.gsensord[0]) if epoch.gsensord else None,
+            to_float_or_none(epoch.gsensord[1]) if epoch.gsensord else None,
+            to_float_or_none(epoch.gsensord[2]) if epoch.gsensord else None,
         ))
         self.last_point = (epoch_ts, lat, lon)
 
-        if epoch.gsensord:
-            s_raw, s_chk, s_cnt, gx, gy, gz = epoch.gsensord
-            s_id = str(uuid.uuid4())
-            self.sentences.append((s_id, epoch_id, s_raw, s_chk, s_cnt))
-            self.gsensord.append((s_id, gx, gy, gz))
-
-        if epoch.gprmc:
-            s_raw, s_chk, s_cnt, time_val, status, lat_v, lat_hem, lon_v, lon_hem, spd, crs, date_val, mode = epoch.gprmc
-            s_id = str(uuid.uuid4())
-            self.sentences.append((s_id, epoch_id, s_raw, s_chk, s_cnt))
-            self.gprmc.append((
-                s_id, time_val, status, lat_v, lat_hem, lon_v, lon_hem, spd, crs, date_val, mode
-            ))
-
-        if epoch.gpvtg:
-            s_raw, s_chk, s_cnt, c_true, c_ti, c_mag, c_mi, spd_kt, spd_kti, spd_km, spd_kmi, mode = epoch.gpvtg
-            s_id = str(uuid.uuid4())
-            self.sentences.append((s_id, epoch_id, s_raw, s_chk, s_cnt))
-            self.gpvtg.append((
-                s_id, c_true, c_ti, c_mag, c_mi, spd_kt, spd_kti, spd_km, spd_kmi, mode
-            ))
-
-        if epoch.gpgga:
-            s_raw, s_chk, s_cnt, gga_time, lat_v, lat_hem, lon_v, lon_hem, fix_q, sats_u, hdop, alt, alt_u, geo_sep, geo_sep_u, dgps_a, dgps_id = epoch.gpgga
-            s_id = str(uuid.uuid4())
-            self.sentences.append((s_id, epoch_id, s_raw, s_chk, s_cnt))
-            self.gpgga.append((
-                s_id, gga_time, lat_v, lat_hem, lon_v, lon_hem, fix_q, sats_u, hdop,
-                alt, alt_u, geo_sep, geo_sep_u, dgps_a, dgps_id
-            ))
-
-        if epoch.gpgsa:
-            s_raw, s_chk, s_cnt, m1, m2, sats, pdop, hdop, vdop = epoch.gpgsa
-            s_id = str(uuid.uuid4())
-            self.sentences.append((s_id, epoch_id, s_raw, s_chk, s_cnt))
-            self.gpgsa.append((
-                s_id, m1, m2, *sats, pdop, hdop, vdop
-            ))
-
         if epoch.gpgsvs:
-            for gsv_item in epoch.gpgsvs:
-                s_raw, s_chk, s_cnt, tot_m, msg_n, sats_view, sats_list = gsv_item
-                s_id = str(uuid.uuid4())
-                self.sentences.append((s_id, epoch_id, s_raw, s_chk, s_cnt))
-                
-                self.gpgsv.append((s_id, tot_m, msg_n, sats_view))
-                
+            for sats_list in epoch.gpgsvs:
                 for sat in sats_list:
-                    self.satellite.append((str(uuid.uuid4()), s_id, sat[0], sat[1], sat[2], sat[3]))
+                    self.satellite.append((str(uuid.uuid4()), epoch_id, sat[0], sat[1], sat[2]))
 
     def flush(self, cur):
         if self.epochs:
-            with cur.copy("""COPY epochs (epoch_id, profile_id, timestamp, geom) FROM STDIN""") as copy:
+            with cur.copy("""COPY epochs (
+                epoch_id, profile_id, timestamp, geom, altitude, speed_kmh, g_x, g_y, g_z
+            ) FROM STDIN""") as copy:
                 for row in self.epochs:
                     copy.write_row(row)
 
-        if self.sentences:
-            with cur.copy("COPY sentence (sentence_id, epoch_id, raw, checksum, parts_count) FROM STDIN") as copy:
-                for row in self.sentences:
-                    copy.write_row(row)
-
-        if self.gsensord:
-            with cur.copy("COPY gsensord (sentence_id, g_x, g_y, g_z) FROM STDIN") as copy:
-                for row in self.gsensord:
-                    copy.write_row(row)
-
-        if self.gpvtg:
-            with cur.copy("""COPY gpvtg (
-                sentence_id, course_true, course_true_indicator, course_magnetic,
-                course_magnetic_indicator, speed_knots, speed_knots_indicator,
-                speed_kmh, speed_kmh_indicator, mode
-            ) FROM STDIN""") as copy:
-                for row in self.gpvtg:
-                    copy.write_row(row)
-
-        if self.gpgga:
-            with cur.copy("""COPY gpgga (
-                sentence_id, time_utc, latitude, latitude_hemisphere, longitude,
-                longitude_hemisphere, fix_quality, satellites_used, hdop, altitude,
-                altitude_units, geoid_separation, geoid_separation_units, dgps_age, dgps_station_id
-            ) FROM STDIN""") as copy:
-                for row in self.gpgga:
-                    copy.write_row(row)
-
-        if self.gpgsa:
-            with cur.copy("""COPY gpgsa (
-                sentence_id, mode1, mode2,
-                satellite_1, satellite_2, satellite_3, satellite_4,
-                satellite_5, satellite_6, satellite_7, satellite_8,
-                satellite_9, satellite_10, satellite_11, satellite_12,
-                pdop, hdop, vdop
-            ) FROM STDIN""") as copy:
-                for row in self.gpgsa:
-                    copy.write_row(row)
-
-        if self.gpgsv:
-            with cur.copy("COPY gpgsv (sentence_id, total_messages, message_number, satellites_in_view) FROM STDIN") as copy:
-                for row in self.gpgsv:
-                    copy.write_row(row)
-
         if self.satellite:
-            with cur.copy("COPY satellite (satellite_id, sentence_id, prn, elevation, azimuth, snr) FROM STDIN") as copy:
+            with cur.copy("COPY satellite (satellite_id, epoch_id, prn, elevation, azimuth) FROM STDIN") as copy:
                 for row in self.satellite:
                     copy.write_row(row)
 
-        if self.gprmc:
-            cur.execute("""
-                CREATE TEMP TABLE temp_gprmc (
-                    sentence_id UUID, time_utc TIME, status CHAR(1), latitude NUMERIC(10, 6),
-                    latitude_hemisphere CHAR(1), longitude NUMERIC(11, 6), longitude_hemisphere CHAR(1),
-                    speed_knots NUMERIC(6, 2), course NUMERIC(5, 2), date DATE, mode CHAR(1)
-                ) ON COMMIT DROP;
-            """)
-            with cur.copy("""COPY temp_gprmc (
-                sentence_id, time_utc, status, latitude, latitude_hemisphere,
-                longitude, longitude_hemisphere, speed_knots, course, date, mode
-            ) FROM STDIN""") as copy:
-                for row in self.gprmc:
-                    copy.write_row(row)
-
-            cur.execute("""
-                INSERT INTO gprmc (
-                    sentence_id, time_utc, status, latitude, latitude_hemisphere,
-                    longitude, longitude_hemisphere, speed_knots, course, date, mode
-                )
-                SELECT * FROM temp_gprmc
-                ON CONFLICT (date, time_utc) DO NOTHING;
-            """)
-            cur.execute("DROP TABLE IF EXISTS temp_gprmc;")
-
         self.epochs.clear()
-        self.sentences.clear()
-        self.gsensord.clear()
-        self.gprmc.clear()
-        self.gpvtg.clear()
-        self.gpgga.clear()
-        self.gpgsa.clear()
-        self.gpgsv.clear()
         self.satellite.clear()
 
 
@@ -377,17 +234,30 @@ def parse_data(data_file_path=DATA_FILE_PATH, batch_size=10000):
                 conn.commit()
 
             cur.execute(
-                "SELECT timestamp FROM epochs WHERE profile_id = %s",
+                """
+                SELECT timestamp, ST_Y(geom), ST_X(geom)
+                FROM epochs
+                WHERE profile_id = %s
+                ORDER BY timestamp DESC
+                """,
                 (profile_id,),
             )
-            existing_timestamps = [row[0] for row in cur.fetchall()]
+            existing_rows = cur.fetchall()
+            existing_timestamps = [row[0] for row in existing_rows]
+            previous_point = None
+            if existing_rows:
+                previous_point = (
+                    existing_rows[0][0],
+                    float(existing_rows[0][1]),
+                    float(existing_rows[0][2]),
+                )
 
             epoch = RawEpoch()
             epochs_in_batch = 0
-            tag = ""
             buffer = CopyBatchBuffer(
                 profile_id=profile_id,
                 existing_timestamps=existing_timestamps,
+                previous_point=previous_point,
             )
 
             with open(str(data_file_path), "r", encoding="utf-8", errors="ignore") as data_file:
@@ -399,21 +269,21 @@ def parse_data(data_file_path=DATA_FILE_PATH, batch_size=10000):
                     if not raw_line:
                         continue
 
-                    parts, checksum, parts_count = split_line(raw_line)
+                    parts = split_line(raw_line)
+                    parts_count = len(parts)
                     tag = parts[0]
 
                     if tag == "$GSENSORD":
                         if epoch.gsensord:
-                            epoch.terminator = tag
                             buffer.add_epoch(epoch)
                             epochs_in_batch += 1
                             epoch = RawEpoch()
-                        epoch.gsensord = (raw_line, checksum, parts_count,
-                                          get_part(parts, 1), get_part(parts, 2), get_part(parts, 3))
+                        epoch.gsensord = (
+                            get_part(parts, 1), get_part(parts, 2), get_part(parts, 3)
+                        )
 
                     elif tag == "$GPRMC":
                         if epoch.gprmc:
-                            epoch.terminator = tag
                             buffer.add_epoch(epoch)
                             epochs_in_batch += 1
                             epoch = RawEpoch()
@@ -436,28 +306,11 @@ def parse_data(data_file_path=DATA_FILE_PATH, batch_size=10000):
                             parsed_time = parse_nmea_time(t_utc)
 
                         epoch.gprmc = (
-                            raw_line, checksum, parts_count,
-                            parsed_time, get_part(parts, 2), lat, get_part(parts, 4),
-                            lon, get_part(parts, 6), get_part(parts, 7), get_part(parts, 8),
-                            parsed_date, get_part(parts, 12)
-                        )
-
-                    elif tag == "$GPVTG":
-                        if epoch.gpvtg:
-                            epoch.terminator = tag
-                            buffer.add_epoch(epoch)
-                            epochs_in_batch += 1
-                            epoch = RawEpoch()
-                        epoch.gpvtg = (
-                            raw_line, checksum, parts_count,
-                            get_part(parts, 1), get_part(parts, 2), get_part(parts, 3), get_part(parts, 4),
-                            get_part(parts, 5), get_part(parts, 6), get_part(parts, 7), get_part(parts, 8),
-                            get_part(parts, 9)
+                            parsed_time, get_part(parts, 2), lat, lon, parsed_date
                         )
 
                     elif tag == "$GPGGA":
                         if epoch.gpgga:
-                            epoch.terminator = tag
                             buffer.add_epoch(epoch)
                             epochs_in_batch += 1
                             epoch = RawEpoch()
@@ -467,33 +320,17 @@ def parse_data(data_file_path=DATA_FILE_PATH, batch_size=10000):
                         lon = ddm_to_dd(get_part(parts, 4), get_part(parts, 5))
 
                         epoch.gpgga = (
-                            raw_line, checksum, parts_count,
-                            parse_nmea_time(t_utc), lat, get_part(parts, 3), lon, get_part(parts, 5),
-                            to_int_or_none(get_part(parts, 6)), to_int_or_none(get_part(parts, 7)),
-                            to_float_or_none(get_part(parts, 8)), to_float_or_none(get_part(parts, 9)),
-                            get_part(parts, 10), to_float_or_none(get_part(parts, 11)), get_part(parts, 12),
-                            to_float_or_none(get_part(parts, 13)), get_part(parts, 14)
-                        )
-
-                    elif tag == "$GPGSA":
-                        if epoch.gpgsa:
-                            epoch.terminator = tag
-                            buffer.add_epoch(epoch)
-                            epochs_in_batch += 1
-                            epoch = RawEpoch()
-
-                        sats = [to_int_or_none(get_part(parts, i)) for i in range(3, 15)]
-                        epoch.gpgsa = (
-                            raw_line, checksum, parts_count,
-                            get_part(parts, 1), to_int_or_none(get_part(parts, 2)),
-                            sats, to_float_or_none(get_part(parts, 15)),
-                            to_float_or_none(get_part(parts, 16)), to_float_or_none(get_part(parts, 17))
+                            parse_nmea_time(t_utc),
+                            lat,
+                            lon,
+                            to_int_or_none(get_part(parts, 6)),
+                            to_float_or_none(get_part(parts, 8)),
+                            to_float_or_none(get_part(parts, 9)),
                         )
 
                     elif tag == "$GPGSV":
                         tot_msg = to_int_or_none(get_part(parts, 1)) or 0
                         if epoch.gpgsvs and len(epoch.gpgsvs) == tot_msg:
-                            epoch.terminator = tag
                             buffer.add_epoch(epoch)
                             epochs_in_batch += 1
                             epoch = RawEpoch()
@@ -505,15 +342,10 @@ def parse_data(data_file_path=DATA_FILE_PATH, batch_size=10000):
                                 to_int_or_none(get_part(parts, s_idx)),
                                 to_int_or_none(get_part(parts, s_idx + 1)),
                                 to_int_or_none(get_part(parts, s_idx + 2)),
-                                to_int_or_none(get_part(parts, s_idx + 3))
                             ))
                             s_idx += 4
 
-                        epoch.gpgsvs.append((
-                            raw_line, checksum, parts_count,
-                            tot_msg, to_int_or_none(get_part(parts, 2)),
-                            to_int_or_none(get_part(parts, 3)), sats_list
-                        ))
+                        epoch.gpgsvs.append(sats_list)
 
                     if epochs_in_batch >= batch_size:
                         buffer.flush(cur)
@@ -525,8 +357,7 @@ def parse_data(data_file_path=DATA_FILE_PATH, batch_size=10000):
 
                     last_line_index = current_number
 
-            if epoch.gprmc or epoch.gpgga or epoch.gpgsvs or epoch.gsensord or epoch.gpgsa:
-                epoch.terminator = tag
+            if epoch.gprmc or epoch.gpgga or epoch.gpgsvs or epoch.gsensord:
                 buffer.add_epoch(epoch)
 
             buffer.flush(cur)
