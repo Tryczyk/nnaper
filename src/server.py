@@ -195,6 +195,9 @@ def get_playback_day(day: str = Query(...)):
         round(ST_X(e.geom)::numeric, 6) AS lon,
         e.altitude,
         e.speed_kmh,
+        e.g_x,
+        e.g_y,
+        e.g_z,
         COALESCE((SELECT json_agg(to_jsonb(sat)) FROM satellite sat WHERE sat.epoch_id = e.epoch_id), '[]'::json) AS satellites
     FROM epochs e
     WHERE e.timestamp >= %s::date

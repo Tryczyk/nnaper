@@ -71,9 +71,12 @@
 <div id="hud-panel">
   <div class="hud-row"><span>Godzina:</span><span id="hud-time" class="hud-val">--:--:--</span></div>
   <div class="hud-row"><span>Prędkość:</span><span id="hud-speed" class="hud-val">0.0 km/h</span></div>
+  <div class="hud-row"><span>altitude:</span><span id="hud-altitude" class="hud-val">-- m</span></div>
+  <div class="hud-row"><span>g_x:</span><span id="hud-gx" class="hud-val">--</span></div>
+  <div class="hud-row"><span>g_y:</span><span id="hud-gy" class="hud-val">--</span></div>
+  <div class="hud-row"><span>g_z:</span><span id="hud-gz" class="hud-val">--</span></div>
   <div class="hud-row"><span>Dystans dnia:</span><span id="hud-dist" class="hud-val">0.0 km</span></div>
   <div class="hud-row"><span>Średnia prędkość:</span><span id="hud-avg-speed" class="hud-val">0.0 km/h</span></div>
-  <div class="hud-row"><span>Satelity:</span><span id="hud-sats" class="hud-val">0</span></div>
 </div>
 
 <div id="bottom-controls">
@@ -305,7 +308,11 @@
     const d = new Date(pt.timestamp);
     document.getElementById('hud-time').innerText = d.toTimeString().split(' ')[0];
     document.getElementById('hud-speed').innerText = `${(pt.speed_kmh || 0).toFixed(1)} km/h`;
-    document.getElementById('hud-sats').innerText = pt.satellites ? pt.satellites.length : 0;
+    document.getElementById('hud-altitude').innerText =
+      pt.altitude === null || pt.altitude === undefined ? '-- m' : `${Number(pt.altitude).toFixed(2)} m`;
+    document.getElementById('hud-gx').innerText = formatSensorValue(pt.g_x);
+    document.getElementById('hud-gy').innerText = formatSensorValue(pt.g_y);
+    document.getElementById('hud-gz').innerText = formatSensorValue(pt.g_z);
     document.getElementById('hud-progress-info').innerText = `${index + 1} / ${trackData.length} epok`;
     document.getElementById('timeline-slider').value = index;
 
@@ -314,6 +321,10 @@
     }
 
     updateSatellitesDisplay(pt);
+  }
+
+  function formatSensorValue(value) {
+    return value === null || value === undefined ? '--' : Number(value).toFixed(3);
   }
 
   function playbackLoop(now) {
