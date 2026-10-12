@@ -31,23 +31,14 @@ CREATE INDEX IF NOT EXISTS idx_profiles_user_id ON profiles (user_id);
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS epochs (
-    epoch_id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    profile_id       UUID NOT NULL REFERENCES profiles(profile_id) ON DELETE CASCADE,
-    terminator       VARCHAR(16),
-    time_diff        NUMERIC(8, 3),
-    distance         NUMERIC(10, 4),
-    is_active        BOOLEAN NOT NULL DEFAULT TRUE,
-    inactive_reasons TEXT[] NOT NULL DEFAULT '{}',
-    latitude         NUMERIC(10, 6),
-    longitude        NUMERIC(11, 6),
-    geom             GEOMETRY(Point, 4326),
-    timestamp        TIMESTAMPTZ
+    epoch_id   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    profile_id UUID NOT NULL REFERENCES profiles(profile_id) ON DELETE CASCADE,
+    timestamp  TIMESTAMPTZ NOT NULL,
+    geom       GEOMETRY(Point, 4326) NOT NULL,
+    CONSTRAINT uq_profile_timestamp UNIQUE (profile_id, timestamp)
 );
 
-CREATE INDEX IF NOT EXISTS idx_epochs_profile_id ON epochs (profile_id);
-CREATE INDEX IF NOT EXISTS idx_epochs_is_active  ON epochs (is_active) WHERE is_active = TRUE;
-CREATE INDEX IF NOT EXISTS idx_epochs_geom       ON epochs USING GIST (geom);
-CREATE INDEX IF NOT EXISTS idx_epochs_timestamp  ON epochs (timestamp);
+CREATE INDEX IF NOT EXISTS idx_epochs_geom ON epochs USING GIST (geom);
 
 -- ============================================================================
 -- 3. BAZOWA TABELA ZDAŃ NMEA

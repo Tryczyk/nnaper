@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 import json
+import math
 from pathlib import Path
 import uuid
 import psycopg
@@ -73,8 +74,12 @@ class RawEpoch:
         self.gpgsvs = []
 
 
-def resolve_and_qualify_epoch(epoch: RawEpoch, max_hdop: float = 5.0):
-    reasons = []
+def resolve_and_qualify_epoch(
+    epoch: RawEpoch,
+    previous_point=None,
+    max_hdop: float = 5.0,
+    max_speed_kmh: float = 500.0,
+):
 
     # Odczyt danych z GPRMC:
     # (s_raw, s_chk, s_cnt, time_val, status, lat, lat_hem, lon, lon_hem, spd, crs, date_val, mode)
@@ -99,30 +104,25 @@ def resolve_and_qualify_epoch(epoch: RawEpoch, max_hdop: float = 5.0):
         epoch_timestamp = datetime.combine(rmc_date, chosen_time).replace(tzinfo=timezone.utc)
 
     if epoch_timestamp is None:
-        if not rmc_date:
-            reasons.append("date")
-        if not chosen_time:
-            reasons.append("time_utc")
+        return None
 
     # 2. Walidacja statusu GPRMC
     if epoch.gprmc and rmc_status != 'A':
-        reasons.append("gprmc.status")
+        return None
 
     # 3. Walidacja szerokości i długości geograficznej
     if rmc_lat is None and gga_lat is None:
-        reasons.append("latitude")
+        return None
 
     if rmc_lon is None and gga_lon is None:
-        reasons.append("longitude")
+        return None
 
     # 4. Walidacja jakości fixa i współczynnika HDOP
     if gga_fix_q is None or gga_fix_q <= 0:
-        reasons.append("gpgga.fix_quality")
+        return None
 
     if gga_hdop is None or gga_hdop > max_hdop:
-        reasons.append("gpgga.hdop")
-
-    is_active = (len(reasons) == 0)
+        return None
 
     # 5. Wybór optymalnej pozycji
     chosen_lat = None
@@ -137,14 +137,45 @@ def resolve_and_qualify_epoch(epoch: RawEpoch, max_hdop: float = 5.0):
     elif rmc_lat is not None and rmc_lon is not None:
         chosen_lat, chosen_lon = rmc_lat, rmc_lon
 
-    geom_wkt = f"SRID=4326;POINT({chosen_lon} {chosen_lat})" if chosen_lat is not None and chosen_lon is not None else None
+    if chosen_lat is None or chosen_lon is None:
+        return None
 
-    return is_active, reasons, chosen_lat, chosen_lon, geom_wkt, epoch_timestamp
+    if previous_point is not None:
+        previous_timestamp, previous_lat, previous_lon = previous_point
+        elapsed_seconds = (epoch_timestamp - previous_timestamp).total_seconds()
+        if elapsed_seconds <= 0:
+            return None
+
+        lat1 = math.radians(previous_lat)
+        lat2 = math.radians(chosen_lat)
+        delta_lat = math.radians(chosen_lat - previous_lat)
+        delta_lon = math.radians(chosen_lon - previous_lon)
+        haversine = (
+            math.sin(delta_lat / 2) ** 2
+            + math.cos(lat1) * math.cos(lat2) * math.sin(delta_lon / 2) ** 2
+        )
+        haversine = min(1.0, max(0.0, haversine))
+        distance_km = 6371.0 * 2 * math.atan2(
+            math.sqrt(haversine),
+            math.sqrt(1.0 - haversine),
+        )
+        speed_kmh = distance_km / (elapsed_seconds / 3600.0)
+        if speed_kmh > max_speed_kmh:
+            return None
+
+    chosen_lat = round(chosen_lat, 6)
+    chosen_lon = round(chosen_lon, 6)
+    geom_wkt = f"SRID=4326;POINT({chosen_lon} {chosen_lat})"
+
+    return chosen_lat, chosen_lon, geom_wkt, epoch_timestamp
 
 
 class CopyBatchBuffer:
-    def __init__(self, profile_id: str):
+    def __init__(self, profile_id: str, existing_timestamps=()):
         self.profile_id = profile_id
+        self.seen_epoch_keys = {
+            (profile_id, timestamp) for timestamp in existing_timestamps
+        }
         self.epochs = []
         self.sentences = []
         self.gsensord = []
@@ -154,16 +185,29 @@ class CopyBatchBuffer:
         self.gpgsa = []
         self.gpgsv = []
         self.satellite = []
+        self.last_point = None
 
     def add_epoch(self, epoch: RawEpoch):
+        result = resolve_and_qualify_epoch(epoch, previous_point=self.last_point)
+
+        if result is None:
+            return
+
+        lat, lon, geom_wkt, epoch_ts = result
+        epoch_key = (self.profile_id, epoch_ts)
+        if epoch_key in self.seen_epoch_keys:
+            return
+
+        self.seen_epoch_keys.add(epoch_key)
         epoch_id = str(uuid.uuid4())
-        
-        is_active, reasons, lat, lon, geom_wkt, epoch_ts = resolve_and_qualify_epoch(epoch)
 
         self.epochs.append((
-            epoch_id, self.profile_id, epoch.terminator, None, None,
-            is_active, reasons, lat, lon, geom_wkt, epoch_ts
+            epoch_id,
+            self.profile_id,
+            epoch_ts,
+            geom_wkt,
         ))
+        self.last_point = (epoch_ts, lat, lon)
 
         if epoch.gsensord:
             s_raw, s_chk, s_cnt, gx, gy, gz = epoch.gsensord
@@ -217,10 +261,7 @@ class CopyBatchBuffer:
 
     def flush(self, cur):
         if self.epochs:
-            with cur.copy("""COPY epochs (
-                epoch_id, profile_id, terminator, time_diff, distance,
-                is_active, inactive_reasons, latitude, longitude, geom, timestamp
-            ) FROM STDIN""") as copy:
+            with cur.copy("""COPY epochs (epoch_id, profile_id, timestamp, geom) FROM STDIN""") as copy:
                 for row in self.epochs:
                     copy.write_row(row)
 
@@ -335,10 +376,19 @@ def parse_data(data_file_path=DATA_FILE_PATH, batch_size=10000):
                 cur.execute("TRUNCATE TABLE epochs CASCADE;")
                 conn.commit()
 
+            cur.execute(
+                "SELECT timestamp FROM epochs WHERE profile_id = %s",
+                (profile_id,),
+            )
+            existing_timestamps = [row[0] for row in cur.fetchall()]
+
             epoch = RawEpoch()
             epochs_in_batch = 0
             tag = ""
-            buffer = CopyBatchBuffer(profile_id=profile_id)
+            buffer = CopyBatchBuffer(
+                profile_id=profile_id,
+                existing_timestamps=existing_timestamps,
+            )
 
             with open(str(data_file_path), "r", encoding="utf-8", errors="ignore") as data_file:
                 for current_number, line in enumerate(data_file, start=1):

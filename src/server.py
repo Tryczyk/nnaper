@@ -26,7 +26,6 @@ def get_dates_tree():
             EXTRACT(MONTH FROM timestamp)::int AS m,
             EXTRACT(DAY FROM timestamp)::int AS d
         FROM epochs
-        WHERE is_active = TRUE AND timestamp IS NOT NULL
         ORDER BY y DESC, m DESC, d DESC;
     """
     tree = {}
@@ -42,7 +41,7 @@ def get_dates_tree():
 
 @app.get("/api/track")
 def get_track(days: str = Query(None)):
-    where_clauses = ["is_active = TRUE", "geom IS NOT NULL"]
+    where_clauses = []
     params = []
     if days:
         if days == "none":
@@ -63,15 +62,14 @@ def get_track(days: str = Query(None)):
                         'epoch_id', epoch_id,
                         'day', timestamp::date,
                         'timestamp', timestamp,
-                        'latitude', latitude,
-                        'longitude', longitude,
-                        'terminator', terminator
+                        'latitude', round(ST_Y(geom)::numeric, 6),
+                        'longitude', round(ST_X(geom)::numeric, 6)
                     )
                 )
             ), '[]'::json)
         ) AS geojson
         FROM epochs
-        WHERE {' AND '.join(where_clauses)};
+        {"WHERE " + " AND ".join(where_clauses) if where_clauses else ""};
     """
     with psycopg.connect(DB_URL) as conn:
         with conn.cursor(row_factory=dict_row) as cur:
@@ -93,8 +91,6 @@ def get_track_tile(z: int, x: int, y: int, days: str = Query(None)):
             day_list = None
 
     where_clauses = [
-        "e.is_active = TRUE",
-        "e.geom IS NOT NULL",
         "e.geom && ST_Transform(ST_TileEnvelope(%s, %s, %s), 4326)",
     ]
     params = [z, x, y]
@@ -117,9 +113,8 @@ def get_track_tile(z: int, x: int, y: int, days: str = Query(None)):
                 e.epoch_id::text AS epoch_id,
                 e.timestamp::date::text AS day,
                 to_char(e.timestamp, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS timestamp,
-                e.latitude::float AS latitude,
-                e.longitude::float AS longitude,
-                e.terminator,
+                round(ST_Y(e.geom)::numeric, 6) AS latitude,
+                round(ST_X(e.geom)::numeric, 6) AS longitude,
                 ST_AsMVTGeom(
                     ST_Transform(e.geom, 3857),
                     bounds.geom,
@@ -155,7 +150,18 @@ def get_track_tile(z: int, x: int, y: int, days: str = Query(None)):
 def get_epoch_details(epoch_id: str):
     query = """
     SELECT json_build_object(
-        'epoch', (SELECT to_jsonb(e) FROM epochs e WHERE e.epoch_id = %(eid)s),
+        'epoch', (
+            SELECT json_build_object(
+                'epoch_id', e.epoch_id,
+                'profile_id', e.profile_id,
+                'timestamp', e.timestamp,
+                'latitude', round(ST_Y(e.geom)::numeric, 6),
+                'longitude', round(ST_X(e.geom)::numeric, 6),
+                'geom', ST_AsGeoJSON(e.geom)::json
+            )
+            FROM epochs e
+            WHERE e.epoch_id = %(eid)s
+        ),
         'profile', (SELECT to_jsonb(p) FROM epochs e JOIN profiles p ON p.profile_id = e.profile_id WHERE e.epoch_id = %(eid)s),
         'user', (SELECT json_build_object('user_id', u.user_id, 'username', u.username, 'email', u.email, 'created_at', u.created_at)
                  FROM epochs e JOIN profiles p ON p.profile_id = e.profile_id JOIN users u ON u.user_id = p.user_id WHERE e.epoch_id = %(eid)s),
@@ -200,8 +206,8 @@ def get_playback_day(day: str = Query(...)):
     SELECT 
         e.epoch_id,
         to_char(e.timestamp, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS timestamp,
-        e.latitude::float AS lat,
-        e.longitude::float AS lon,
+        round(ST_Y(e.geom)::numeric, 6) AS lat,
+        round(ST_X(e.geom)::numeric, 6) AS lon,
         COALESCE(
             (
                 SELECT (v.speed_kmh)::float
@@ -251,9 +257,7 @@ def get_playback_day(day: str = Query(...)):
             '[]'::json
         ) AS satellites
     FROM epochs e
-    WHERE e.is_active = TRUE 
-      AND e.geom IS NOT NULL 
-      AND e.timestamp >= %s::date
+    WHERE e.timestamp >= %s::date
       AND e.timestamp < (%s::date + INTERVAL '1 day')
     ORDER BY e.timestamp ASC;
     """

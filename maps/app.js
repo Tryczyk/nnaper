@@ -920,13 +920,8 @@ async function loadPointFullDetails(epochId) {
         <h4>Tabela EPOCHS</h4>
         <table class="kv-table">
           <tr><td>epoch_id</td><td>${e.epoch_id}</td></tr>
-          <tr><td>is_active</td><td>${e.is_active ? '<span class="badge badge-ok">TRUE</span>' : '<span class="badge badge-err">FALSE</span>'}</td></tr>
-          <tr><td>inactive_reasons</td><td>${(e.inactive_reasons && e.inactive_reasons.length) ? JSON.stringify(e.inactive_reasons) : '[]'}</td></tr>
           <tr><td>timestamp</td><td>${e.timestamp || 'NULL'}</td></tr>
-          <tr><td>latitude / longitude</td><td>${e.latitude}, ${e.longitude}</td></tr>
-          <tr><td>terminator</td><td>${e.terminator || 'NULL'}</td></tr>
-          <tr><td>time_diff</td><td>${e.time_diff ?? 'NULL'} s</td></tr>
-          <tr><td>distance</td><td>${e.distance ?? 'NULL'} m</td></tr>
+          <tr><td>latitude / longitude</td><td>${Number(e.latitude).toFixed(6)}, ${Number(e.longitude).toFixed(6)}</td></tr>
         </table>
       </div>
 
