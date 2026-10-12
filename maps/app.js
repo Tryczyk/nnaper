@@ -184,16 +184,6 @@ function updateTrackPaintProperty(property, value) {
   });
 }
 
-function bindTrackLayerInteractions(layerId) {
-  map.on('click', layerId, (e) => {
-    const feat = e.features && e.features[0];
-    if (feat && feat.properties && feat.properties.epoch_id) {
-    }
-  });
-  map.on('mouseenter', layerId, () => { map.getCanvas().style.cursor = 'pointer'; });
-  map.on('mouseleave', layerId, () => { map.getCanvas().style.cursor = ''; });
-}
-
 function addTrackMonthLayers(months) {
   months.forEach(({ key, days }) => {
     if (trackMonthLayers.has(key)) return;
@@ -225,7 +215,6 @@ function addTrackMonthLayers(months) {
     });
     trackMonthLayers.set(key, { layerId, days });
     trackLayerIds.add(layerId);
-    bindTrackLayerInteractions(layerId);
   });
 }
 
@@ -966,15 +955,6 @@ map.on('load', () => {
       'circle-pitch-scale': 'viewport'
     }
   });
-
-  map.on('click', 'GPS / Ślad trasy', (e) => {
-    const feat = e.features[0];
-    if (feat && feat.properties && feat.properties.epoch_id) {
-    }
-  });
-
-  map.on('mouseenter', 'GPS / Ślad trasy', () => { map.getCanvas().style.cursor = 'pointer'; });
-  map.on('mouseleave', 'GPS / Ślad trasy', () => { map.getCanvas().style.cursor = ''; });
 
   map.setTerrain({ source: 'terrain-dem', exaggeration: 0.85 });
 
