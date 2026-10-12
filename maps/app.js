@@ -110,7 +110,7 @@ function createFilterTreeNode(title, checked = true) {
   header.className = 'node-header';
   header.style.padding = '3px 6px';
 
-  const label = document.createElement('label');
+  const label = document.createElement('div');
   label.className = 'node-label';
   label.style.fontSize = '11.5px';
 
@@ -408,17 +408,18 @@ function autoBuildTree() {
     const label = document.createElement('label');
     label.className = 'node-label';
 
-    const pCheckbox = document.createElement('input');
-    pCheckbox.type = 'checkbox';
-    pCheckbox.checked = true;
+    const pCheckbox = groupName === 'GPS'
+      ? null
+      : document.createElement('input');
+    if (pCheckbox) {
+      pCheckbox.type = 'checkbox';
+      pCheckbox.checked = true;
+    }
 
     const pTitle = document.createElement('span');
     pTitle.innerText = groupName;
 
-    // DLA GPS: Ukrywamy nadrzędny checkbox, zostawiając samą nazwę
-    if (groupName === 'GPS') {
-      pCheckbox.style.display = 'none';
-    } else {
+    if (pCheckbox) {
       label.appendChild(pCheckbox);
     }
     label.appendChild(pTitle);
@@ -434,7 +435,7 @@ function autoBuildTree() {
     childrenBox.className = 'node-children';
 
     header.addEventListener('click', (e) => {
-      if (e.target === pCheckbox) return;
+      if (pCheckbox && e.target === pCheckbox) return;
       childrenBox.classList.toggle('collapsed');
       arrow.classList.toggle('collapsed');
     });
@@ -451,14 +452,15 @@ function autoBuildTree() {
       const leftDiv = document.createElement('div');
       leftDiv.className = 'leaf-left';
 
-      const cCheckbox = document.createElement('input');
-      cCheckbox.type = 'checkbox';
-      cCheckbox.checked = true;
+      const cCheckbox = child.id === 'GPS / Ślad trasy'
+        ? null
+        : document.createElement('input');
+      if (cCheckbox) {
+        cCheckbox.type = 'checkbox';
+        cCheckbox.checked = true;
+      }
 
-      // DLA GPS: Ukrywamy checkbox przy "Ślad trasy"
-      if (child.id === 'GPS / Ślad trasy') {
-        cCheckbox.style.display = 'none';
-      } else {
+      if (cCheckbox) {
         childInputs.push(cCheckbox);
         leftDiv.appendChild(cCheckbox);
       }
@@ -649,7 +651,7 @@ function autoBuildTree() {
       leafBox.appendChild(ctrlDiv);
       childrenBox.appendChild(leafBox);
 
-      if (child.id !== 'GPS / Ślad trasy') {
+      if (cCheckbox) {
         cCheckbox.addEventListener('change', () => {
           const vis = cCheckbox.checked ? 'visible' : 'none';
           if (map.getLayer(child.id)) map.setLayoutProperty(child.id, 'visibility', vis);
@@ -661,7 +663,7 @@ function autoBuildTree() {
       }
     });
 
-    if (groupName !== 'GPS') {
+    if (pCheckbox) {
       pCheckbox.addEventListener('change', () => {
         const isChecked = pCheckbox.checked;
         pCheckbox.indeterminate = false;

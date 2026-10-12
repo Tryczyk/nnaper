@@ -9,6 +9,8 @@ let inlineRouteLayerReady = false;
 let inlineContextLocation = null;
 let routeStartRequestId = 0;
 let routeStartAbortController = null;
+let inlineRouteCalculationTimer = null;
+let inlineRouteCalculationId = 0;
 const inlineContextMenu = document.getElementById('inline-route-context-menu');
 const mapContextMenu = document.getElementById('map-context-menu');
 let mapContextLocation = null;
@@ -32,6 +34,7 @@ function inlineRoutePlaceLabel(place) {
 }
 
 function openInlineRoutePlanner(destination) {
+  document.getElementById('btn-route-back-to-location').hidden = false;
   inlineRouteState = {
     points: [
       { type: 'start', place: null },
@@ -46,9 +49,11 @@ function openInlineRoutePlanner(destination) {
   routePlannerStats.innerText = '';
   renderInlineRouteLists();
   renderInlineRouteMarkers();
+  scheduleInlineRouteCalculation();
 }
 
 function openInlineRoutePlannerFromStart(start) {
+  document.getElementById('btn-route-back-to-location').hidden = true;
   inlineRouteState = {
     points: [
       { type: 'start', place: start },
@@ -72,6 +77,7 @@ function closeInlineRoutePlanner() {
   if (routeStartSuggestions) routeStartSuggestions.innerHTML = '';
   clearInlineRouteLayer();
   clearInlineRouteMarkers();
+  document.getElementById('btn-route-back-to-location').hidden = true;
 }
 
 window.addEventListener('nnaper-route-destination-selected', event => {
@@ -98,6 +104,7 @@ async function searchInlinePoint(input, point, suggestions) {
   suggestions.innerHTML = '';
   point.place = null;
   renderInlineRouteMarkers();
+  scheduleInlineRouteCalculation();
   if (!query) {
     routePlannerHint.innerText = 'Wpisz miejsce startu.';
     return;
@@ -129,6 +136,7 @@ async function searchInlinePoint(input, point, suggestions) {
         map.flyTo({ center: [place.lon, place.lat], zoom: 14 });
         renderInlineRouteLists();
         renderInlineRouteMarkers();
+        scheduleInlineRouteCalculation();
       });
       suggestions.appendChild(item);
     });
@@ -195,6 +203,7 @@ function addInlineContextPoint(type) {
   inlineContextMenu.classList.remove('active');
   renderInlineRouteLists();
   renderInlineRouteMarkers();
+  scheduleInlineRouteCalculation();
   reverseGeocodeInlinePoint(place);
 }
 
@@ -317,6 +326,7 @@ function renderInlineRouteLists() {
       });
       renderInlineRouteLists();
       renderInlineRouteMarkers();
+      scheduleInlineRouteCalculation();
     };
     item.appendChild(remove);
     routePlannerStops.appendChild(item);
@@ -332,6 +342,7 @@ function renderInlineRouteLists() {
           entry.type = pointIndex === 0 ? 'start' : pointIndex === inlineRouteState.points.length - 1 ? 'destination' : 'stop';
         });
         renderInlineRouteLists();
+        scheduleInlineRouteCalculation();
         const newInput = routePlannerStops.querySelector(`[data-point-index="${index + 1}"] input`);
         if (newInput) newInput.focus();
       };
@@ -346,6 +357,7 @@ function renderInlineRouteLists() {
       inlineRouteState.avoids.splice(index, 1);
       renderInlineRouteLists();
       renderInlineRouteMarkers();
+      scheduleInlineRouteCalculation();
     };
     routePlannerAvoids.appendChild(item);
   });
@@ -364,6 +376,7 @@ function moveInlinePoint(index, offset) {
   });
   renderInlineRouteLists();
   renderInlineRouteMarkers();
+  scheduleInlineRouteCalculation();
 }
 
 function renderInlineRouteMarkers() {
@@ -417,9 +430,25 @@ function bringInlineRouteLayersToFront() {
   }
 }
 
-document.getElementById('btn-calculate-inline-route').addEventListener('click', async () => {
+function scheduleInlineRouteCalculation() {
+  clearTimeout(inlineRouteCalculationTimer);
+  inlineRouteCalculationId += 1;
+  clearInlineRouteLayer();
+  if (inlineRouteState.points.filter(point => point.place).length < 2) {
+    routePlannerStats.innerText = 'Wybierz co najmniej dwa punkty trasy.';
+  } else {
+    routePlannerStats.innerText = 'Wyznaczanie trasy...';
+  }
+  inlineRouteCalculationTimer = setTimeout(() => {
+    calculateInlineRoute();
+  }, 350);
+}
+
+async function calculateInlineRoute() {
+  const calculationId = ++inlineRouteCalculationId;
   const points = inlineRouteState.points.map(point => point.place).filter(Boolean);
   if (points.length < 2) {
+    clearInlineRouteLayer();
     routePlannerStats.innerText = 'Wybierz co najmniej dwa punkty trasy.';
     return;
   }
@@ -439,8 +468,10 @@ document.getElementById('btn-calculate-inline-route').addEventListener('click', 
       const end = points[index + 1];
       const coordinates = `${start.lon},${start.lat};${end.lon},${end.lat}`;
       const response = await fetch(`http://localhost:5000/route/v1/driving/${coordinates}?overview=full&steps=true&geometries=geojson`);
+      if (calculationId !== inlineRouteCalculationId) return;
       if (!response.ok) throw new Error(`OSRM zwrócił ${response.status}`);
       const data = await response.json();
+      if (calculationId !== inlineRouteCalculationId) return;
       if (!data.routes || !data.routes.length) throw new Error(`Brak trasy dla odcinka ${index + 1}`);
       const route = data.routes[0];
       if (!route.geometry || !Array.isArray(route.geometry.coordinates) || route.geometry.coordinates.length < 2) {
@@ -509,7 +540,7 @@ document.getElementById('btn-calculate-inline-route').addEventListener('click', 
   if (segmentRoutes.length > 0 && !bounds.isEmpty()) {
     map.fitBounds(bounds, { padding: 90, duration: 800, maxZoom: 16 });
   }
-});
+}
 
 const storedInlineDestination = JSON.parse(localStorage.getItem('nnaper-route-destination') || 'null');
 if (storedInlineDestination) {
