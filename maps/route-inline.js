@@ -1,10 +1,9 @@
 const routePlannerPanel = document.getElementById('route-planner-panel');
 const routeStartSuggestions = document.getElementById('route-start-suggestions');
 const routePlannerStops = document.getElementById('route-planner-stops');
-const routePlannerAvoids = document.getElementById('route-planner-avoids');
 const routePlannerStats = document.getElementById('route-planner-stats');
 const routePlannerHint = document.getElementById('route-planner-hint');
-let inlineRouteState = { points: [], avoids: [], mode: null };
+let inlineRouteState = { points: [], mode: null };
 let inlineRouteLayerReady = false;
 let inlineContextLocation = null;
 let routeStartRequestId = 0;
@@ -19,7 +18,6 @@ document.body.appendChild(inlineContextMenu);
 document.body.appendChild(mapContextMenu);
 
 function inlineRoutePointColor(index, type = 'stop') {
-  if (type === 'avoid') return '#ef4444';
   if (type === 'destination') return '#dc2626';
   return routeSegmentColors[Math.max(0, index) % routeSegmentColors.length];
 }
@@ -40,7 +38,6 @@ function openInlineRoutePlanner(destination) {
       { type: 'start', place: null },
       { type: 'destination', place: destination }
     ],
-    avoids: [],
     mode: null
   };
   document.getElementById('menu').classList.add('route-planner-open');
@@ -59,7 +56,6 @@ function openInlineRoutePlannerFromStart(start) {
       { type: 'start', place: start },
       { type: 'destination', place: null }
     ],
-    avoids: [],
     mode: null
   };
   document.getElementById('menu').classList.add('route-planner-open');
@@ -195,9 +191,12 @@ async function getMapContextPlace() {
 
 function addInlineContextPoint(type) {
   if (!inlineContextLocation) return;
-  const place = { name: 'Pobieranie adresu...', display_name: 'Pobieranie adresu...', ...inlineContextLocation };
-  if (type === 'stop') inlineRouteState.points.splice(inlineRouteState.points.length - 1, 0, { type: 'stop', place });
-  else inlineRouteState.avoids.push(place);
+  const place = {
+    name: 'Pobieranie adresu...',
+    display_name: 'Pobieranie adresu...',
+    ...inlineContextLocation
+  };
+  inlineRouteState.points.splice(inlineRouteState.points.length - 1, 0, { type: 'stop', place });
   inlineContextLocation = null;
   inlineContextMenu.classList.remove('active');
   renderInlineRouteLists();
@@ -227,7 +226,6 @@ async function reverseGeocodeInlinePoint(place) {
 }
 
 document.getElementById('inline-context-stop').addEventListener('click', () => addInlineContextPoint('stop'));
-document.getElementById('inline-context-avoid').addEventListener('click', () => addInlineContextPoint('avoid'));
 inlineContextMenu.addEventListener('click', event => event.stopPropagation());
 mapContextMenu.addEventListener('click', event => event.stopPropagation());
 document.getElementById('map-context-route').addEventListener('click', async () => {
@@ -348,18 +346,6 @@ function renderInlineRouteLists() {
       routePlannerStops.appendChild(plus);
     }
   });
-  routePlannerAvoids.innerHTML = '';
-  inlineRouteState.avoids.forEach((place, index) => {
-    const item = document.createElement('li');
-    item.innerHTML = `<span class="route-point-icon avoid" style="color: #ef4444">●</span><span>${place.name}</span><button type="button" data-action="remove">Usuń</button>`;
-    item.querySelector('[data-action="remove"]').onclick = () => {
-      inlineRouteState.avoids.splice(index, 1);
-      renderInlineRouteLists();
-      renderInlineRouteMarkers();
-      scheduleInlineRouteCalculation();
-    };
-    routePlannerAvoids.appendChild(item);
-  });
 }
 
 function moveInlinePoint(index, offset) {
@@ -381,11 +367,7 @@ function moveInlinePoint(index, offset) {
 function renderInlineRouteMarkers() {
   clearInlineRouteMarkers();
   const routePoints = inlineRouteState.points.filter(point => point.place);
-  const markerPlaces = [
-    ...inlineRouteState.points.filter(point => point.place).map(point => ({ place: point.place, type: point.type })),
-    ...inlineRouteState.avoids.map(place => ({ place, type: 'avoid' }))
-  ];
-  markerPlaces.forEach(({ place, type }) => {
+  inlineRouteState.points.filter(point => point.place).forEach(({ place, type }) => {
     const pointIndex = routePoints.findIndex(point => point.place === place);
     const color = inlineRoutePointColor(pointIndex, type);
     const marker = new maplibregl.Marker({ color })
@@ -393,9 +375,7 @@ function renderInlineRouteMarkers() {
       .addTo(map);
     marker.getElement().classList.add('inline-route-marker');
     marker.getElement().classList.add(`inline-route-marker-${type}`);
-    marker.getElement().title = type === 'avoid'
-      ? 'Punkt unikania'
-      : type === 'start' ? 'Start' : type === 'destination' ? 'Cel' : 'Punkt trasy';
+    marker.getElement().title = type === 'start' ? 'Start' : type === 'destination' ? 'Cel' : 'Punkt trasy';
     marker.getElement().style.cursor = 'default';
   });
 }
@@ -427,6 +407,20 @@ function bringInlineRouteLayersToFront() {
       map.moveLayer(layerId);
     }
   }
+}
+
+async function requestOsrmRoutes(coordinates, calculationId) {
+  const response = await fetch(
+    `http://localhost:5000/route/v1/driving/${coordinates}?overview=full&steps=true&geometries=geojson&alternatives=3`
+  );
+  if (calculationId !== inlineRouteCalculationId) return [];
+  if (!response.ok) throw new Error(`OSRM zwrócił ${response.status}`);
+  const data = await response.json();
+  return Array.isArray(data.routes)
+    ? data.routes.filter(route => route.geometry &&
+      Array.isArray(route.geometry.coordinates) &&
+      route.geometry.coordinates.length >= 2)
+    : [];
 }
 
 function scheduleInlineRouteCalculation() {
@@ -465,13 +459,10 @@ async function calculateInlineRoute() {
       const start = points[index];
       const end = points[index + 1];
       const coordinates = `${start.lon},${start.lat};${end.lon},${end.lat}`;
-      const response = await fetch(`http://localhost:5000/route/v1/driving/${coordinates}?overview=full&steps=true&geometries=geojson`);
+      const routes = await requestOsrmRoutes(coordinates, calculationId);
+      if (!routes.length) throw new Error(`Brak trasy dla odcinka ${index + 1}`);
+      const route = routes[0];
       if (calculationId !== inlineRouteCalculationId) return;
-      if (!response.ok) throw new Error(`OSRM zwrócił ${response.status}`);
-      const data = await response.json();
-      if (calculationId !== inlineRouteCalculationId) return;
-      if (!data.routes || !data.routes.length) throw new Error(`Brak trasy dla odcinka ${index + 1}`);
-      const route = data.routes[0];
       if (!route.geometry || !Array.isArray(route.geometry.coordinates) || route.geometry.coordinates.length < 2) {
         throw new Error(`Odcinek ${index + 1} nie posiada geometrii`);
       }
@@ -496,7 +487,8 @@ async function calculateInlineRoute() {
         source: sourceId,
         layout: {
           'line-cap': 'round',
-          'line-join': 'round'
+          'line-join': 'round',
+          'line-sort-key': 100000
         },
         paint: {
           'line-color': '#020617',
@@ -511,7 +503,8 @@ async function calculateInlineRoute() {
         source: sourceId,
         layout: {
           'line-cap': 'round',
-          'line-join': 'round'
+          'line-join': 'round',
+          'line-sort-key': 100001
         },
         paint: {
           'line-color': inlineRoutePointColor(index, routePoints[index]?.type),
@@ -526,11 +519,12 @@ async function calculateInlineRoute() {
       const duration = segmentRoutes.reduce((total, item) => total + Number(item.duration || 0), 0);
       routePlannerStats.innerText = `Dystans: ${(distance / 1000).toFixed(1)} km | Czas: ${Math.round(duration / 60)} min`;
     } catch (error) {
-      routePlannerStats.innerText = index === 0
-        ? 'Nie udało się wyznaczyć trasy.'
-        : `Wyznaczono ${index} z ${points.length - 1} odcinków trasy.`;
+      clearInlineRouteLayer();
+      routePlannerStats.innerText = error.message === 'Nie można bezpiecznie ominąć punktów zakazu - brak alternatywnej drogi'
+        ? error.message
+        : 'Nie udało się wyznaczyć trasy.';
       console.error(`Nie udało się wyznaczyć odcinka ${index + 1}:`, error);
-      break;
+      return;
     }
   }
 

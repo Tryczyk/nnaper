@@ -411,7 +411,6 @@ body, html {
 .route-planner-list > .route-point-row { margin: 4px 0; }
 .route-insert-btn { display: block; width: 24px; height: 24px; margin: -1px auto; padding: 0; border: 1px solid #94a3b8; border-radius: 50%; background: #0f172a; color: #f8fafc; font-size: 16px; line-height: 20px; cursor: pointer; position: relative; z-index: 2; }
 .route-insert-btn:hover { background: #0284c7; border-color: #38bdf8; }
-.route-avoid-list li { border-left: 3px solid #ef4444; }
 .inline-route-marker { cursor: grab; }
 .inline-route-marker:active { cursor: grabbing; }
 .route-planner-list li span { flex: 0 0 auto; }
