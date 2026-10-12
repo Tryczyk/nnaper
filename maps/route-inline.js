@@ -10,8 +10,11 @@ let inlineContextLocation = null;
 let routeStartRequestId = 0;
 let routeStartAbortController = null;
 const inlineContextMenu = document.getElementById('inline-route-context-menu');
+const mapContextMenu = document.getElementById('map-context-menu');
+let mapContextLocation = null;
 const routeSegmentColors = ['#0284c7', '#16a34a', '#f59e0b', '#9333ea', '#0891b2', '#e11d48'];
 document.body.appendChild(inlineContextMenu);
+document.body.appendChild(mapContextMenu);
 
 function inlineRoutePointColor(index, type = 'stop') {
   if (type === 'avoid') return '#ef4444';
@@ -33,6 +36,23 @@ function openInlineRoutePlanner(destination) {
     points: [
       { type: 'start', place: null },
       { type: 'destination', place: destination }
+    ],
+    avoids: [],
+    mode: null
+  };
+  document.getElementById('menu').classList.add('route-planner-open');
+  routePlannerPanel.classList.add('active');
+  routePlannerPanel.setAttribute('aria-hidden', 'false');
+  routePlannerStats.innerText = '';
+  renderInlineRouteLists();
+  renderInlineRouteMarkers();
+}
+
+function openInlineRoutePlannerFromStart(start) {
+  inlineRouteState = {
+    points: [
+      { type: 'start', place: start },
+      { type: 'destination', place: null }
     ],
     avoids: [],
     mode: null
@@ -123,14 +143,48 @@ async function searchInlinePoint(input, point, suggestions) {
 }
 
 map.on('contextmenu', event => {
-  if (!routePlannerPanel.classList.contains('active')) return;
   event.preventDefault();
   if (event.originalEvent) event.originalEvent.preventDefault();
-  inlineContextLocation = { lon: event.lngLat.lng, lat: event.lngLat.lat };
-  inlineContextMenu.style.left = `${Math.max(8, Math.min(event.point.x, window.innerWidth - 210))}px`;
-  inlineContextMenu.style.top = `${Math.max(8, Math.min(event.point.y, window.innerHeight - 80))}px`;
-  inlineContextMenu.classList.add('active');
+  if (routePlannerPanel.classList.contains('active')) {
+    inlineContextLocation = { lon: event.lngLat.lng, lat: event.lngLat.lat };
+    inlineContextMenu.style.left = `${Math.max(8, Math.min(event.point.x, window.innerWidth - 210))}px`;
+    inlineContextMenu.style.top = `${Math.max(8, Math.min(event.point.y, window.innerHeight - 80))}px`;
+    inlineContextMenu.classList.add('active');
+    return;
+  }
+  mapContextLocation = { lon: event.lngLat.lng, lat: event.lngLat.lat };
+  mapContextMenu.style.left = `${Math.max(8, Math.min(event.point.x, window.innerWidth - 250))}px`;
+  mapContextMenu.style.top = `${Math.max(8, Math.min(event.point.y, window.innerHeight - 80))}px`;
+  mapContextMenu.classList.add('active');
 });
+
+async function getMapContextPlace() {
+  if (!mapContextLocation) return null;
+  const place = {
+    ...mapContextLocation,
+    name: 'Pobieranie adresu...',
+    display_name: 'Pobieranie adresu...'
+  };
+  const response = await fetch(`https://photon.komoot.io/reverse?lon=${encodeURIComponent(place.lon)}&lat=${encodeURIComponent(place.lat)}`);
+  if (!response.ok) throw new Error(`Photon returned ${response.status}`);
+  const data = await response.json();
+  const feature = data.features && data.features[0];
+  const properties = feature && feature.properties;
+  if (properties) {
+    Object.assign(place, properties);
+    place.display_name = inlineRoutePlaceLabel(properties);
+    place.name = place.display_name;
+    place.address = {
+      road: properties.street,
+      house_number: properties.housenumber,
+      city: properties.city || properties.town || properties.village,
+      state: properties.state,
+      country: properties.country,
+      postcode: properties.postcode
+    };
+  }
+  return place;
+}
 
 function addInlineContextPoint(type) {
   if (!inlineContextLocation) return;
@@ -167,8 +221,32 @@ async function reverseGeocodeInlinePoint(place) {
 document.getElementById('inline-context-stop').addEventListener('click', () => addInlineContextPoint('stop'));
 document.getElementById('inline-context-avoid').addEventListener('click', () => addInlineContextPoint('avoid'));
 inlineContextMenu.addEventListener('click', event => event.stopPropagation());
+mapContextMenu.addEventListener('click', event => event.stopPropagation());
+document.getElementById('map-context-route').addEventListener('click', async () => {
+  mapContextMenu.classList.remove('active');
+  try {
+    const place = await getMapContextPlace();
+    if (place) openInlineRoutePlannerFromStart(place);
+  } catch (error) {
+    console.error('Nie udało się pobrać adresu punktu startowego:', error);
+  } finally {
+    mapContextLocation = null;
+  }
+});
+document.getElementById('map-context-info').addEventListener('click', async () => {
+  mapContextMenu.classList.remove('active');
+  try {
+    const place = await getMapContextPlace();
+    if (place && typeof displayPlaceDetails === 'function') displayPlaceDetails(place);
+  } catch (error) {
+    console.error('Nie udało się pobrać informacji o miejscu:', error);
+  } finally {
+    mapContextLocation = null;
+  }
+});
 document.addEventListener('click', event => {
   if (!inlineContextMenu.contains(event.target)) inlineContextMenu.classList.remove('active');
+  if (!mapContextMenu.contains(event.target)) mapContextMenu.classList.remove('active');
 });
 
 function renderInlineRouteLists() {
