@@ -188,7 +188,6 @@ function bindTrackLayerInteractions(layerId) {
   map.on('click', layerId, (e) => {
     const feat = e.features && e.features[0];
     if (feat && feat.properties && feat.properties.epoch_id) {
-      loadPointFullDetails(feat.properties.epoch_id);
     }
   });
   map.on('mouseenter', layerId, () => { map.getCanvas().style.cursor = 'pointer'; });
@@ -686,8 +685,6 @@ function autoBuildTree() {
 /* ------------------- INTERFEJS OKNA ------------------- */
 const menuEl = document.getElementById('menu');
 const btnMin = document.getElementById('btn-minimize');
-const pointPanelEl = document.getElementById('point-panel');
-const btnClosePoint = document.getElementById('btn-close-point');
 const btnBackLocation = document.getElementById('btn-back-location');
 const btnCloseLocation = document.getElementById('btn-close-location');
 const menuTitle = menuEl.querySelector('.menu-header h3');
@@ -729,9 +726,6 @@ btnSwitch.addEventListener('click', () => {
   menuEl.classList.toggle('dock-left', !isLeft);
   menuEl.classList.toggle('dock-right', isLeft);
 
-  pointPanelEl.classList.toggle('dock-left', isLeft);
-  pointPanelEl.classList.toggle('dock-right', !isLeft);
-
   map.removeControl(navControl);
   navControl = new maplibregl.NavigationControl({ showCompass: true });
   map.addControl(navControl, isLeft ? 'top-left' : 'top-right');
@@ -758,12 +752,6 @@ window.restoreOriginalSearchLocation = () => closeLocation(true);
 
 btnBackLocation.addEventListener('click', () => closeLocation(true));
 btnCloseLocation.addEventListener('click', () => closeLocation(false));
-
-btnClosePoint.addEventListener('click', () => {
-  pointPanelEl.classList.remove('active');
-  clearSatelliteLayers();
-  expandMenu();
-});
 
 /* ------------------- WIZUALIZACJA SATELITÓW ------------------- */
 let activeSatelliteContext = null;
@@ -955,61 +943,6 @@ async function loadPointFullDetails(epochId) {
 
 /* ------------------- INICJALIZACJA ------------------- */
 map.on('load', () => {
-  map.addSource('satellites-lines-source', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-  map.addSource('satellites-points-source', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-
-  map.addLayer({
-    id: 'sat-rays-outline',
-    source: 'satellites-lines-source',
-    type: 'line',
-    paint: {
-      'line-color': '#000000',
-      'line-width': 0.0,
-      'line-opacity': 0.0
-    }
-  });
-
-  map.addLayer({
-    id: 'Satelity / Promienie wektorowe',
-    source: 'satellites-lines-source',
-    type: 'line',
-    paint: {
-      'line-color': '#f59e0b',
-      'line-width': 2.0,
-      'line-dasharray': [3, 2]
-    }
-  });
-
-  map.addLayer({
-    id: 'Satelity / Punkty nieboskłonu',
-    source: 'satellites-points-source',
-    type: 'circle',
-    paint: {
-      'circle-color': '#f59e0b',
-      'circle-radius': 5.5,
-      'circle-stroke-width': 1.5,
-      'circle-stroke-color': '#ffffff'
-    }
-  });
-
-  map.addLayer({
-    id: 'Satelity / Etykiety PRN',
-    source: 'satellites-points-source',
-    type: 'symbol',
-    layout: {
-      'text-field': ['get', 'label'],
-      'text-size': 11,
-      'text-offset': [0, 1.2],
-      'text-anchor': 'top',
-      'text-font': ['Open Sans Bold']
-    },
-    paint: {
-      'text-color': '#fef08a',
-      'text-halo-color': '#020617',
-      'text-halo-width': 2
-    }
-  });
-
   // Ślad GPS
   map.addSource('gps-track', {
     type: 'vector',
@@ -1037,7 +970,6 @@ map.on('load', () => {
   map.on('click', 'GPS / Ślad trasy', (e) => {
     const feat = e.features[0];
     if (feat && feat.properties && feat.properties.epoch_id) {
-      loadPointFullDetails(feat.properties.epoch_id);
     }
   });
 
@@ -1296,6 +1228,5 @@ function displayPlaceDetails(place) {
     window.dispatchEvent(new CustomEvent('nnaper-route-destination-selected', { detail: place }));
   });
   menuBody.appendChild(routeButton);
-  pointPanelEl.classList.remove('active');
   expandMenu();
 }
