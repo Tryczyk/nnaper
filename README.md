@@ -1,153 +1,215 @@
-<p align="center">
-  <img src="assets/header.png" alt="Naper Logo" width="100%" />
-</p>
-
-Aplikacja do przetwarzania danych lokalizacyjnych GPS w formacie **NMEA**, bezpośredniego strumieniowania ich do bazy danych **PostgreSQL + PostGIS** oraz wizualizacji na interaktywnej mapie opartej o kafelki wektorowe **PMTiles** (OpenStreetMap).
-
----
+Aplikacja do przetwarzania i analizy danych lokalizacyjnych GPS w formacie **NMEA**, bezpośredniego strumieniowania ich do bazy danych **PostgreSQL + PostGIS**, serwowania przez mikroserwis **FastAPI** oraz zaawansowanej wizualizacji na interaktywnej mapie opartej o kafelki wektorowe **PMTiles** (OpenStreetMap), dynamiczne kafelki **MVT** ze śladem telemetrycznym oraz silnik routingu **OSRM**.
 
 ## Jak to działa?
 
 1. **Infrastruktura kontenerowa (Docker Compose):**
-   - W tle działa baza **PostgreSQL (PostGIS)** zainicjalizowana schematem z pliku `init_db.sql` oraz lekki serwer HTTP **Caddy** serwujący kafelki i mapę na porcie `8080`.
 
-2. **Kafelki podkładowe OpenStreetMap (PMTiles):**
-   - Docker sam weryfikuje obecność pliku `.pmtiles` i `.osm.pbf` (w razie potrzeby pobiera go automatycznie z serwisu [Geofabrik](https://download.geofabrik.de/europe/poland.html)).
-   - Narzędzie **Planetiler** kompresuje wyciąg OSM do pojedynczego pliku kafelków wektorowych `.pmtiles` w katalogu `osm_data/`.
+   * **PostGIS (`db`)**: Relacyjna baza przestrzenna zainicjalizowana schematem z pliku `init_db.sql`.
 
-3. **Parsowanie i strumieniowanie NMEA (`data/raw.txt`):**
-   - Skrypt odczytuje surowe logi NMEA linia po linii, łącząc komunikaty w spójne epoki pomiarowe.
-   - Dane są zapisywane partiami bezpośrednio do bazy PostgreSQL/PostGIS.
-   - Unikalny indeks czasowy w bazie oraz plik `data/state.txt` zapobiegają duplikatom i pozwalają na bezpieczne wznawianie pracy w dowolnym momencie.
+   * **Backend API (`api`)**: Serwis FastAPI serwujący kafelki wektorowe w locie (`ST_AsMVT`), telemetrię epok, strukturę dat oraz dane playbacku.
 
-4. **Wizualizacja:**
-   - Mapa w `maps/tile_map.html` odpytuje serwer o kafelki PMTiles i dynamiczne kafelki wektorowe MVT ze śladem GPS, a następnie renderuje warstwy za pośrednictwem biblioteki **MapLibre GL JS**.
+   * **Silnik routingu (`osrm`)**: Lokalna usługa OSRM na porcie `5000` wyznaczająca trasy drogowe na podstawie danych OpenStreetMap.
 
----
+   * **Kafelki podkładowe OpenStreetMap (`tiles-downloader` + `tiles-generator`)**: Automatycznie pobiera wyciąg OSM z serwisu Geofabrik i kompresuje go do pojedynczego archiwum wektorowego `.pmtiles` za pomocą narzędzia **Planetiler**.
+
+   * **Serwer WWW (`tiles-server`)**: Serwer HTTP **Caddy** serwujący interfejs mapy oraz kafelki PMTiles na porcie `8080`.
+
+2. **Parsowanie i strumieniowanie NMEA (`data/raw.txt`):**
+
+   * Skrypt `src/parser.py` odczytuje surowe logi NMEA linia po linii, grupując komunikaty w spójne epoki pomiarowe.
+
+   * Dokonuje walidacji jakości fixa GPS i współczynnika HDOP oraz zapisuje dane partiami bezpośrednio do bazy za pomocą protokołu `COPY`.
+
+   * Plik `data/state.txt` oraz unikalny indeks czasowy zapobiegają duplikatom i pozwalają na bezpieczne wznawianie pracy w dowolnym momencie.
+
+3. **Interfejs mapy i narzędzia wizualizacji (`maps/tile_map.html`):**
+
+   * **Sterowanie warstwami podkładu:** Dynamiczne drzewo warstw z możliwością edycji kolorów, grubości linii, linii przerywanych, obwódek oraz widoczności budynków 3D.
+
+   * **Hierarchiczny filtr czasu:** Selektywny wybór lat, miesięcy i poszczególnych dni z dynamicznym przełączaniem warstw MVT bez konieczności ponownego ładowania danych pozostałych miesięcy.
+
+   * **Inspekcja punktów telemetrycznych:** Kliknięcie w punkt trasy wyświetla pełne dane z bazy: rekordy epoki, użytkownika, profil oraz poszczególne zdekodowane ramki NMEA (`$GPRMC`, `$GPGGA`, `$GPVTG`, `$GPGSA`, `$GPGSV`, `$GSENSORD`).
+
+   * **Wizualizacja satelitów:** Wizualizacja pozycji i promieni satelitów w dwóch trybach: lokalnym (nieboskłon / skyplot) lub globalnym sferycznym (orbita MEO \~20 200 km).
+
+   * **Wyszukiwarka i geokodowanie:** Zintegrowana wyszukiwarka miejsc i adresów bazująca na API Photon (Komoot).
+
+   * **Planer trasy:** Wyznaczanie optymalnej trasy drogowej z obsługą punktów pośrednich, zamiany kolejności (góra/dół), obsługi z menu kontekstowego mapy (PPM) oraz kalkulacją czasu i dystansu przez OSRM.
+
+4. **Dedykowany odtwarzacz trasy (`maps/playback.html`):**
+
+   * Symulacja przejazdu samochodem wzdłuż zarejestrowanego śladu GPS z automatycznym obrotem pojazdu zgodnie z kursem.
+
+   * Panel HUD w czasie rzeczywistym: godzina pomiaru, prędkość chwilowa, kurs, dystans dnia, średnia prędkość oraz liczba satelitów.
+
+   * Suwak osi czasu, regulacja tempa odtwarzania (1x–60x), automatyczne śledzenie pojazdu kamerą oraz synchronizowana wizualizacja promieni satelitów.
+
+5. **Wykresy analityczne (`src/plots.py`):**
+
+   * Skrypt generuje samodzielne, interaktywne wykresy HTML w bibliotece Plotly (m.in. trójwymiarowy rozkład przeciążeń akcelerometru 3D, biegunowy skyplot satelitów, histogramy prędkości i kursów, analiza parametrów DOP).
 
 ## Struktura projektu
 
-```text
+```
 nnaper/
 ├── data/
 │   ├── raw.txt             # Surowe logi NMEA z urządzenia GPS (nieśledzone w Git)
 │   └── state.txt           # Numer ostatnio przetworzonej linii z raw.txt
-├── osm_data/               # Dane przestrzenne i wyjściowe kafelki:
+├── osm_data/               # Dane przestrzenne, wyciągi i kafelki:
 │   ├── *.osm.pbf           # Pobrany wyciąg OSM (np. pomorskie.osm.pbf, ignorowany w Git)
 │   └── *.pmtiles           # Wygenerowane kafelki wektorowe PMTiles (ignorowane w Git)
+├── plots/                  # Wygenerowane interaktywne wykresy HTML (Plotly)
 ├── maps/
-│   └── tile_map.html       # Interfejs mapy (MapLibre GL JS)
+│   ├── app.js              # Główna logika interfejsu mapy, filtr czasu i inspekcja epok
+│   ├── layers.js           # Konfiguracja stylu MapLibre i definicje warstw PMTiles
+│   ├── playback.html       # Dedykowany odtwarzacz trasy GPS (HUD + animacja samochodu)
+│   ├── route-inline.js     # Moduł planowania trasy drogowej OSRM z menu kontekstowym
+│   ├── styles.css          # Style CSS paneli, HUD-a i wyszukiwarki
+│   └── tile_map.html       # Główny interfejs mapy
 ├── src/
 │   ├── constants.py        # Stałe konfiguracyjne i ścieżki projektu
-│   ├── geography.py        # Narzędzia i funkcje pomocnicze do obliczeń geograficznych
-│   ├── main.py             # Główny punkt startowy aplikacji
-│   ├── map.py              # Tworzenie i konfiguracja mapy
-│   ├── osm.py              # Ekstrakcja danych przestrzennych z plików PBF
-│   ├── parser.py           # Parsowanie NMEA i zapis epok do PostgreSQL/PostGIS
-│   └── utils.py            # Ogólne funkcje pomocnicze
+│   ├── parser.py           # Parsowanie NMEA i zapis epok do PostgreSQL/PostGIS (COPY)
+│   ├── plots.py            # Generowanie interaktywnych wykresów HTML (Plotly)
+│   ├── server.py           # Backend FastAPI (dynamiczne MVT, telemetria, OSRM proxy)
+│   └── utils.py            # Narzędzia pomocnicze (dekodowanie współrzędnych i czasu NMEA)
 ├── .env.example            # Wzór zmiennych środowiskowych
-├── docker-compose.yml      # Baza PostGIS, downloader PBF, Planetiler i serwer Caddy
-├── init_db.sql             # Schemat bazy danych, relacje i unikalne indeksy
+├── docker-compose.yml      # PostGIS, FastAPI, OSRM, Planetiler i Caddy
+├── init_db.sql             # Schemat bazy danych, relacje, indeksy GiST i unikalne ograniczenia
 ├── pyproject.toml          # Konfiguracja środowiska i zależności (uv)
 └── README.md
-```
 
----
+```
 
 ## Stos technologiczny
 
-- **Środowisko i język:** Python 3.14, menedżer pakietów [uv](https://docs.astral.sh/uv/)
-- **Baza danych przestrzennych:** PostgreSQL 16 + PostGIS 3.4
-- **Sterownik bazy danych:** `psycopg` (binary)
-- **Generowanie kafelków:** [Planetiler](https://github.com/onthegomap/planetiler) (Docker)
-- **Format kafelków:** PMTiles (OpenMapTiles schema)
-- **Frontend / Wizualizacja:** MapLibre GL JS, Caddy Server
-- **Formaty danych:** NMEA, PBF (OpenStreetMap), GeoJSON
+* **Środowisko i język:** Python 3.14, menedżer pakietów [uv](https://docs.astral.sh/uv/)
 
----
+* **Baza danych przestrzennych:** PostgreSQL 16 + PostGIS 3.4
+
+* **Backend API:** FastAPI, Uvicorn, sterownik `psycopg` (binary z obsługą `COPY`)
+
+* **Silnik routingu:** OSRM Backend (MLD)
+
+* **Generowanie kafelków:** [Planetiler](https://github.com/onthegomap/planetiler) (Docker)
+
+* **Format kafelków:** PMTiles (OpenMapTiles schema) oraz dynamiczne Mapbox Vector Tiles (MVT) generowane w locie przez `ST_AsMVT`
+
+* **Frontend / Wizualizacja:** MapLibre GL JS, PMTiles Protocol, Caddy Server
+
+* **Analiza i wizualizacja danych:** Pandas, NumPy, Plotly
+
+* **Formaty danych:** NMEA 0183 (\$GPRMC,$GPGGA, $GPVTG,$GPGSA, $GPGSV,$GSENSORD), PBF (OpenStreetMap), GeoJSON
 
 ## Wymagania wstępne
 
-- Zainstalowany **Python 3.14+**
-- Zainstalowane narzędzie **[uv](https://docs.astral.sh/uv/)**
-- Zainstalowany **Docker Desktop** (wraz z obsługą Docker Compose)
+* Zainstalowany **Python 3.14+**
 
----
+* Zainstalowane narzędzie [**uv**](https://docs.astral.sh/uv/)
+
+* Zainstalowany **Docker Desktop** (wraz z obsługą Docker Compose)
 
 ## Konfiguracja i uruchomienie
 
 ### 1. Przygotowanie repozytorium
-```bash
+
+```
 git clone https://github.com/Tryczyk/nnaper.git
 cd nnaper
+
 ```
 
 ### 2. Konfiguracja zmiennych środowiskowych
+
 Skopiuj wzorzec pliku konfiguracyjnego:
-```bash
+
+```
 cp .env.example .env
+
 ```
 
-W pliku `.env` wskaż nazwę pliku regionalnego OSM (domyślnie `pomorskie.osm.pbf`):
-```env
+W pliku `.env` wskaż parametry połączenia z bazą oraz nazwę wyciągu OSM (domyślnie `pomorskie.osm.pbf`):
+
+```
+DB_URL=postgresql://nnaper:nnaper@localhost:5432/nnaper_db
 OSM_FILE_NAME=pomorskie.osm.pbf
+
 ```
 
-> **Uwaga:** Pliki `.pbf`, `.pmtiles`, wolumeny baz danych oraz duże pliki `data/raw.txt` są wykluczone z repozytorium Git przez `.gitignore`.
+> **Uwaga:** Pliki `.pbf`, `.pmtiles`, dane bazy danych oraz duże pliki `data/raw.txt` są wykluczone z repozytorium Git przez `.gitignore`.
 
 ### 3. Uruchomienie infrastruktury (Docker Compose)
+
 Uruchom całe środowisko w tle:
-```bash
-docker compose up -d
+
 ```
-> Kontenery automatycznie sprawdzą obecność kafelków `.pmtiles` i pliku `.osm.pbf` (pobiorą go z Geofabrik i wygenerują kafelki, jeśli ich brakuje), postawią bazę PostGIS i zainicjalizują schemat z `init_db.sql` oraz uruchomią serwer HTTP.
+docker compose up -d
+
+```
+
+> Kontenery automatycznie:
+>
+> 1. Zainicjalizują bazę danych PostGIS i schemat z `init_db.sql`.
+>
+> 2. Uruchomią backend FastAPI na porcie `8000`.
+>
+> 3. Sprawdzą obecność kafelków `.pmtiles` i wyciągu `.osm.pbf` (w razie potrzeby pobiorą plik z Geofabrik i wygenerują kafelki).
+>
+> 4. Przygotują graf OSRM i uruchomią silnik routingu na porcie `5000`.
+>
+> 5. Uruchomią serwer WWW Caddy serwujący mapę na porcie `8080`.
 
 ### 4. Przetwarzanie danych lokalizacyjnych (Python)
-Umieść surowy plik z logami GPS w `data/raw.txt`, a następnie uruchom proces parsowania:
-```bash
-uv run src/parser.py
+
+Umieść surowy plik z logami GPS w katalogu `data/raw.txt`, a następnie uruchom proces parsowania:
+
 ```
-*Skrypt strumieniuje odczytane epoki bezpośrednio do bazy PostgreSQL, logując postęp przetwarzania w konsoli i pliku `data/state.txt`.*
+uv run src/parser.py
 
-### 5. Podgląd mapy
-Otwórz przeglądarkę pod adresem:
-[http://localhost:8080/maps/tile_map.html](http://localhost:8080/maps/tile_map.html)
+```
 
-Ślad GPS jest dostarczany dynamicznie z PostGIS przez endpoint
-`/api/track/{z}/{x}/{y}.pbf`. Frontend tworzy osobne źródło i warstwę MVT dla
-każdego miesiąca (`?days=YYYY-MM-DD,...`), a poszczególne dni są filtrowane
-lokalnie w MapLibre. Zmiana zaznaczenia miesiąca lub dnia przełącza widoczność
-bez regenerowania ani przeładowywania kafelków pozostałych miesięcy.
+*Skrypt strumieniuje odczytane epoki bezpośrednio do bazy PostgreSQL/PostGIS, logując postęp przetwarzania w konsoli i aktualizując znacznik w `data/state.txt`.*
 
-Po wybraniu lokalizacji można przejść do planera trasy. Planer korzysta z
-lokalnej usługi OSRM uruchamianej przez Docker Compose (`localhost:5000`) i
-pozwala ustawić punkt startowy, cel oraz punkty pośrednie.
+### 5. Dostęp do aplikacji
 
----
+* **Główna mapa i planer trasy:**
 
-## 6. Generowanie wykresów
+  <http://localhost:8080/maps/tile_map.html>
+
+* **Odtwarzacz trasy GPS (Playback & HUD):**
+
+  <http://localhost:8080/maps/playback.html>
+
+## Generowanie wykresów analitycznych
+
+Aplikacja udostępnia skrypt do generowania interaktywnych wykresów w formacie HTML na podstawie danych telemetrycznych zgromadzonych w bazie:
 
 1. **Uruchomienie skryptu:**
-   ```bash
-   uv run src/plots.py
-   ```
-   Wykresy interaktywne HTML zostaną zapisane w katalogu `plots/`.
 
-2. **Podgląd w przeglądarce:**
-     ```powershell
-     Get-ChildItem -Path "plots\*.html" | ForEach-Object { Start-Process $_.FullName }
-     ```
+   ```
+   uv run src/plots.py
+   
+   ```
+
+   Wykresy zostaną zapisane w katalogu `plots/` (m.in. trójwymiarowy model przeciążeń z akcelerometru, skyplot satelitów GSV, histogramy prędkości i kursów, analiza parametrów DOP).
+
+2. **Podgląd wykresów w przeglądarce (PowerShell):**
+
+   ```
+   Get-ChildItem -Path "plots\*.html" | ForEach-Object { Start-Process $_.FullName }
+   
+   ```
 
 ## Przy pracy nad bazą lub parserem
 
-W trakcie rozwijania schematu SQL (`init_db.sql`) lub modyfikacji logiki w parserze (`parser.py`), najszybszym sposobem na zresetowanie środowiska, wyczyszczenie wolumenu i załadowanie danych od nowa jest sekwencja:
+W trakcie modyfikowania struktury SQL (`init_db.sql`) lub reguł kwalifikacji w parserze (`src/parser.py`), najszybszym sposobem na zresetowanie środowiska, wyczyszczenie wolumenu i załadowanie danych od nowa jest sekwencja:
 
 ### Pełny reset bazy i ponowne sparsowanie logów
-```powershell
-# 1. Zatrzymanie kontenerów i usunięcie starego wolumenu danych
+
+```
+# 1. Zatrzymanie kontenerów i usunięcie starego wolumenu bazy
 docker compose down -v
 
-# 2. Uruchomienie bazy na czysto (z załadowaniem aktualnego init_db.sql)
+# 2. Uruchomienie infrastruktury na czysto (z załadowaniem aktualnego init_db.sql)
 docker compose up -d
 
 # 3. Zresetowanie wskaźnika przetworzonych linii do zera
@@ -155,4 +217,5 @@ Set-Content -Path "data/state.txt" -Value "0"
 
 # 4. Ponowne uruchomienie parsera
 uv run src/parser.py
+
 ```
