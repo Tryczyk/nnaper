@@ -17,7 +17,7 @@ def plot_gsensord(df: pd.DataFrame):
     if df.empty:
         return
 
-    sample_df = df.sample(min(len(df), 25000), random_state=42).sort_index()
+    sample_df = df.sort_index()
     sample_df["g_mag"] = np.sqrt(sample_df["g_x"] ** 2 + sample_df["g_y"] ** 2 + sample_df["g_z"] ** 2)
 
     fig_3d = px.scatter_3d(
@@ -42,7 +42,6 @@ def plot_satellites(df: pd.DataFrame):
     samples = df.dropna(subset=["elevation", "azimuth"])
     if samples.empty:
         return
-    samples = samples.sample(min(len(samples), 5000), random_state=42)
     fig = px.scatter_polar(
         samples,
         r=90.0 - samples["elevation"],
@@ -67,11 +66,11 @@ def main():
 
     with psycopg.connect(DB_URL) as conn:
         epochs = pd.read_sql(
-            "SELECT g_x::float, g_y::float, g_z::float FROM epochs LIMIT 500000;",
+            "SELECT g_x::float, g_y::float, g_z::float FROM epochs;",
             conn,
         )
         satellites = pd.read_sql(
-            "SELECT prn, elevation, azimuth FROM satellite LIMIT 50000;",
+            "SELECT prn, elevation, azimuth FROM satellite;",
             conn,
         )
 

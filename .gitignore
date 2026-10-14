@@ -3,6 +3,7 @@
 *.pyc
 *.pbf
 .env
+maps/runtime-config.local.js
 *.pmtiles
 *.gz
 *.zip

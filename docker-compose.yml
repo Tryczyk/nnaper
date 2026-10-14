@@ -3,16 +3,16 @@ services:
     image: postgis/postgis:16-3.4
     container_name: nnaper_db
     environment:
-      - POSTGRES_USER=nnaper
-      - POSTGRES_PASSWORD=nnaper
-      - POSTGRES_DB=nnaper_db
+      - POSTGRES_USER=${POSTGRES_USER:-nnaper}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-nnaper}
+      - POSTGRES_DB=${POSTGRES_DB:-nnaper_db}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - nnaper_pgdata:/var/lib/postgresql/data
       - ./init_db.sql:/docker-entrypoint-initdb.d/init_db.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U nnaper -d nnaper_db"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 3s
       timeout: 3s
       retries: 10
@@ -25,9 +25,10 @@ services:
     volumes:
       - .:/app
     ports:
-      - "8000:8000"
+      - "${API_PORT:-8000}:8000"
     environment:
-      - DB_URL=postgresql://nnaper:nnaper@db:5432/nnaper_db
+      - DB_URL=postgresql://${POSTGRES_USER:-nnaper}:${POSTGRES_PASSWORD:-nnaper}@db:5432/${POSTGRES_DB:-nnaper_db}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
       - PYTHONPATH=/app
     command: >
       sh -c "pip install --no-cache-dir fastapi uvicorn 'psycopg[binary]' python-dotenv &&
@@ -43,7 +44,7 @@ services:
     volumes:
       - ./osm_data:/data
     ports:
-      - "5000:5000"
+      - "${OSRM_PORT:-5000}:5000"
     environment:
       - OSM_FILE_NAME=${OSM_FILE_NAME:-pomorskie.osm.pbf}
     entrypoint: ["/bin/sh", "-c"]
@@ -69,14 +70,15 @@ services:
       - ./osm_data:/data
     environment:
       - OSM_FILE_NAME=${OSM_FILE_NAME:-pomorskie.osm.pbf}
+      - PMTILES_FILE=${PMTILES_FILE:-pomorskie.pmtiles}
+      - OSM_DOWNLOAD_BASE_URL=${OSM_DOWNLOAD_BASE_URL:-https://download.geofabrik.de/europe/poland}
     entrypoint: ["/bin/sh", "-c"]
     command: >
       "apk add --no-cache curl &&
-       if [ ! -f /data/pomorskie.pmtiles ] && [ ! -f /data/$${OSM_FILE_NAME} ]; then
+       if [ ! -f /data/$${PMTILES_FILE} ] && [ ! -f /data/$${OSM_FILE_NAME} ]; then
          echo '[DOCKER] Brak kafelkow i pliku /data/'$${OSM_FILE_NAME}'. Pobieranie PBF z Geofabrik...';
          REGION=$$(echo $${OSM_FILE_NAME} | sed 's/\.osm\.pbf//' | sed 's/\.pbf//');
-         curl -L --fail https://download.geofabrik.de/europe/poland/$${REGION}-latest.osm.pbf -o /data/$${OSM_FILE_NAME} || \
-         curl -L --fail https://download.geofabrik.de/europe/poland/pomorskie-latest.osm.pbf -o /data/pomorskie.osm.pbf;
+         curl -L --fail $${OSM_DOWNLOAD_BASE_URL}/$${REGION}-latest.osm.pbf -o /data/$${OSM_FILE_NAME};
        else
          echo '[DOCKER] PBF lub kafelki juz istnieja. Pomijam pobieranie.';
        fi"
@@ -88,17 +90,19 @@ services:
       tiles-downloader:
         condition: service_completed_successfully
     environment:
-      - JAVA_OPTS=-Xmx4g
+      - JAVA_OPTS=${PLANETILER_JAVA_OPTS:--Xmx4g}
+      - OSM_FILE_NAME=${OSM_FILE_NAME:-pomorskie.osm.pbf}
+      - PMTILES_FILE=${PMTILES_FILE:-pomorskie.pmtiles}
     volumes:
       - ./osm_data:/data
     entrypoint: ["/bin/sh", "-c"]
     command: >
-      "if [ -f /data/pomorskie.pmtiles ] && [ \"$(head -c 7 /data/pomorskie.pmtiles)\" = 'PMTiles' ]; then
-         echo '[DOCKER] Poprawne archiwum /data/pomorskie.pmtiles juz istnieje. Pomijam Planetiler.';
+      "if [ -f /data/$${PMTILES_FILE} ] && [ \"$(head -c 7 /data/$${PMTILES_FILE})\" = 'PMTiles' ]; then
+         echo '[DOCKER] Poprawne archiwum /data/'$${PMTILES_FILE}' juz istnieje. Pomijam Planetiler.';
          exit 0;
        fi;
        echo '[DOCKER] Brak poprawnego archiwum PMTiles. Uruchamiam Planetiler.';
-       exec java -cp @/app/jib-classpath-file com.onthegomap.planetiler.Main --osm-path=/data/$${OSM_FILE_NAME:-pomorskie.osm.pbf} --output=/data/pomorskie.pmtiles --download"
+       exec java -cp @/app/jib-classpath-file com.onthegomap.planetiler.Main --osm-path=/data/$${OSM_FILE_NAME} --output=/data/$${PMTILES_FILE} --download"
 
   tiles-server:
     image: caddy:alpine
@@ -107,10 +111,29 @@ services:
       tiles-generator:
         condition: service_completed_successfully
     ports:
-      - "8080:8080"
+      - "${TILES_PORT:-8080}:8080"
     volumes:
       - .:/usr/share/caddy
-    command: caddy file-server --root /usr/share/caddy --listen :8080 --access-log
+    environment:
+      - API_PUBLIC_URL=${API_PUBLIC_URL:-http://localhost:8000}
+      - TILES_PUBLIC_URL=${TILES_PUBLIC_URL:-http://localhost:8080}
+      - OSRM_PUBLIC_URL=${OSRM_PUBLIC_URL:-http://localhost:5000}
+      - PHOTON_URL=${PHOTON_URL:-https://photon.komoot.io}
+      - PHOTON_BBOX=${PHOTON_BBOX:-14.1,53.9,19.9,55.9}
+      - PHOTON_SEARCH_LIMIT=${PHOTON_SEARCH_LIMIT:-50}
+      - PMTILES_FILE=${PMTILES_FILE:-pomorskie.pmtiles}
+    command: >
+      sh -c "printf '%s\\n' \\
+        \"window.NNAPER_CONFIG = {\" \\
+        \"  API_BASE_URL: '$${API_PUBLIC_URL}',\" \\
+        \"  TILES_BASE_URL: '$${TILES_PUBLIC_URL}',\" \\
+        \"  OSRM_URL: '$${OSRM_PUBLIC_URL}',\" \\
+        \"  PHOTON_URL: '$${PHOTON_URL}',\" \\
+        \"  PHOTON_BBOX: '$${PHOTON_BBOX}',\" \\
+        \"  PHOTON_SEARCH_LIMIT: $${PHOTON_SEARCH_LIMIT},\" \\
+        \"  PMTILES_FILE: '$${PMTILES_FILE}'\" \\
+        \"};\" > /usr/share/caddy/maps/runtime-config.local.js && \\
+        caddy file-server --root /usr/share/caddy --listen :8080 --access-log"
     restart: unless-stopped
 
   open-browser:
@@ -120,6 +143,8 @@ services:
       tiles-server:
         condition: service_started
     entrypoint: ["/bin/sh", "-c"]
+    environment:
+      - PUBLIC_MAP_URL=${TILES_PUBLIC_URL:-http://localhost:8080}/maps/tile_map.html
     command: >
       "apk add --no-cache curl &&
        echo '[DOCKER] Oczekiwanie na serwer mapy...' &&
@@ -127,7 +152,7 @@ services:
          sleep 1;
        done &&
        echo '========================================================' &&
-       echo '  MAPA GOTOWA: http://localhost:8080/maps/tile_map.html ' &&
+      echo '  MAPA GOTOWA: '$${PUBLIC_MAP_URL}' ' &&
        echo '========================================================'"
 
 volumes:

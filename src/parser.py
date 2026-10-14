@@ -3,11 +3,27 @@ import math
 import uuid
 import psycopg
 
-from constants import DATA_FILE_PATH, STATE_FILE_PATH, DB_URL
+from constants import (
+    BATCH_SIZE,
+    DATA_FILE_PATH,
+    DB_URL,
+    DEFAULT_PROFILE_EMAIL_DOMAIN,
+    DEFAULT_PROFILE_NAME,
+    DEFAULT_PROFILE_PASSWORD_HASH,
+    DEFAULT_PROFILE_USERNAME,
+    MAX_HDOP,
+    MAX_SPEED_KMH,
+    PREFERRED_HDOP,
+    STATE_FILE_PATH,
+)
 from utils import ddm_to_dd, parse_nmea_time, to_int_or_none
 
 
-def get_or_create_default_profile(cur, username="admin", profile_name="samochód") -> str:
+def get_or_create_default_profile(
+    cur,
+    username=DEFAULT_PROFILE_USERNAME,
+    profile_name=DEFAULT_PROFILE_NAME,
+) -> str:
     cur.execute(
         """
         INSERT INTO users (username, email, password_hash)
@@ -15,7 +31,7 @@ def get_or_create_default_profile(cur, username="admin", profile_name="samochód
         ON CONFLICT (username) DO UPDATE SET username = EXCLUDED.username
         RETURNING user_id;
         """,
-        (username, f"{username}@local.dev", "placeholder_hash"),
+        (username, f"{username}@{DEFAULT_PROFILE_EMAIL_DOMAIN}", DEFAULT_PROFILE_PASSWORD_HASH),
     )
     user_id = cur.fetchone()[0]
 
@@ -67,8 +83,8 @@ class RawEpoch:
 def resolve_and_qualify_epoch(
     epoch: RawEpoch,
     previous_point=None,
-    max_hdop: float = 5.0,
-    max_speed_kmh: float = 500.0,
+    max_hdop: float = MAX_HDOP,
+    max_speed_kmh: float = MAX_SPEED_KMH,
 ):
 
     rmc_time, rmc_status, rmc_lat, rmc_lon, rmc_date = epoch.gprmc or (None,) * 5
@@ -105,7 +121,7 @@ def resolve_and_qualify_epoch(
     chosen_lat = None
     chosen_lon = None
 
-    if gga_lat is not None and gga_lon is not None and (gga_fix_q and gga_fix_q > 0) and (gga_hdop is None or gga_hdop <= 3.0):
+    if gga_lat is not None and gga_lon is not None and (gga_fix_q and gga_fix_q > 0) and (gga_hdop is None or gga_hdop <= PREFERRED_HDOP):
         chosen_lat, chosen_lon = gga_lat, gga_lon
     elif rmc_lat is not None and rmc_lon is not None and rmc_status == 'A':
         chosen_lat, chosen_lon = rmc_lat, rmc_lon
@@ -207,7 +223,7 @@ class CopyBatchBuffer:
         self.satellite.clear()
 
 
-def parse_data(data_file_path=DATA_FILE_PATH, batch_size=10000):
+def parse_data(data_file_path=DATA_FILE_PATH, batch_size=BATCH_SIZE):
     if not data_file_path.exists():
         print(f"Data file not found: {data_file_path}")
         return
@@ -225,7 +241,7 @@ def parse_data(data_file_path=DATA_FILE_PATH, batch_size=10000):
             cur.execute("SET synchronous_commit = OFF;")
             cur.execute("SET work_mem = '64MB';")
 
-            profile_id = get_or_create_default_profile(cur, username="admin", profile_name="samochód")
+            profile_id = get_or_create_default_profile(cur)
             conn.commit()
 
             if last_line_index == 0:

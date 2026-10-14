@@ -1,8 +1,14 @@
-const PMTILES_URL = 'pmtiles://http://localhost:8080/osm_data/pomorskie.pmtiles';
+const config = window.NNAPER_CONFIG || {
+  TILES_BASE_URL: 'http://localhost:8080',
+  PMTILES_FILE: 'pomorskie.pmtiles',
+  GLYPHS_URL: 'https://fonts.openmaptiles.org/{fontstack}/{range}.pbf',
+  TERRAIN_TILES_URL: 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
+};
+const PMTILES_URL = `pmtiles://${config.TILES_BASE_URL.replace(/\/$/, '')}/osm_data/${config.PMTILES_FILE}`;
 
 const MAP_STYLE = {
   version: 8,
-  glyphs: "https://fonts.openmaptiles.org/{fontstack}/{range}.pbf",
+  glyphs: config.GLYPHS_URL || "https://fonts.openmaptiles.org/{fontstack}/{range}.pbf",
   sources: {
     'pomorskie-tiles': {
       type: 'vector',
@@ -10,7 +16,7 @@ const MAP_STYLE = {
     },
     'terrain-dem': {
       type: 'raster-dem',
-      tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
+      tiles: [config.TERRAIN_TILES_URL || 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
       tileSize: 256,
       maxzoom: 15,
       encoding: 'terrarium'

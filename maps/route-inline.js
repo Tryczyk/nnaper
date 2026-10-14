@@ -14,6 +14,10 @@ const inlineContextMenu = document.getElementById('inline-route-context-menu');
 const mapContextMenu = document.getElementById('map-context-menu');
 let mapContextLocation = null;
 const routeSegmentColors = ['#0284c7', '#16a34a', '#f59e0b', '#9333ea', '#0891b2', '#e11d48'];
+const photonUrl = (window.NNAPER_CONFIG?.PHOTON_URL || 'https://photon.komoot.io').replace(/\/$/, '');
+const photonBbox = window.NNAPER_CONFIG?.PHOTON_BBOX || '14.1,53.9,19.9,55.9';
+const photonSearchLimit = window.NNAPER_CONFIG?.PHOTON_SEARCH_LIMIT || 50;
+const osrmUrl = (window.NNAPER_CONFIG?.OSRM_URL || 'http://localhost:5000').replace(/\/$/, '');
 document.body.appendChild(inlineContextMenu);
 document.body.appendChild(mapContextMenu);
 
@@ -108,7 +112,7 @@ async function searchInlinePoint(input, point, suggestions) {
   routePlannerHint.innerText = 'Wyszukiwanie...';
   routeStartAbortController = new AbortController();
   try {
-    const response = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=20&bbox=14.1,53.9,19.9,55.9`, {
+    const response = await fetch(`${photonUrl}/api/?q=${encodeURIComponent(query)}&limit=${photonSearchLimit}&bbox=${photonBbox}`, {
       signal: routeStartAbortController.signal
     });
     if (!response.ok) throw new Error(`Photon returned ${response.status}`);
@@ -168,7 +172,7 @@ async function getMapContextPlace() {
     name: 'Pobieranie adresu...',
     display_name: 'Pobieranie adresu...'
   };
-  const response = await fetch(`https://photon.komoot.io/reverse?lon=${encodeURIComponent(place.lon)}&lat=${encodeURIComponent(place.lat)}`);
+  const response = await fetch(`${photonUrl}/reverse?lon=${encodeURIComponent(place.lon)}&lat=${encodeURIComponent(place.lat)}`);
   if (!response.ok) throw new Error(`Photon returned ${response.status}`);
   const data = await response.json();
   const feature = data.features && data.features[0];
@@ -207,7 +211,7 @@ function addInlineContextPoint(type) {
 
 async function reverseGeocodeInlinePoint(place) {
   try {
-    const response = await fetch(`https://photon.komoot.io/reverse?lon=${encodeURIComponent(place.lon)}&lat=${encodeURIComponent(place.lat)}`);
+    const response = await fetch(`${photonUrl}/reverse?lon=${encodeURIComponent(place.lon)}&lat=${encodeURIComponent(place.lat)}`);
     if (!response.ok) throw new Error(`Photon returned ${response.status}`);
     const data = await response.json();
     const properties = data.features && data.features[0] && data.features[0].properties;
@@ -411,7 +415,7 @@ function bringInlineRouteLayersToFront() {
 
 async function requestOsrmRoutes(coordinates, calculationId) {
   const response = await fetch(
-    `http://localhost:5000/route/v1/driving/${coordinates}?overview=full&steps=true&geometries=geojson&alternatives=3`
+    `${osrmUrl}/route/v1/driving/${coordinates}?overview=full&steps=true&geometries=geojson&alternatives=3`
   );
   if (calculationId !== inlineRouteCalculationId) return [];
   if (!response.ok) throw new Error(`OSRM zwrócił ${response.status}`);

@@ -3,19 +3,18 @@ from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 import psycopg
 from psycopg.rows import dict_row
-import os
+
+from constants import CORS_ORIGINS, DB_URL
 
 app = FastAPI(title="nnaper API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:8080", "http://127.0.0.1:8080"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-DB_URL = os.getenv("DB_URL", "postgresql://nnaper:nnaper@localhost:5432/nnaper_db")
 
 @app.get("/api/dates-tree")
 def get_dates_tree():

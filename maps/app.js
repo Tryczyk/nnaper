@@ -1,7 +1,11 @@
 const protocol = new pmtiles.Protocol();
 maplibregl.addProtocol("pmtiles", protocol.tile);
 
-const TRACK_TILES_URL = 'http://localhost:8000/api/track/{z}/{x}/{y}.pbf';
+const apiBaseUrl = (window.NNAPER_CONFIG?.API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '');
+const photonUrl = (window.NNAPER_CONFIG?.PHOTON_URL || 'https://photon.komoot.io').replace(/\/$/, '');
+const photonBbox = window.NNAPER_CONFIG?.PHOTON_BBOX || '14.1,53.9,19.9,55.9';
+const photonSearchLimit = window.NNAPER_CONFIG?.PHOTON_SEARCH_LIMIT || 50;
+const TRACK_TILES_URL = `${apiBaseUrl}/api/track/{z}/{x}/{y}.pbf`;
 const trackMonthLayers = new Map();
 const trackLayerIds = new Set(['GPS / Ślad trasy']);
 
@@ -220,7 +224,7 @@ function addTrackMonthLayers(months) {
 
 async function buildInlineTimeFilter(container) {
   try {
-    const res = await fetch('http://localhost:8000/api/dates-tree');
+    const res = await fetch(`${apiBaseUrl}/api/dates-tree`);
     if (!res.ok) throw new Error('Błąd API');
     const data = await res.json();
 
@@ -854,7 +858,7 @@ async function loadPointFullDetails(epochId) {
   content.innerHTML = '<div style="color:#94a3b8;">Odpytywanie bazy danych...</div>';
 
   try {
-    const res = await fetch(`http://localhost:8000/api/epoch/${epochId}`);
+    const res = await fetch(`${apiBaseUrl}/api/epoch/${epochId}`);
     if (!res.ok) throw new Error('Błąd odpytania serwera');
     const data = await res.json();
     if (data.error) throw new Error(data.error);
@@ -1057,8 +1061,7 @@ searchInput.addEventListener('input', (e) => {
         return;
       }
 
-      const pomorskieBbox = '14.1,53.9,19.9,55.9';
-      const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=50&bbox=${pomorskieBbox}`;
+      const url = `${photonUrl}/api/?q=${encodeURIComponent(query)}&limit=${photonSearchLimit}&bbox=${photonBbox}`;
       searchAbortController = new AbortController();
       const response = await fetch(url, { signal: searchAbortController.signal });
       if (!response.ok) throw new Error(`Błąd wyszukiwania: ${response.status}`);

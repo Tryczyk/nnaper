@@ -7,6 +7,8 @@
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
   <script src="https://unpkg.com/pmtiles@3.0.7/dist/pmtiles.js"></script>
+  <script src="runtime-config.js"></script>
+  <script src="runtime-config.local.js"></script>
   <script src="layers.js"></script>
   <style>
     body, html { margin: 0; padding: 0; width: 100%; height: 100%; font-family: system-ui, sans-serif; background: #090d16; overflow: hidden; color: #f8fafc; }
@@ -169,7 +171,8 @@
   async function loadDates() {
     const sel = document.getElementById('date-select');
     try {
-      const res = await fetch('http://localhost:8000/api/dates-tree', { cache: 'no-store' });
+      const apiBaseUrl = (window.NNAPER_CONFIG?.API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '');
+      const res = await fetch(`${apiBaseUrl}/api/dates-tree`, { cache: 'no-store' });
       const tree = await res.json();
       availableDates = [];
       Object.keys(tree).sort().forEach(y => {
@@ -199,7 +202,7 @@
   async function loadTrackForDay(dayStr) {
     pausePlayback();
     try {
-      const res = await fetch(`http://localhost:8000/api/playback-day?day=${dayStr}`);
+      const res = await fetch(`${apiBaseUrl}/api/playback-day?day=${dayStr}`);
       if (!res.ok) {
         const errJson = await res.json().catch(() => ({}));
         throw new Error(errJson.detail || `HTTP ${res.status}`);

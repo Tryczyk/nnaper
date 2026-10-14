@@ -134,8 +134,17 @@ W pliku `.env` wskaż parametry połączenia z bazą oraz nazwę wyciągu OSM (d
 ```
 DB_URL=postgresql://nnaper:nnaper@localhost:5432/nnaper_db
 OSM_FILE_NAME=pomorskie.osm.pbf
+PMTILES_FILE=pomorskie.pmtiles
+API_PORT=8000
+OSRM_PORT=5000
+TILES_PORT=8080
+API_PUBLIC_URL=http://localhost:8000
+TILES_PUBLIC_URL=http://localhost:8080
+OSRM_PUBLIC_URL=http://localhost:5000
 
 ```
+
+Pozostale ustawienia, miedzy innymi dane dostepowe Postgresa, CORS, Photon, sciezki parsera oraz progi walidacji GPS, sa opisane w pliku `.env.example`.
 
 > **Uwaga:** Pliki `.pbf`, `.pmtiles`, dane bazy danych oraz duże pliki `data/raw.txt` są wykluczone z repozytorium Git przez `.gitignore`.
 
