@@ -28,8 +28,6 @@ Aplikacja do przetwarzania i analizy danych lokalizacyjnych GPS w formacie **NME
 
    * **Hierarchiczny filtr czasu:** Selektywny wybór lat, miesięcy i poszczególnych dni z dynamicznym przełączaniem warstw MVT bez konieczności ponownego ładowania danych pozostałych miesięcy.
 
-   * **Inspekcja punktów telemetrycznych:** Kliknięcie w punkt trasy wyświetla pełne dane z bazy: rekordy epoki, użytkownika, profil oraz poszczególne zdekodowane ramki NMEA (`$GPRMC`, `$GPGGA`, `$GPVTG`, `$GPGSA`, `$GPGSV`, `$GSENSORD`).
-
    * **Wizualizacja satelitów:** Wizualizacja pozycji i promieni satelitów w dwóch trybach: lokalnym (nieboskłon / skyplot) lub globalnym sferycznym (orbita MEO \~20 200 km).
 
    * **Wyszukiwarka i geokodowanie:** Zintegrowana wyszukiwarka miejsc i adresów bazująca na API Photon (Komoot).
