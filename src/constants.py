@@ -15,9 +15,14 @@ PLOTS_DIR = Path(os.getenv("PLOTS_DIR", BASE_DIR / "plots"))
 PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Połączenie z bazą danych
-DB_URL = os.environ["DB_URL"]
+DB_URL = os.getenv("DB_URL", "postgresql://nnaper:nnaper@localhost:5432/nnaper_db")
 
-CORS_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ORIGINS", "").split(",") if origin.strip()]
+_cors_env = os.getenv("CORS_ORIGINS", "").strip()
+CORS_ORIGINS = (
+    [origin.strip() for origin in _cors_env.split(",") if origin.strip()]
+    if _cors_env
+    else ["http://localhost:8080", "http://127.0.0.1:8080"]
+)
 
 DEFAULT_PROFILE_USERNAME = os.getenv("DEFAULT_PROFILE_USERNAME", "admin")
 DEFAULT_PROFILE_NAME = os.getenv("DEFAULT_PROFILE_NAME", "samochód")

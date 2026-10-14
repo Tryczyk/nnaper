@@ -111,6 +111,8 @@
   const protocol = new pmtiles.Protocol();
   maplibregl.addProtocol("pmtiles", protocol.tile);
 
+  const apiBaseUrl = (window.NNAPER_CONFIG?.API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '');
+
   const map = new maplibregl.Map({
     container: 'map',
     center: [18.6466, 54.3520],
@@ -171,7 +173,6 @@
   async function loadDates() {
     const sel = document.getElementById('date-select');
     try {
-      const apiBaseUrl = (window.NNAPER_CONFIG?.API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '');
       const res = await fetch(`${apiBaseUrl}/api/dates-tree`, { cache: 'no-store' });
       const tree = await res.json();
       availableDates = [];

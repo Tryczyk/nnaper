@@ -124,7 +124,7 @@ services:
       - PMTILES_FILE=${PMTILES_FILE:-pomorskie.pmtiles}
     command: >
       sh -c "printf '%s\\n' \\
-        \"window.NNAPER_CONFIG = {\" \\
+        \"window.NNAPER_CONFIG = Object.assign(window.NNAPER_CONFIG || {}, {\" \\
         \"  API_BASE_URL: '$${API_PUBLIC_URL}',\" \\
         \"  TILES_BASE_URL: '$${TILES_PUBLIC_URL}',\" \\
         \"  OSRM_URL: '$${OSRM_PUBLIC_URL}',\" \\
@@ -132,7 +132,7 @@ services:
         \"  PHOTON_BBOX: '$${PHOTON_BBOX}',\" \\
         \"  PHOTON_SEARCH_LIMIT: $${PHOTON_SEARCH_LIMIT},\" \\
         \"  PMTILES_FILE: '$${PMTILES_FILE}'\" \\
-        \"};\" > /usr/share/caddy/maps/runtime-config.local.js && \\
+        \"});\" > /usr/share/caddy/maps/runtime-config.local.js && \\
         caddy file-server --root /usr/share/caddy --listen :8080 --access-log"
     restart: unless-stopped
 

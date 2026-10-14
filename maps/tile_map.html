@@ -40,7 +40,10 @@
 <div id="route-planner-panel" class="route-planner-panel" aria-hidden="true">
   <div class="route-planner-header">
     <h3>Planowanie trasy</h3>
-    <button class="route-action-btn route-planner-back-original" id="btn-route-back-to-original" title="Wróć do pierwotnej lokalizacji" aria-label="Wróć do pierwotnej lokalizacji">←</button>
+    <div style="display: flex; gap: 4px;">
+      <button class="route-action-btn route-planner-back-original" id="btn-route-back-to-original" title="Wróć do pierwotnej lokalizacji" aria-label="Wróć do pierwotnej lokalizacji">←</button>
+      <button class="route-action-btn route-planner-close" id="btn-route-close" title="Zamknij planowanie trasy" aria-label="Zamknij planowanie trasy">✕</button>
+    </div>
   </div>
   <div id="inline-route-context-menu" class="inline-route-context-menu">
     <button id="inline-context-stop">Dodaj punkt trasy</button>

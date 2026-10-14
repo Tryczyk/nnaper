@@ -388,12 +388,14 @@ body, html {
 .route-planner-panel.active { display: block; }
 .route-planner-header { display: flex; justify-content: space-between; align-items: center; }
 .route-planner-header h3 { margin: 0 0 10px; color: #38bdf8; }
-.route-planner-back-original {
-  width: 42px;
-  min-width: 42px;
-  margin: 0 0 10px 8px;
-  padding-left: 10px;
-  padding-right: 10px;
+.route-planner-back-original,
+.route-planner-close {
+  width: 36px;
+  min-width: 36px;
+  margin: 0 0 10px 0;
+  padding: 6px;
+  text-align: center;
+  line-height: 1;
 }
 .route-planner-navigation { display: flex; }
 .route-point-row { display: flex; align-items: center; gap: 7px; position: relative; min-height: 42px; }

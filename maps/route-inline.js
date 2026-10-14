@@ -1,3 +1,4 @@
+(() => {
 const routePlannerPanel = document.getElementById('route-planner-panel');
 const routeStartSuggestions = document.getElementById('route-start-suggestions');
 const routePlannerStops = document.getElementById('route-planner-stops');
@@ -97,55 +98,96 @@ document.getElementById('btn-route-back-to-original').addEventListener('click', 
   }
 });
 
-async function searchInlinePoint(input, point, suggestions) {
+const btnRouteClose = document.getElementById('btn-route-close');
+if (btnRouteClose) {
+  btnRouteClose.addEventListener('click', closeInlineRoutePlanner);
+}
+
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && routePlannerPanel.classList.contains('active')) {
+    closeInlineRoutePlanner();
+  }
+});
+
+const searchCache = new Map();
+let inlineSearchDebounceTimer = null;
+
+function searchInlinePoint(input, point, suggestions) {
+  clearTimeout(inlineSearchDebounceTimer);
   const query = input.value.trim();
   const requestId = ++routeStartRequestId;
   if (routeStartAbortController) routeStartAbortController.abort();
   suggestions.innerHTML = '';
-  point.place = null;
-  renderInlineRouteMarkers();
-  scheduleInlineRouteCalculation();
+
   if (!query) {
+    point.place = null;
     routePlannerHint.innerText = 'Wpisz miejsce startu.';
+    renderInlineRouteMarkers();
+    scheduleInlineRouteCalculation();
     return;
   }
+
   routePlannerHint.innerText = 'Wyszukiwanie...';
+  inlineSearchDebounceTimer = setTimeout(() => {
+    executeInlinePointSearch(input, point, suggestions, query, requestId);
+  }, 250);
+}
+
+async function executeInlinePointSearch(input, point, suggestions, query, requestId) {
+  if (searchCache.has(query)) {
+    renderInlineSearchSuggestions(searchCache.get(query), input, point, suggestions, requestId);
+    return;
+  }
+
   routeStartAbortController = new AbortController();
+  const timeoutId = setTimeout(() => routeStartAbortController.abort(), 4000);
+
   try {
     const response = await fetch(`${photonUrl}/api/?q=${encodeURIComponent(query)}&limit=${photonSearchLimit}&bbox=${photonBbox}`, {
       signal: routeStartAbortController.signal
     });
+    clearTimeout(timeoutId);
     if (!response.ok) throw new Error(`Photon returned ${response.status}`);
     const data = await response.json();
     if (requestId !== routeStartRequestId) return;
-    suggestions.innerHTML = '';
     const features = Array.isArray(data.features) ? data.features : [];
-    features.slice(0, 6).forEach(feature => {
-      const properties = feature.properties || {};
-      const coordinates = feature.geometry && feature.geometry.coordinates;
-      if (!Array.isArray(coordinates) || coordinates.length < 2) return;
-      const place = { ...properties, display_name: inlineRoutePlaceLabel(properties), lon: coordinates[0], lat: coordinates[1] };
-      const item = document.createElement('div');
-      item.className = 'route-start-suggestion';
-      item.innerText = place.display_name;
-      item.addEventListener('click', () => {
-        point.place = place;
-        input.value = place.display_name;
-        suggestions.innerHTML = '';
-        routePlannerHint.innerText = 'Punkt wybrany.';
-        renderInlineRouteLists();
-        renderInlineRouteMarkers();
-        scheduleInlineRouteCalculation();
-      });
-      suggestions.appendChild(item);
-    });
-    if (!suggestions.children.length) routePlannerHint.innerText = 'Nie znaleziono adresu.';
+    searchCache.set(query, features);
+    renderInlineSearchSuggestions(features, input, point, suggestions, requestId);
   } catch (error) {
-    if (error.name === 'AbortError') return;
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError' && requestId !== routeStartRequestId) return;
     if (requestId !== routeStartRequestId) return;
     suggestions.innerHTML = '';
-    routePlannerHint.innerText = 'Nie udało się wyszukać miejsca startu.';
-    console.error('Nie udało się wyszukać miejsca startu:', error);
+    routePlannerHint.innerText = 'Nie udało się wyszukać adresu (serwer geokodowania nie odpowiada).';
+  }
+}
+
+function renderInlineSearchSuggestions(features, input, point, suggestions, requestId) {
+  if (requestId !== routeStartRequestId) return;
+  suggestions.innerHTML = '';
+  features.slice(0, 6).forEach(feature => {
+    const properties = feature.properties || {};
+    const coordinates = feature.geometry && feature.geometry.coordinates;
+    if (!Array.isArray(coordinates) || coordinates.length < 2) return;
+    const place = { ...properties, display_name: inlineRoutePlaceLabel(properties), lon: coordinates[0], lat: coordinates[1] };
+    const item = document.createElement('div');
+    item.className = 'route-start-suggestion';
+    item.innerText = place.display_name;
+    item.addEventListener('click', () => {
+      point.place = place;
+      input.value = place.display_name;
+      suggestions.innerHTML = '';
+      routePlannerHint.innerText = 'Punkt wybrany.';
+      renderInlineRouteLists();
+      renderInlineRouteMarkers();
+      scheduleInlineRouteCalculation();
+    });
+    suggestions.appendChild(item);
+  });
+  if (!suggestions.children.length) {
+    routePlannerHint.innerText = 'Nie znaleziono adresu.';
+  } else {
+    routePlannerHint.innerText = 'Wybierz podpowiedź z listy.';
   }
 }
 
@@ -165,44 +207,62 @@ map.on('contextmenu', event => {
   mapContextMenu.classList.add('active');
 });
 
-async function getMapContextPlace() {
-  if (!mapContextLocation) return null;
-  const place = {
-    ...mapContextLocation,
-    name: 'Pobieranie adresu...',
-    display_name: 'Pobieranie adresu...'
-  };
-  const response = await fetch(`${photonUrl}/reverse?lon=${encodeURIComponent(place.lon)}&lat=${encodeURIComponent(place.lat)}`);
-  if (!response.ok) throw new Error(`Photon returned ${response.status}`);
-  const data = await response.json();
-  const feature = data.features && data.features[0];
-  const properties = feature && feature.properties;
-  if (properties) {
-    Object.assign(place, properties);
-    place.display_name = inlineRoutePlaceLabel(properties);
-    place.name = place.display_name;
-    place.address = {
-      road: properties.street,
-      house_number: properties.housenumber,
-      city: properties.city || properties.town || properties.village,
-      state: properties.state,
-      country: properties.country,
-      postcode: properties.postcode
-    };
+const reverseGeocodeCache = new Map();
+
+async function fetchReverseGeocode(place, timeoutMs = 3000) {
+  if (!place || !Number.isFinite(Number(place.lon)) || !Number.isFinite(Number(place.lat))) return null;
+  const cacheKey = `${Number(place.lat).toFixed(4)},${Number(place.lon).toFixed(4)}`;
+  if (reverseGeocodeCache.has(cacheKey)) {
+    return reverseGeocodeCache.get(cacheKey);
   }
-  return place;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(
+      `${photonUrl}/reverse?lon=${encodeURIComponent(place.lon)}&lat=${encodeURIComponent(place.lat)}`,
+      { signal: controller.signal }
+    );
+    clearTimeout(timer);
+    if (!response.ok) return null;
+    const data = await response.json();
+    const feature = data.features && data.features[0];
+    const properties = feature && feature.properties;
+    if (properties) {
+      const updated = {
+        ...place,
+        ...properties,
+        display_name: inlineRoutePlaceLabel(properties),
+        name: inlineRoutePlaceLabel(properties),
+        address: {
+          road: properties.street,
+          house_number: properties.housenumber,
+          city: properties.city || properties.town || properties.village,
+          state: properties.state,
+          country: properties.country,
+          postcode: properties.postcode
+        }
+      };
+      reverseGeocodeCache.set(cacheKey, updated);
+      return updated;
+    }
+  } catch (err) {
+    clearTimeout(timer);
+  }
+  return null;
 }
 
 function addInlineContextPoint(type) {
   if (!inlineContextLocation) return;
-  const place = {
-    name: 'Pobieranie adresu...',
-    display_name: 'Pobieranie adresu...',
-    ...inlineContextLocation
-  };
-  inlineRouteState.points.splice(inlineRouteState.points.length - 1, 0, { type: 'stop', place });
+  const loc = inlineContextLocation;
   inlineContextLocation = null;
   inlineContextMenu.classList.remove('active');
+  const place = {
+    name: 'Pobieranie adresu...',
+    display_name: `${Number(loc.lat).toFixed(5)}, ${Number(loc.lon).toFixed(5)}`,
+    lon: loc.lon,
+    lat: loc.lat
+  };
+  inlineRouteState.points.splice(inlineRouteState.points.length - 1, 0, { type: 'stop', place });
   renderInlineRouteLists();
   renderInlineRouteMarkers();
   scheduleInlineRouteCalculation();
@@ -211,19 +271,17 @@ function addInlineContextPoint(type) {
 
 async function reverseGeocodeInlinePoint(place) {
   try {
-    const response = await fetch(`${photonUrl}/reverse?lon=${encodeURIComponent(place.lon)}&lat=${encodeURIComponent(place.lat)}`);
-    if (!response.ok) throw new Error(`Photon returned ${response.status}`);
-    const data = await response.json();
-    const properties = data.features && data.features[0] && data.features[0].properties;
-    if (properties) {
-      Object.assign(place, properties);
-      place.display_name = inlineRoutePlaceLabel(properties);
+    const updated = await fetchReverseGeocode(place, 3000);
+    if (updated) {
+      Object.assign(place, updated);
+      renderInlineRouteLists();
+    } else if (!place.display_name || place.display_name === 'Pobieranie adresu...') {
+      place.display_name = `${Number(place.lat).toFixed(5)}, ${Number(place.lon).toFixed(5)}`;
       place.name = place.display_name;
       renderInlineRouteLists();
     }
   } catch (error) {
-    console.error('Nie udało się pobrać adresu punktu trasy:', error);
-    place.display_name = `${Number(place.lat).toFixed(6)}, ${Number(place.lon).toFixed(6)}`;
+    place.display_name = `${Number(place.lat).toFixed(5)}, ${Number(place.lon).toFixed(5)}`;
     place.name = place.display_name;
     renderInlineRouteLists();
   }
@@ -232,27 +290,42 @@ async function reverseGeocodeInlinePoint(place) {
 document.getElementById('inline-context-stop').addEventListener('click', () => addInlineContextPoint('stop'));
 inlineContextMenu.addEventListener('click', event => event.stopPropagation());
 mapContextMenu.addEventListener('click', event => event.stopPropagation());
-document.getElementById('map-context-route').addEventListener('click', async () => {
+
+document.getElementById('map-context-route').addEventListener('click', () => {
   mapContextMenu.classList.remove('active');
-  try {
-    const place = await getMapContextPlace();
-    if (place) openInlineRoutePlannerFromStart(place);
-  } catch (error) {
-    console.error('Nie udało się pobrać adresu punktu startowego:', error);
-  } finally {
-    mapContextLocation = null;
-  }
+  if (!mapContextLocation) return;
+  const loc = mapContextLocation;
+  mapContextLocation = null;
+  const place = {
+    lon: loc.lon,
+    lat: loc.lat,
+    name: 'Pobieranie adresu...',
+    display_name: `${loc.lat.toFixed(5)}, ${loc.lon.toFixed(5)}`
+  };
+  openInlineRoutePlannerFromStart(place);
+  reverseGeocodeInlinePoint(place);
 });
-document.getElementById('map-context-info').addEventListener('click', async () => {
+
+document.getElementById('map-context-info').addEventListener('click', () => {
   mapContextMenu.classList.remove('active');
-  try {
-    const place = await getMapContextPlace();
-    if (place && typeof displayPlaceDetails === 'function') displayPlaceDetails(place);
-  } catch (error) {
-    console.error('Nie udało się pobrać informacji o miejscu:', error);
-  } finally {
-    mapContextLocation = null;
+  if (!mapContextLocation) return;
+  const loc = mapContextLocation;
+  mapContextLocation = null;
+  const place = {
+    lon: loc.lon,
+    lat: loc.lat,
+    name: `${loc.lat.toFixed(5)}, ${loc.lon.toFixed(5)}`,
+    display_name: `${loc.lat.toFixed(5)}, ${loc.lon.toFixed(5)}`,
+    address: {}
+  };
+  if (typeof displayPlaceDetails === 'function') {
+    displayPlaceDetails(place);
   }
+  fetchReverseGeocode(place, 3000).then(updated => {
+    if (updated && typeof displayPlaceDetails === 'function') {
+      displayPlaceDetails(updated);
+    }
+  });
 });
 document.addEventListener('click', event => {
   if (!inlineContextMenu.contains(event.target)) inlineContextMenu.classList.remove('active');
@@ -415,7 +488,7 @@ function bringInlineRouteLayersToFront() {
 
 async function requestOsrmRoutes(coordinates, calculationId) {
   const response = await fetch(
-    `${osrmUrl}/route/v1/driving/${coordinates}?overview=full&steps=true&geometries=geojson&alternatives=3`
+    `${osrmUrl}/route/v1/driving/${coordinates}?overview=full&steps=false&geometries=geojson&alternatives=false`
   );
   if (calculationId !== inlineRouteCalculationId) return [];
   if (!response.ok) throw new Error(`OSRM zwrócił ${response.status}`);
@@ -516,12 +589,6 @@ async function calculateInlineRoute() {
           'line-opacity': 1
         }
       });
-
-      bringInlineRouteLayersToFront();
-
-      const distance = segmentRoutes.reduce((total, item) => total + Number(item.distance || 0), 0);
-      const duration = segmentRoutes.reduce((total, item) => total + Number(item.duration || 0), 0);
-      routePlannerStats.innerText = `Dystans: ${(distance / 1000).toFixed(1)} km | Czas: ${Math.round(duration / 60)} min`;
     } catch (error) {
       clearInlineRouteLayer();
       routePlannerStats.innerText = error.message === 'Nie można bezpiecznie ominąć punktów zakazu - brak alternatywnej drogi'
@@ -532,6 +599,12 @@ async function calculateInlineRoute() {
     }
   }
 
+  bringInlineRouteLayersToFront();
+
+  const distance = segmentRoutes.reduce((total, item) => total + Number(item.distance || 0), 0);
+  const duration = segmentRoutes.reduce((total, item) => total + Number(item.duration || 0), 0);
+  routePlannerStats.innerText = `Dystans: ${(distance / 1000).toFixed(1)} km | Czas: ${Math.round(duration / 60)} min`;
+
 }
 
 const storedInlineDestination = JSON.parse(localStorage.getItem('nnaper-route-destination') || 'null');
@@ -539,3 +612,7 @@ if (storedInlineDestination) {
   localStorage.removeItem('nnaper-route-destination');
   openInlineRoutePlanner(storedInlineDestination);
 }
+
+window.openInlineRoutePlanner = openInlineRoutePlanner;
+window.openInlineRoutePlannerFromStart = openInlineRoutePlannerFromStart;
+})();

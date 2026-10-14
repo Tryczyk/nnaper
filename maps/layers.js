@@ -1,10 +1,10 @@
-const config = window.NNAPER_CONFIG || {
+const config = Object.assign({
   TILES_BASE_URL: 'http://localhost:8080',
   PMTILES_FILE: 'pomorskie.pmtiles',
   GLYPHS_URL: 'https://fonts.openmaptiles.org/{fontstack}/{range}.pbf',
   TERRAIN_TILES_URL: 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
-};
-const PMTILES_URL = `pmtiles://${config.TILES_BASE_URL.replace(/\/$/, '')}/osm_data/${config.PMTILES_FILE}`;
+}, window.NNAPER_CONFIG || {});
+const PMTILES_URL = `pmtiles://${(config.TILES_BASE_URL || 'http://localhost:8080').replace(/\/$/, '')}/osm_data/${config.PMTILES_FILE || 'pomorskie.pmtiles'}`;
 
 const MAP_STYLE = {
   version: 8,

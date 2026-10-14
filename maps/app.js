@@ -1063,7 +1063,9 @@ searchInput.addEventListener('input', (e) => {
 
       const url = `${photonUrl}/api/?q=${encodeURIComponent(query)}&limit=${photonSearchLimit}&bbox=${photonBbox}`;
       searchAbortController = new AbortController();
+      const searchAbortTimer = setTimeout(() => searchAbortController.abort(), 4000);
       const response = await fetch(url, { signal: searchAbortController.signal });
+      clearTimeout(searchAbortTimer);
       if (!response.ok) throw new Error(`Błąd wyszukiwania: ${response.status}`);
       const data = await response.json();
       if (requestId !== searchRequestId) return;
