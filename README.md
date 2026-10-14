@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/header.png" alt="Header" width="100%" />
+</p>
+
 Aplikacja do przetwarzania i analizy danych lokalizacyjnych GPS w formacie **NMEA**, bezpośredniego strumieniowania ich do bazy danych **PostgreSQL + PostGIS**, serwowania przez mikroserwis **FastAPI** oraz zaawansowanej wizualizacji na interaktywnej mapie opartej o kafelki wektorowe **PMTiles** (OpenStreetMap), dynamiczne kafelki **MVT** ze śladem telemetrycznym oraz silnik routingu **OSRM**.
 
 ## Jak to działa?
