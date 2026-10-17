@@ -4,6 +4,18 @@ const routeStartSuggestions = document.getElementById('route-start-suggestions')
 const routePlannerStops = document.getElementById('route-planner-stops');
 const routePlannerStats = document.getElementById('route-planner-stats');
 const routePlannerHint = document.getElementById('route-planner-hint');
+const btnRouteGoogleMaps = document.getElementById('btn-route-google-maps');
+const routeGoogleOutput = document.getElementById('route-google-output');
+const routeGoogleUrl = document.getElementById('route-google-url');
+const btnCopyGoogleUrl = document.getElementById('btn-copy-google-url');
+const btnOpenGoogleUrl = document.getElementById('btn-open-google-url');
+const routeGoogleFeedback = document.getElementById('route-google-feedback');
+let googleFeedbackTimer = null;
+const routeImportInput = document.getElementById('route-import-input');
+const btnRouteImport = document.getElementById('btn-route-import');
+const routeImportFeedback = document.getElementById('route-import-feedback');
+let importFeedbackTimer = null;
+const btnOpenPlannerMenu = document.getElementById('btn-open-planner-menu');
 let inlineRouteState = { points: [], mode: null };
 let inlineRouteLayerReady = false;
 let inlineContextLocation = null;
@@ -79,6 +91,14 @@ function closeInlineRoutePlanner() {
   clearInlineRouteLayer();
   clearInlineRouteMarkers();
   document.getElementById('btn-route-back-to-location').hidden = true;
+  if (routeGoogleOutput) {
+    routeGoogleOutput.style.display = 'none';
+    if (routeGoogleFeedback) routeGoogleFeedback.innerText = '';
+    if (routeGoogleUrl) routeGoogleUrl.value = '';
+    if (btnOpenGoogleUrl) btnOpenGoogleUrl.removeAttribute('href');
+  }
+  if (routeImportInput) routeImportInput.value = '';
+  if (routeImportFeedback) routeImportFeedback.innerText = '';
 }
 
 window.addEventListener('nnaper-route-destination-selected', event => {
@@ -423,6 +443,7 @@ function renderInlineRouteLists() {
       routePlannerStops.appendChild(plus);
     }
   });
+  updateGoogleMapsOutputIfVisible();
 }
 
 function moveInlinePoint(index, offset) {
@@ -604,7 +625,7 @@ async function calculateInlineRoute() {
   const distance = segmentRoutes.reduce((total, item) => total + Number(item.distance || 0), 0);
   const duration = segmentRoutes.reduce((total, item) => total + Number(item.duration || 0), 0);
   routePlannerStats.innerText = `Dystans: ${(distance / 1000).toFixed(1)} km | Czas: ${Math.round(duration / 60)} min`;
-
+  updateGoogleMapsOutputIfVisible();
 }
 
 const storedInlineDestination = JSON.parse(localStorage.getItem('nnaper-route-destination') || 'null');
@@ -613,6 +634,316 @@ if (storedInlineDestination) {
   openInlineRoutePlanner(storedInlineDestination);
 }
 
+function formatCoord(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return null;
+  return parseFloat(num.toFixed(7));
+}
+
+function getGoogleMapsRouteUrl() {
+  const validCoords = inlineRouteState.points
+    .map(point => point && point.place)
+    .filter(place => place && Number.isFinite(Number(place.lat)) && Number.isFinite(Number(place.lon)))
+    .map(place => {
+      const lat = formatCoord(place.lat);
+      const lon = formatCoord(place.lon);
+      return (lat !== null && lon !== null) ? `${lat},${lon}` : null;
+    })
+    .filter(Boolean);
+
+  if (validCoords.length < 2) return null;
+  return `https://www.google.com/maps/dir/${validCoords.join('/')}`;
+}
+
+function copyTextToClipboard(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard.writeText(text);
+  }
+  return new Promise((resolve, reject) => {
+    try {
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      textArea.style.position = 'fixed';
+      textArea.style.left = '-999999px';
+      textArea.style.top = '-999999px';
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(textArea);
+      if (ok) resolve();
+      else reject(new Error('Nie udało się skopiować'));
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+function setGoogleFeedback(message, isError = false) {
+  if (!routeGoogleFeedback) return;
+  clearTimeout(googleFeedbackTimer);
+  routeGoogleFeedback.innerText = message;
+  if (isError) {
+    routeGoogleFeedback.classList.add('error');
+  } else {
+    routeGoogleFeedback.classList.remove('error');
+  }
+  if (!isError && message) {
+    googleFeedbackTimer = setTimeout(() => {
+      if (routeGoogleFeedback) routeGoogleFeedback.innerText = '';
+    }, 4000);
+  }
+}
+
+function updateGoogleMapsOutputIfVisible() {
+  if (!routeGoogleOutput || routeGoogleOutput.style.display === 'none') return;
+  const url = getGoogleMapsRouteUrl();
+  if (url) {
+    if (routeGoogleUrl) routeGoogleUrl.value = url;
+    if (btnOpenGoogleUrl) btnOpenGoogleUrl.href = url;
+  } else {
+    if (routeGoogleUrl) routeGoogleUrl.value = '';
+    if (btnOpenGoogleUrl) btnOpenGoogleUrl.removeAttribute('href');
+  }
+}
+
+if (btnRouteGoogleMaps) {
+  btnRouteGoogleMaps.addEventListener('click', () => {
+    const url = getGoogleMapsRouteUrl();
+    if (!url) {
+      if (routeGoogleOutput) routeGoogleOutput.style.display = 'block';
+      if (routeGoogleUrl) routeGoogleUrl.value = '';
+      if (btnOpenGoogleUrl) btnOpenGoogleUrl.removeAttribute('href');
+      setGoogleFeedback('Wybierz co najmniej 2 punkty trasy z prawidłowymi współrzędnymi.', true);
+      return;
+    }
+
+    if (routeGoogleUrl) routeGoogleUrl.value = url;
+    if (btnOpenGoogleUrl) btnOpenGoogleUrl.href = url;
+    if (routeGoogleOutput) routeGoogleOutput.style.display = 'block';
+
+    copyTextToClipboard(url)
+      .then(() => {
+        setGoogleFeedback('✓ Skopiowano link do schowka! Możesz też kliknąć Otwórz ↗', false);
+      })
+      .catch(() => {
+        setGoogleFeedback('Link wygenerowany! Możesz go skopiować lub otworzyć.', false);
+      });
+  });
+}
+
+if (btnCopyGoogleUrl) {
+  btnCopyGoogleUrl.addEventListener('click', () => {
+    const url = routeGoogleUrl ? routeGoogleUrl.value : getGoogleMapsRouteUrl();
+    if (!url) return;
+    copyTextToClipboard(url).then(() => {
+      const originalText = btnCopyGoogleUrl.innerText;
+      btnCopyGoogleUrl.innerText = 'Skopiowano!';
+      setGoogleFeedback('✓ Skopiowano link do schowka!', false);
+      setTimeout(() => {
+        btnCopyGoogleUrl.innerText = originalText;
+      }, 2000);
+    });
+  });
+}
+
+if (routeGoogleUrl) {
+  routeGoogleUrl.addEventListener('click', () => {
+    routeGoogleUrl.select();
+  });
+}
+
+function parseCoordPair(str) {
+  if (!str) return null;
+  const cleaned = str.trim();
+  const match = cleaned.match(/^([-+]?\d{1,2}(?:\.\d+)?)\s*,\s*([-+]?\d{1,3}(?:\.\d+)?)$/);
+  if (!match) return null;
+  const lat = parseFloat(match[1]);
+  const lon = parseFloat(match[2]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
+  return { lat, lon };
+}
+
+function parseGoogleMapsRouteUrl(rawInput) {
+  if (!rawInput || typeof rawInput !== 'string') return [];
+  let input = rawInput.trim();
+
+  const urlMatch = input.match(/(https?:\/\/[^\s]+|google\.[a-z.]+\/maps\/[^\s]+|[0-9.-]+,[0-9.-]+(?:\/[0-9.-]+,[0-9.-]+)+)/i);
+  if (urlMatch) {
+    input = urlMatch[1];
+  }
+
+  try {
+    input = decodeURIComponent(input);
+  } catch (e) {
+    // Keep input as-is
+  }
+
+  if (input.includes('origin=') || input.includes('destination=')) {
+    try {
+      const normalized = input.startsWith('http') ? input : `https://${input}`;
+      const urlObj = new URL(normalized);
+      const origin = urlObj.searchParams.get('origin');
+      const destination = urlObj.searchParams.get('destination');
+      const waypoints = urlObj.searchParams.get('waypoints');
+      const list = [];
+      if (origin) list.push(origin);
+      if (waypoints) {
+        waypoints.split('|').forEach(wp => {
+          if (wp.trim()) list.push(wp.trim());
+        });
+      }
+      if (destination) list.push(destination);
+
+      const parsed = list.map(item => parseCoordPair(item)).filter(Boolean);
+      if (parsed.length >= 2) return parsed;
+    } catch (e) {
+      // Fall through to path parsing
+    }
+  }
+
+  let pathPart = input;
+  if (pathPart.includes('/dir/')) {
+    pathPart = pathPart.split('/dir/')[1] || '';
+  }
+
+  pathPart = pathPart.split('?')[0].split('#')[0];
+  const segments = pathPart.split('/').map(s => s.trim()).filter(Boolean);
+  const coords = [];
+  for (const seg of segments) {
+    if (seg.startsWith('@') || seg.startsWith('data=')) {
+      continue;
+    }
+    const pair = parseCoordPair(seg);
+    if (pair) {
+      coords.push(pair);
+    }
+  }
+
+  return coords;
+}
+
+function setImportFeedback(message, isError = false) {
+  if (!routeImportFeedback) return;
+  clearTimeout(importFeedbackTimer);
+  routeImportFeedback.innerText = message;
+  if (isError) {
+    routeImportFeedback.classList.add('error');
+  } else {
+    routeImportFeedback.classList.remove('error');
+  }
+  if (!isError && message) {
+    importFeedbackTimer = setTimeout(() => {
+      if (routeImportFeedback) routeImportFeedback.innerText = '';
+    }, 4000);
+  }
+}
+
+function loadRouteFromGoogleMapsUrl(rawInput) {
+  const coords = parseGoogleMapsRouteUrl(rawInput);
+  if (!coords || coords.length < 2) {
+    setImportFeedback('Nie znaleziono poprawnych współrzędnych w podanym linku (wymagane min. 2 punkty).', true);
+    return false;
+  }
+
+  inlineRouteState = {
+    points: coords.map((c, index) => {
+      const type = index === 0 ? 'start' : index === coords.length - 1 ? 'destination' : 'stop';
+      const lat = parseFloat(Number(c.lat).toFixed(7));
+      const lon = parseFloat(Number(c.lon).toFixed(7));
+      return {
+        type,
+        place: {
+          lon,
+          lat,
+          name: `${lat.toFixed(5)}, ${lon.toFixed(5)}`,
+          display_name: `${lat.toFixed(5)}, ${lon.toFixed(5)}`
+        }
+      };
+    }),
+    mode: null
+  };
+
+  document.getElementById('menu').classList.add('route-planner-open');
+  routePlannerPanel.classList.add('active');
+  routePlannerPanel.setAttribute('aria-hidden', 'false');
+  document.getElementById('btn-route-back-to-location').hidden = true;
+
+  if (routeStartSuggestions) routeStartSuggestions.innerHTML = '';
+  clearInlineRouteLayer();
+  renderInlineRouteLists();
+  renderInlineRouteMarkers();
+
+  if (typeof map !== 'undefined' && coords.length > 0) {
+    const bounds = new maplibregl.LngLatBounds();
+    coords.forEach(c => bounds.extend([c.lon, c.lat]));
+    map.fitBounds(bounds, { padding: 90, maxZoom: 15 });
+  }
+
+  inlineRouteState.points.forEach(point => {
+    if (point.place) {
+      reverseGeocodeInlinePoint(point.place);
+    }
+  });
+
+  scheduleInlineRouteCalculation();
+  updateGoogleMapsOutputIfVisible();
+  setImportFeedback(`✓ Wczytano trasę z ${coords.length} punktów.`, false);
+  return true;
+}
+
+function handleRouteImport() {
+  if (!routeImportInput) return;
+  const input = routeImportInput.value.trim();
+  if (!input) {
+    setImportFeedback('Wklej link do trasy Google Maps.', true);
+    return;
+  }
+  const success = loadRouteFromGoogleMapsUrl(input);
+  if (success) {
+    routeImportInput.value = '';
+  }
+}
+
+if (btnRouteImport) {
+  btnRouteImport.addEventListener('click', handleRouteImport);
+}
+
+if (routeImportInput) {
+  routeImportInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleRouteImport();
+    }
+  });
+  routeImportInput.addEventListener('paste', () => {
+    setTimeout(handleRouteImport, 20);
+  });
+}
+
+if (btnOpenPlannerMenu) {
+  btnOpenPlannerMenu.addEventListener('click', () => {
+    document.getElementById('menu').classList.add('route-planner-open');
+    routePlannerPanel.classList.add('active');
+    routePlannerPanel.setAttribute('aria-hidden', 'false');
+    if (!inlineRouteState.points.length) {
+      inlineRouteState.points = [
+        { type: 'start', place: null },
+        { type: 'destination', place: null }
+      ];
+      renderInlineRouteLists();
+      renderInlineRouteMarkers();
+    }
+    if (routeImportInput) {
+      setTimeout(() => routeImportInput.focus(), 50);
+    }
+  });
+}
+
+window.parseGoogleMapsRouteUrl = parseGoogleMapsRouteUrl;
+window.loadRouteFromGoogleMapsUrl = loadRouteFromGoogleMapsUrl;
+window.getGoogleMapsRouteUrl = getGoogleMapsRouteUrl;
 window.openInlineRoutePlanner = openInlineRoutePlanner;
 window.openInlineRoutePlannerFromStart = openInlineRoutePlannerFromStart;
 })();

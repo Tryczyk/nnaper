@@ -1031,11 +1031,37 @@ searchInput.addEventListener('keydown', (e) => {
     highlightedSearchIndex = (highlightedSearchIndex + direction + searchResults.length) % searchResults.length;
     updateHighlightedSearchResult();
     suggestionsBox.children[highlightedSearchIndex].scrollIntoView({ block: 'nearest' });
-  } else if (e.key === 'Enter' && searchResults.length) {
-    e.preventDefault();
-    selectPlace(searchResults[highlightedSearchIndex >= 0 ? highlightedSearchIndex : 0]);
+  } else if (e.key === 'Enter') {
+    const query = searchInput.value.trim();
+    if (typeof window.parseGoogleMapsRouteUrl === 'function') {
+      const coords = window.parseGoogleMapsRouteUrl(query);
+      if (coords && coords.length >= 2) {
+        e.preventDefault();
+        searchInput.value = '';
+        suggestionsBox.style.display = 'none';
+        window.loadRouteFromGoogleMapsUrl(query);
+        return;
+      }
+    }
+    if (searchResults.length) {
+      e.preventDefault();
+      selectPlace(searchResults[highlightedSearchIndex >= 0 ? highlightedSearchIndex : 0]);
+    }
   } else if (e.key === 'Escape') {
     suggestionsBox.style.display = 'none';
+  }
+});
+
+searchInput.addEventListener('paste', (e) => {
+  const text = (e.clipboardData || window.clipboardData)?.getData('text');
+  if (text && typeof window.parseGoogleMapsRouteUrl === 'function') {
+    const coords = window.parseGoogleMapsRouteUrl(text);
+    if (coords && coords.length >= 2) {
+      e.preventDefault();
+      searchInput.value = '';
+      suggestionsBox.style.display = 'none';
+      window.loadRouteFromGoogleMapsUrl(text);
+    }
   }
 });
 
@@ -1050,6 +1076,26 @@ searchInput.addEventListener('input', (e) => {
     suggestionsBox.style.display = 'none';
     suggestionsBox.innerHTML = '';
     return;
+  }
+
+  if (typeof window.parseGoogleMapsRouteUrl === 'function') {
+    const coords = window.parseGoogleMapsRouteUrl(query);
+    if (coords && coords.length >= 2) {
+      suggestionsBox.innerHTML = '';
+      const div = document.createElement('div');
+      div.className = 'suggestion-item';
+      div.style.color = '#38bdf8';
+      div.style.fontWeight = 'bold';
+      div.innerText = `🗺️ Wczytaj trasę z linku Google Maps (${coords.length} punktów)`;
+      div.addEventListener('click', () => {
+        searchInput.value = '';
+        suggestionsBox.style.display = 'none';
+        window.loadRouteFromGoogleMapsUrl(query);
+      });
+      suggestionsBox.appendChild(div);
+      suggestionsBox.style.display = 'block';
+      return;
+    }
   }
 
   searchTimeout = setTimeout(async () => {

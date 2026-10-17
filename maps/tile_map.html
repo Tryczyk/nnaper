@@ -7,7 +7,7 @@
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
   <script src="https://unpkg.com/pmtiles@3.0.7/dist/pmtiles.js"></script>
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=20261016" />
 </head>
 <body>
 
@@ -26,6 +26,10 @@
     <button onclick="window.location.href='playback.html'" 
             style="width: 100%; margin-bottom: 10px; background: #0284c7; color: #fff; border: 1px solid #38bdf8; padding: 8px 12px; border-radius: 6px; font-weight: bold; cursor: pointer;">
       🎬 Przejdź do Odtwarzacza Trasy
+    </button>
+    <button id="btn-open-planner-menu" 
+            style="width: 100%; margin-bottom: 10px; background: #1e293b; color: #38bdf8; border: 1px solid #334155; padding: 8px 12px; border-radius: 6px; font-weight: bold; cursor: pointer;">
+      🗺️ Planowanie trasy / Wklej link
     </button>
 
     <div id="tree-container"></div>
@@ -52,11 +56,31 @@
     <button class="route-action-btn" id="btn-route-back-to-location" hidden>Wróć do poprzedniej lokalizacji</button>
   </div>
   <div id="route-start-suggestions" class="route-start-suggestions"></div>
+  <div class="route-import-box">
+    <div class="route-import-row">
+      <input type="text" id="route-import-input" class="route-field" placeholder="Wklej link do trasy Google Maps..." spellcheck="false" autocomplete="off" />
+      <button type="button" id="btn-route-import" class="route-action-btn route-google-action-btn" title="Wczytaj trasę z linku">Wczytaj</button>
+    </div>
+    <div id="route-import-feedback" class="route-google-feedback"></div>
+  </div>
   <div id="route-planner-hint">Użyj + między punktami albo kliknij prawym przyciskiem mapę.</div>
   <div class="route-list-section">
     <ul id="route-planner-stops" class="route-planner-list"></ul>
   </div>
   <div id="route-planner-stats"></div>
+  <div class="route-planner-actions">
+    <button class="route-action-btn" id="btn-route-google-maps" type="button" title="Generuj link do trasy w Google Maps ze współrzędnych">
+      🗺️ Generuj link do Google Maps
+    </button>
+  </div>
+  <div id="route-google-output" class="route-google-output" style="display: none;">
+    <div class="route-google-row">
+      <input type="text" id="route-google-url" class="route-field" readonly spellcheck="false" title="Kliknij, aby zaznaczyć link" />
+      <button type="button" id="btn-copy-google-url" class="route-action-btn route-google-action-btn" title="Kopiuj link do schowka">Kopiuj</button>
+      <a id="btn-open-google-url" class="route-action-btn route-google-action-btn route-open-btn" target="_blank" rel="noopener noreferrer" title="Otwórz w Google Maps w nowej karcie">Otwórz ↗</a>
+    </div>
+    <div id="route-google-feedback" class="route-google-feedback"></div>
+  </div>
 </div>
 
 <div id="map-context-menu" class="inline-route-context-menu">
@@ -69,7 +93,7 @@
 <script src="runtime-config.js"></script>
 <script src="runtime-config.local.js"></script>
 <script src="layers.js"></script>
-<script src="app.js?v=20261012-2"></script>
-<script src="route-inline.js?v=20261012-2"></script>
+<script src="app.js?v=20261016"></script>
+<script src="route-inline.js?v=20261016"></script>
 </body>
 </html>
