@@ -190,26 +190,6 @@ uv run src/parser.py
 
   <http://localhost:8080/maps/playback.html>
 
-## Generowanie wykresów analitycznych
-
-Aplikacja udostępnia skrypt do generowania interaktywnych wykresów w formacie HTML na podstawie danych telemetrycznych zgromadzonych w bazie:
-
-1. **Uruchomienie skryptu:**
-
-   ```
-   uv run src/plots.py
-   
-   ```
-
-   Wykresy zostaną zapisane w katalogu `plots/` (m.in. trójwymiarowy model przeciążeń z akcelerometru, skyplot satelitów GSV, histogramy prędkości i kursów, analiza parametrów DOP).
-
-2. **Podgląd wykresów w przeglądarce (PowerShell):**
-
-   ```
-   Get-ChildItem -Path "plots\*.html" | ForEach-Object { Start-Process $_.FullName }
-   
-   ```
-
 ## Przy pracy nad bazą lub parserem
 
 W trakcie modyfikowania struktury SQL (`init_db.sql`) lub reguł kwalifikacji w parserze (`src/parser.py`), najszybszym sposobem na zresetowanie środowiska, wyczyszczenie wolumenu i załadowanie danych od nowa jest sekwencja:
