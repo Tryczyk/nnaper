@@ -56,8 +56,33 @@
   document.body.appendChild(inlineContextMenu);
   document.body.appendChild(mapContextMenu);
 
-  function inlineRoutePointColor(index) {
-    const idx = Math.max(0, parseInt(index, 10) || 0);
+  let inlinePointColorSequence = 0;
+
+  function getNextAvailablePointColor(prevColor = null, nextColor = null) {
+    for (let i = 0; i < routeSegmentColors.length; i += 1) {
+      const candidateColor = routeSegmentColors[inlinePointColorSequence % routeSegmentColors.length];
+      inlinePointColorSequence += 1;
+      if (candidateColor !== prevColor && candidateColor !== nextColor) {
+        return candidateColor;
+      }
+    }
+    return routeSegmentColors[0];
+  }
+
+  function assignPointColor(point, prevPoint = null, nextPoint = null) {
+    if (!point) return routeSegmentColors[0];
+    if (point.color) return point.color;
+    const prevColor = prevPoint && prevPoint.color ? prevPoint.color : null;
+    const nextColor = nextPoint && nextPoint.color ? nextPoint.color : null;
+    point.color = getNextAvailablePointColor(prevColor, nextColor);
+    return point.color;
+  }
+
+  function inlineRoutePointColor(pointOrIndex) {
+    if (typeof pointOrIndex === 'object' && pointOrIndex !== null) {
+      return assignPointColor(pointOrIndex);
+    }
+    const idx = Math.max(0, parseInt(pointOrIndex, 10) || 0);
     return routeSegmentColors[idx % routeSegmentColors.length];
   }
 
@@ -72,11 +97,13 @@
 
   function openInlineRoutePlanner(destination) {
     document.getElementById('btn-route-back-to-location').hidden = false;
+    inlinePointColorSequence = 0;
+    const p1 = { type: 'start', place: null };
+    assignPointColor(p1);
+    const p2 = { type: 'destination', place: destination };
+    assignPointColor(p2, p1);
     inlineRouteState = {
-      points: [
-        { type: 'start', place: null },
-        { type: 'destination', place: destination }
-      ],
+      points: [p1, p2],
       mode: null
     };
     document.getElementById('menu')?.classList.add('route-planner-open');
@@ -90,11 +117,13 @@
 
   function openInlineRoutePlannerFromStart(start) {
     document.getElementById('btn-route-back-to-location').hidden = true;
+    inlinePointColorSequence = 0;
+    const p1 = { type: 'start', place: start };
+    assignPointColor(p1);
+    const p2 = { type: 'destination', place: null };
+    assignPointColor(p2, p1);
     inlineRouteState = {
-      points: [
-        { type: 'start', place: start },
-        { type: 'destination', place: null }
-      ],
+      points: [p1, p2],
       mode: null
     };
     document.getElementById('menu')?.classList.add('route-planner-open');
@@ -114,6 +143,7 @@
     clearInlineRouteLayer();
     clearInlineRouteMarkers();
     inlineRouteState.points = [];
+    inlinePointColorSequence = 0;
     renderInlineRouteMarkers();
     routePlannerStats.innerText = '';
     document.getElementById('btn-route-back-to-location').hidden = true;
@@ -307,10 +337,14 @@
       lon: loc.lon,
       lat: loc.lat
     };
+    const prevPoint = inlineRouteState.points.length ? inlineRouteState.points[inlineRouteState.points.length - 1] : null;
+    const newPoint = { type: 'destination', place };
+    assignPointColor(newPoint, prevPoint, null);
     if (inlineRouteState.points.length === 0) {
-      inlineRouteState.points.push({ type: 'start', place });
+      newPoint.type = 'start';
+      inlineRouteState.points.push(newPoint);
     } else {
-      inlineRouteState.points.push({ type: 'destination', place });
+      inlineRouteState.points.push(newPoint);
       inlineRouteState.points.forEach((entry, pointIndex) => {
         entry.type = pointIndex === 0 ? 'start' : (pointIndex === inlineRouteState.points.length - 1 ? 'destination' : 'stop');
       });
@@ -398,7 +432,10 @@
       emptyPlus.innerText = '+ Dodaj punkt startowy';
       emptyPlus.title = 'Dodaj punkt startowy trasy';
       emptyPlus.onclick = () => {
-        inlineRouteState.points.push({ type: 'start', place: null });
+        inlinePointColorSequence = 0;
+        const newPoint = { type: 'start', place: null };
+        assignPointColor(newPoint);
+        inlineRouteState.points.push(newPoint);
         renderInlineRouteMarkers();
         const input = routePlannerStops.querySelector('input');
         if (input) input.focus();
@@ -412,7 +449,7 @@
       item.dataset.pointIndex = String(index);
       const place = point.place;
       const icon = index === 0 ? '○' : index === inlineRouteState.points.length - 1 ? '●' : '●';
-      const pointColor = inlineRoutePointColor(index);
+      const pointColor = assignPointColor(point);
       item.innerHTML = `<span class="route-point-icon" style="color: ${pointColor}">${icon}</span>`;
       const suggestions = document.createElement('div');
       suggestions.className = 'route-point-suggestions';
@@ -454,6 +491,9 @@
         inlineRouteState.points.forEach((entry, pointIndex) => {
           entry.type = pointIndex === 0 ? 'start' : pointIndex === inlineRouteState.points.length - 1 ? 'destination' : 'stop';
         });
+        if (inlineRouteState.points.length === 0) {
+          inlinePointColorSequence = 0;
+        }
         renderInlineRouteMarkers();
         scheduleInlineRouteCalculation();
       };
@@ -466,7 +506,11 @@
         plus.innerText = '+';
         plus.title = 'Dodaj punkt trasy';
         plus.onclick = () => {
-          inlineRouteState.points.splice(index + 1, 0, { type: 'stop', place: null });
+          const prevPoint = inlineRouteState.points[index];
+          const nextPoint = inlineRouteState.points[index + 1];
+          const newPoint = { type: 'stop', place: null };
+          assignPointColor(newPoint, prevPoint, nextPoint);
+          inlineRouteState.points.splice(index + 1, 0, newPoint);
           inlineRouteState.points.forEach((entry, pointIndex) => {
             entry.type = pointIndex === 0 ? 'start' : pointIndex === inlineRouteState.points.length - 1 ? 'destination' : 'stop';
           });
@@ -499,10 +543,10 @@
   function renderInlineRouteMarkers() {
     clearInlineRouteMarkers();
     renderInlineRouteLists();
-    const routePoints = inlineRouteState.points.filter(point => point.place);
-    routePoints.forEach(({ place, type }) => {
-      const pointIndex = routePoints.findIndex(point => point.place === place);
-      const color = inlineRoutePointColor(pointIndex);
+    const routePoints = inlineRouteState.points.filter(point => point && point.place);
+    routePoints.forEach(point => {
+      const { place, type } = point;
+      const color = assignPointColor(point);
       const marker = new maplibregl.Marker({ color })
         .setLngLat([Number(place.lon), Number(place.lat)])
         .addTo(map);
@@ -574,7 +618,8 @@
 
   async function calculateInlineRoute() {
     const calculationId = ++inlineRouteCalculationId;
-    const points = inlineRouteState.points.map(point => point.place).filter(Boolean);
+    const routePoints = inlineRouteState.points.filter(point => point && point.place);
+    const points = routePoints.map(point => point.place);
     if (points.length < 2) {
       clearInlineRouteLayer();
       if (points.length === 1) {
@@ -590,7 +635,6 @@
     }
     routePlannerStats.innerText = 'Wyznaczanie trasy...';
     clearInlineRouteLayer();
-    const routePoints = inlineRouteState.points.filter(point => point.place);
     const segmentRoutes = [];
 
     for (let index = 0; index < points.length - 1; index += 1) {
@@ -646,7 +690,7 @@
             'line-sort-key': 100001
           },
           paint: {
-            'line-color': inlineRoutePointColor(index),
+            'line-color': assignPointColor(routePoints[index]),
             'line-width': 5.5,
             'line-opacity': 1
           }
@@ -874,12 +918,13 @@
       return false;
     }
 
+    inlinePointColorSequence = 0;
     inlineRouteState = {
       points: coords.map((c, index) => {
         const type = index === 0 ? 'start' : index === coords.length - 1 ? 'destination' : 'stop';
         const lat = parseFloat(Number(c.lat).toFixed(7));
         const lon = parseFloat(Number(c.lon).toFixed(7));
-        return {
+        const newPoint = {
           type,
           place: {
             lon,
@@ -888,6 +933,8 @@
             display_name: `${lat.toFixed(5)}, ${lon.toFixed(5)}`
           }
         };
+        assignPointColor(newPoint);
+        return newPoint;
       }),
       mode: null
     };
@@ -957,6 +1004,7 @@
       routePlannerPanel.classList.add('active');
       routePlannerPanel.setAttribute('aria-hidden', 'false');
       inlineRouteState.points = [];
+      inlinePointColorSequence = 0;
       renderInlineRouteMarkers();
       routePlannerStats.innerText = '';
       if (routeImportInput) {
