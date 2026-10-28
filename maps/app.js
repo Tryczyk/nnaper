@@ -739,6 +739,42 @@ if (btnToggleMenu) {
 }
 collapseMenu();
 
+/* ------------------- PRAWY PANEL (NAWIGACJA I TRASY) ------------------- */
+const menuRightEl = document.getElementById('menu-right');
+const btnToggleMenuRight = document.getElementById('btn-toggle-menu-right');
+
+function collapseRightMenu() {
+  if (!menuRightEl) return;
+  menuRightEl.classList.add('collapsed');
+  if (btnToggleMenuRight) {
+    btnToggleMenuRight.setAttribute('title', 'Rozwiń panel tras');
+    btnToggleMenuRight.setAttribute('aria-label', 'Rozwiń panel tras');
+  }
+}
+
+function expandRightMenu() {
+  if (!menuRightEl) return;
+  menuRightEl.classList.remove('collapsed');
+  if (btnToggleMenuRight) {
+    btnToggleMenuRight.setAttribute('title', 'Zwiń panel tras');
+    btnToggleMenuRight.setAttribute('aria-label', 'Zwiń panel tras');
+  }
+}
+
+function toggleRightMenu() {
+  if (!menuRightEl) return;
+  if (menuRightEl.classList.contains('collapsed')) {
+    expandRightMenu();
+  } else {
+    collapseRightMenu();
+  }
+}
+
+if (btnToggleMenuRight) {
+  btnToggleMenuRight.addEventListener('click', toggleRightMenu);
+}
+collapseRightMenu();
+
 function closeLocation(restoreCamera) {
   restoreLayerMenu();
   if (searchMarker) {
@@ -867,6 +903,7 @@ function renderSatelliteRays() {
 /* ------------------- POBIERANIE PEŁNYCH DANYCH Z BAZY ------------------- */
 async function loadPointFullDetails(epochId) {
   collapseMenu();
+  collapseRightMenu();
   pointPanelEl.classList.add('active');
 
   const content = document.getElementById('pp-content');
