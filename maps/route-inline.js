@@ -752,25 +752,11 @@
     btnRouteGoogleMaps.addEventListener('click', () => {
       const url = getGoogleMapsRouteUrl();
       if (!url) {
-        if (routeGoogleOutput) routeGoogleOutput.style.display = 'block';
-        if (routeGoogleUrl) routeGoogleUrl.value = '';
-        if (btnOpenGoogleUrl) btnOpenGoogleUrl.removeAttribute('href');
-        setGoogleFeedback('Wybierz co najmniej 2 punkty trasy z prawidłowymi współrzędnymi.', true);
+        routePlannerStats.innerText = 'Wybierz co najmniej 2 punkty trasy z prawidłowymi współrzędnymi.';
         return;
       }
-
-      if (routeGoogleUrl) routeGoogleUrl.value = url;
-      if (btnOpenGoogleUrl) btnOpenGoogleUrl.href = url;
-      if (routeGoogleOutput) routeGoogleOutput.style.display = 'block';
-
-      copyTextToClipboard(url)
-        .then(() => {
-          setGoogleFeedback('✓ Skopiowano link do schowka! Możesz też kliknąć Otwórz ↗', false);
-        })
-        .catch(() => {
-          setGoogleFeedback('Link wygenerowany! Możesz go skopiować lub otworzyć.', false);
-        });
-  });
+      window.open(url, '_blank', 'noopener,noreferrer');
+    });
   }
 
   if (btnCopyGoogleUrl) {
