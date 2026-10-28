@@ -109,6 +109,18 @@ const MONTH_NAMES = {
   "09": "Wrzesień", "10": "Październik", "11": "Listopad", "12": "Grudzień"
 };
 
+let gpsMasterCheckbox = null;
+let allGpsDayCheckboxes = [];
+let allGpsYearCheckboxes = [];
+
+function syncGpsMasterCheckbox() {
+  if (!gpsMasterCheckbox || allGpsDayCheckboxes.length === 0) return;
+  const checkedCount = allGpsDayCheckboxes.filter(c => c.checked).length;
+  const total = allGpsDayCheckboxes.length;
+  gpsMasterCheckbox.checked = checkedCount === total;
+  gpsMasterCheckbox.indeterminate = checkedCount > 0 && checkedCount < total;
+}
+
 function createFilterTreeNode(title, checked = true, collapsed = true) {
   const header = document.createElement('div');
   header.className = 'node-header';
@@ -245,45 +257,26 @@ async function buildInlineTimeFilter(container) {
     addTrackMonthLayers(months);
 
     container.innerHTML = '';
-    const allDayCheckboxes = [];
-
-    const rootNode = document.createElement('div');
-    rootNode.className = 'tree-node';
-    const rootHeader = createFilterTreeNode('Wszystko', true);
-    const rootChildren = document.createElement('div');
-    rootChildren.className = 'node-children collapsed';
-    rootChildren.style.marginLeft = '8px';
-
-    bindFilterCollapse(rootHeader, rootChildren);
-
-    // Główny przełącznik śladu GPS
-    rootHeader.checkbox.addEventListener('change', () => {
-      const isChecked = rootHeader.checkbox.checked;
-      rootHeader.checkbox.indeterminate = false;
-      allDayCheckboxes.forEach(cb => { cb.checked = isChecked; });
-      container.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-        cb.checked = isChecked;
-        cb.indeterminate = false;
-      });
-      applyTrackDateFilter(allDayCheckboxes, isChecked);
-    });
+    allGpsDayCheckboxes = [];
+    allGpsYearCheckboxes = [];
 
     Object.keys(data).sort().reverse().forEach(year => {
       const yearNode = document.createElement('div');
       yearNode.className = 'tree-node';
-      const yearHeader = createFilterTreeNode(`Rok: ${year}`, true);
+      const yearHeader = createFilterTreeNode(`Rok: ${year}`, true, true);
       const yearChildren = document.createElement('div');
       yearChildren.className = 'node-children collapsed';
       yearChildren.style.marginLeft = '8px';
       bindFilterCollapse(yearHeader, yearChildren);
 
+      allGpsYearCheckboxes.push(yearHeader.checkbox);
       const yearDayCheckboxes = [];
 
       Object.keys(data[year]).sort().reverse().forEach(month => {
         const monthNode = document.createElement('div');
         monthNode.className = 'tree-node';
         const monthName = MONTH_NAMES[month] || month;
-        const monthHeader = createFilterTreeNode(`Miesiąc: ${monthName} (${month})`, true);
+        const monthHeader = createFilterTreeNode(`Miesiąc: ${monthName} (${month})`, true, true);
         const monthChildren = document.createElement('div');
         monthChildren.className = 'node-children collapsed';
         monthChildren.style.marginLeft = '8px';
@@ -307,13 +300,13 @@ async function buildInlineTimeFilter(container) {
 
           monthDayCheckboxes.push(dayCheckbox);
           yearDayCheckboxes.push(dayCheckbox);
-          allDayCheckboxes.push(dayCheckbox);
+          allGpsDayCheckboxes.push(dayCheckbox);
 
           dayCheckbox.addEventListener('change', () => {
             syncFilterCheckbox(monthHeader.checkbox, monthDayCheckboxes);
             syncFilterCheckbox(yearHeader.checkbox, yearDayCheckboxes);
-            syncFilterCheckbox(rootHeader.checkbox, allDayCheckboxes);
-            applyTrackDateFilter(allDayCheckboxes, rootHeader.checkbox.checked || rootHeader.checkbox.indeterminate);
+            syncGpsMasterCheckbox();
+            applyTrackDateFilter(allGpsDayCheckboxes, allGpsDayCheckboxes.some(c => c.checked));
           });
 
           const dayLabel = document.createElement('span');
@@ -329,8 +322,8 @@ async function buildInlineTimeFilter(container) {
           monthHeader.checkbox.indeterminate = false;
           monthDayCheckboxes.forEach(cb => { cb.checked = isChecked; });
           syncFilterCheckbox(yearHeader.checkbox, yearDayCheckboxes);
-          syncFilterCheckbox(rootHeader.checkbox, allDayCheckboxes);
-          applyTrackDateFilter(allDayCheckboxes, rootHeader.checkbox.checked || rootHeader.checkbox.indeterminate);
+          syncGpsMasterCheckbox();
+          applyTrackDateFilter(allGpsDayCheckboxes, allGpsDayCheckboxes.some(c => c.checked));
         });
 
         monthNode.appendChild(monthHeader.element);
@@ -346,19 +339,17 @@ async function buildInlineTimeFilter(container) {
           cb.checked = isChecked;
           cb.indeterminate = false;
         });
-        syncFilterCheckbox(rootHeader.checkbox, allDayCheckboxes);
-        applyTrackDateFilter(allDayCheckboxes, rootHeader.checkbox.checked || rootHeader.checkbox.indeterminate);
+        syncGpsMasterCheckbox();
+        applyTrackDateFilter(allGpsDayCheckboxes, allGpsDayCheckboxes.some(c => c.checked));
       });
 
       yearNode.appendChild(yearHeader.element);
       yearNode.appendChild(yearChildren);
-      rootChildren.appendChild(yearNode);
+      container.appendChild(yearNode);
     });
 
-    rootNode.appendChild(rootHeader.element);
-    rootNode.appendChild(rootChildren);
-    container.appendChild(rootNode);
-    applyTrackDateFilter(allDayCheckboxes, true);
+    syncGpsMasterCheckbox();
+    applyTrackDateFilter(allGpsDayCheckboxes, true);
 
   } catch (err) {
     container.innerHTML = `<span style="color:#ef4444;font-size:11px;">Brak połączenia z API dat.</span>`;
@@ -381,9 +372,9 @@ function autoBuildTree() {
       layer.id.startsWith('GPS / Ślad trasy / ')
     ) return;
 
-    const parts = layer.id.split('/');
+    const parts = layer.id.split('/').map(p => p.trim());
     const groupName = parts.length > 1 ? parts[0] : 'Inne';
-    const leafTitle = parts.length > 1 ? parts[1] : layer.id;
+    const leafTitle = parts.length > 1 ? parts[1] : layer.id.trim();
 
     if (!groups[groupName]) groups[groupName] = [];
     groups[groupName].push({ id: layer.id, title: leafTitle, raw: JSON.parse(JSON.stringify(layer)) });
@@ -400,20 +391,14 @@ function autoBuildTree() {
     const label = document.createElement('label');
     label.className = 'node-label';
 
-    const pCheckbox = groupName === 'GPS'
-      ? null
-      : document.createElement('input');
-    if (pCheckbox) {
-      pCheckbox.type = 'checkbox';
-      pCheckbox.checked = true;
-    }
+    const pCheckbox = document.createElement('input');
+    pCheckbox.type = 'checkbox';
+    pCheckbox.checked = true;
 
     const pTitle = document.createElement('span');
     pTitle.innerText = groupName;
 
-    if (pCheckbox) {
-      label.appendChild(pCheckbox);
-    }
+    label.appendChild(pCheckbox);
     label.appendChild(pTitle);
 
     const arrow = document.createElement('span');
@@ -648,25 +633,48 @@ function autoBuildTree() {
           const vis = cCheckbox.checked ? 'visible' : 'none';
           if (map.getLayer(child.id)) map.setLayoutProperty(child.id, 'visibility', vis);
           if (map.getLayer(`${child.id}-outline-line`)) map.setLayoutProperty(`${child.id}-outline-line`, 'visibility', vis);
-          const checkedCount = childInputs.filter(i => i.checked).length;
-          pCheckbox.checked = checkedCount === childInputs.length;
-          pCheckbox.indeterminate = checkedCount > 0 && checkedCount < childInputs.length;
+          if (pCheckbox) {
+            const checkedCount = childInputs.filter(i => i.checked).length;
+            pCheckbox.checked = checkedCount === childInputs.length;
+            pCheckbox.indeterminate = checkedCount > 0 && checkedCount < childInputs.length;
+          }
         });
       }
     });
 
     if (pCheckbox) {
-      pCheckbox.addEventListener('change', () => {
-        const isChecked = pCheckbox.checked;
-        pCheckbox.indeterminate = false;
-        childInputs.forEach((ci, idx) => {
-          ci.checked = isChecked;
-          const targetId = childList[idx].id;
-          const vis = isChecked ? 'visible' : 'none';
-          if (map.getLayer(targetId)) map.setLayoutProperty(targetId, 'visibility', vis);
-          if (map.getLayer(`${targetId}-outline-line`)) map.setLayoutProperty(`${targetId}-outline-line`, 'visibility', vis);
+      if (groupName.trim() === 'GPS') {
+        gpsMasterCheckbox = pCheckbox;
+        pCheckbox.addEventListener('change', () => {
+          const isChecked = pCheckbox.checked;
+          pCheckbox.indeterminate = false;
+          allGpsDayCheckboxes.forEach(cb => { cb.checked = isChecked; });
+          allGpsYearCheckboxes.forEach(cb => {
+            cb.checked = isChecked;
+            cb.indeterminate = false;
+          });
+          const filterSection = document.querySelector('.time-filter-section');
+          if (filterSection) {
+            filterSection.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+              cb.checked = isChecked;
+              cb.indeterminate = false;
+            });
+          }
+          applyTrackDateFilter(allGpsDayCheckboxes, isChecked);
         });
-      });
+      } else {
+        pCheckbox.addEventListener('change', () => {
+          const isChecked = pCheckbox.checked;
+          pCheckbox.indeterminate = false;
+          childInputs.forEach((ci, idx) => {
+            ci.checked = isChecked;
+            const targetId = childList[idx].id;
+            const vis = isChecked ? 'visible' : 'none';
+            if (map.getLayer(targetId)) map.setLayoutProperty(targetId, 'visibility', vis);
+            if (map.getLayer(`${targetId}-outline-line`)) map.setLayoutProperty(`${targetId}-outline-line`, 'visibility', vis);
+          });
+        });
+      }
     }
 
     node.appendChild(header);
