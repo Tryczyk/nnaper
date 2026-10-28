@@ -958,10 +958,26 @@ html {
   box-shadow: 0 0 0 1px #38bdf8;
 }
 
-#btn-open-planner-menu:hover {
-  background: #0284c7 !important;
-  color: #fff !important;
-  border-color: #38bdf8 !important;
+.menu-action-btn {
+  width: 100%;
+  margin-bottom: 6px;
+  padding: 7px 10px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 5px;
+  color: #38bdf8;
+  font-weight: bold;
+  font-size: 11.5px;
+  cursor: pointer;
+  box-sizing: border-box;
+  text-align: center;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.menu-action-btn:hover {
+  background: #0284c7;
+  color: #ffffff;
+  border-color: #38bdf8;
 }
 
 /* KONTROLKI NAWIGACJI MAPY (PRZYBLIŻANIE, KOMPAS) */
