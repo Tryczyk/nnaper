@@ -574,7 +574,7 @@ html {
   right: 0;
   z-index: 30;
   width: 260px;
-  max-height: calc(100vh - 20px);
+  max-height: calc(100vh - 130px);
   overflow-y: auto;
   padding: 10px 12px;
   color: #f8fafc;
@@ -962,4 +962,38 @@ html {
   background: #0284c7 !important;
   color: #fff !important;
   border-color: #38bdf8 !important;
+}
+
+/* KONTROLKI NAWIGACJI MAPY (PRZYBLIŻANIE, KOMPAS) */
+.maplibregl-ctrl-bottom-right {
+  bottom: 15px !important;
+  right: 15px !important;
+  z-index: 15 !important;
+}
+
+.maplibregl-ctrl-group {
+  background: rgba(15, 23, 42, 0.95) !important;
+  border: 1px solid #334155 !important;
+  border-radius: 6px !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5) !important;
+  overflow: hidden !important;
+}
+
+.maplibregl-ctrl-group button {
+  width: 32px !important;
+  height: 32px !important;
+  border-bottom: 1px solid #334155 !important;
+  background-color: transparent !important;
+}
+
+.maplibregl-ctrl-group button:last-child {
+  border-bottom: none !important;
+}
+
+.maplibregl-ctrl-group button:hover {
+  background-color: #1e293b !important;
+}
+
+.maplibregl-ctrl-icon {
+  filter: invert(1) brightness(1.2);
 }

@@ -24,7 +24,7 @@ const map = new maplibregl.Map({
 });
 
 const navControl = new maplibregl.NavigationControl({ showCompass: true });
-map.addControl(navControl, 'top-right');
+map.addControl(navControl, 'bottom-right');
 
 function getLayerColor(layer) {
   if (!layer.paint) return '#94a3b8';
