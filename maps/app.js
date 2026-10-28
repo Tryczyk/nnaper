@@ -133,6 +133,9 @@ function createFilterTreeNode(title, checked = true, collapsed = true) {
   const checkbox = document.createElement('input');
   checkbox.type = 'checkbox';
   checkbox.checked = checked;
+  checkbox.addEventListener('click', (e) => {
+    e.stopPropagation();
+  });
 
   const text = document.createElement('span');
   text.innerText = title;
@@ -286,10 +289,9 @@ async function buildInlineTimeFilter(container) {
 
         data[year][month].sort().reverse().forEach(day => {
           const dateStr = `${year}-${month}-${day}`;
-          const leaf = document.createElement('label');
+          const leaf = document.createElement('div');
           leaf.className = 'leaf-item';
           leaf.style.padding = '2px 4px';
-          leaf.style.cursor = 'pointer';
 
           const dayCheckbox = document.createElement('input');
           dayCheckbox.type = 'checkbox';
@@ -297,6 +299,7 @@ async function buildInlineTimeFilter(container) {
           dayCheckbox.value = dateStr;
           dayCheckbox.style.accentColor = '#38bdf8';
           dayCheckbox.style.marginRight = '6px';
+          dayCheckbox.style.cursor = 'pointer';
 
           monthDayCheckboxes.push(dayCheckbox);
           yearDayCheckboxes.push(dayCheckbox);
@@ -388,12 +391,15 @@ function autoBuildTree() {
     const header = document.createElement('div');
     header.className = 'node-header';
 
-    const label = document.createElement('label');
+    const label = document.createElement('div');
     label.className = 'node-label';
 
     const pCheckbox = document.createElement('input');
     pCheckbox.type = 'checkbox';
     pCheckbox.checked = groupName.trim() === 'GPS' ? false : true;
+    pCheckbox.addEventListener('click', (e) => {
+      e.stopPropagation();
+    });
 
     const pTitle = document.createElement('span');
     pTitle.innerText = groupName;

@@ -177,13 +177,14 @@ html {
   align-items: center;
   font-weight: 600;
   color: #e2e8f0;
-  font-size: 12.5px;
+  font-size: 12px;
   cursor: pointer;
 }
 
 .node-label input {
-  margin-right: 8px;
+  margin-right: 6px;
   accent-color: #38bdf8;
+  cursor: pointer;
 }
 
 .arrow {
