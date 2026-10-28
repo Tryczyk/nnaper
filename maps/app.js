@@ -774,6 +774,8 @@ if (btnToggleMenuRight) {
   btnToggleMenuRight.addEventListener('click', toggleRightMenu);
 }
 collapseRightMenu();
+window.collapseRightMenu = collapseRightMenu;
+window.expandRightMenu = expandRightMenu;
 
 function closeLocation(restoreCamera) {
   restoreLayerMenu();

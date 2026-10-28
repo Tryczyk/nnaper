@@ -58,7 +58,7 @@
       mode: null
     };
     document.getElementById('menu')?.classList.add('route-planner-open');
-    document.getElementById('menu-right')?.classList.add('route-planner-open');
+    window.collapseRightMenu?.();
     routePlannerPanel.classList.add('active');
     routePlannerPanel.setAttribute('aria-hidden', 'false');
     routePlannerStats.innerText = '';
@@ -77,7 +77,7 @@
       mode: null
     };
     document.getElementById('menu')?.classList.add('route-planner-open');
-    document.getElementById('menu-right')?.classList.add('route-planner-open');
+    window.collapseRightMenu?.();
     routePlannerPanel.classList.add('active');
     routePlannerPanel.setAttribute('aria-hidden', 'false');
     routePlannerStats.innerText = '';
@@ -89,7 +89,7 @@
     routePlannerPanel.classList.remove('active');
     routePlannerPanel.setAttribute('aria-hidden', 'true');
     document.getElementById('menu')?.classList.remove('route-planner-open');
-    document.getElementById('menu-right')?.classList.remove('route-planner-open');
+  
     if (routeStartSuggestions) routeStartSuggestions.innerHTML = '';
     clearInlineRouteLayer();
     clearInlineRouteMarkers();
@@ -869,7 +869,7 @@
     };
 
     document.getElementById('menu')?.classList.add('route-planner-open');
-    document.getElementById('menu-right')?.classList.add('route-planner-open');
+    window.collapseRightMenu?.();
     routePlannerPanel.classList.add('active');
     routePlannerPanel.setAttribute('aria-hidden', 'false');
     document.getElementById('btn-route-back-to-location').hidden = true;
@@ -929,7 +929,7 @@
   if (btnOpenPlannerMenu) {
     btnOpenPlannerMenu.addEventListener('click', () => {
       document.getElementById('menu')?.classList.add('route-planner-open');
-      document.getElementById('menu-right')?.classList.add('route-planner-open');
+      window.collapseRightMenu?.();
       routePlannerPanel.classList.add('active');
       routePlannerPanel.setAttribute('aria-hidden', 'false');
       if (!inlineRouteState.points.length) {
