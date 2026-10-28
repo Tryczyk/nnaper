@@ -30,7 +30,13 @@ body, html {
   flex-direction: column;
   transition: all 0.25s ease;
 }
-#menu.dock-left { left: 15px; right: auto; }
+#menu.dock-left {
+  left: 0;
+  right: auto;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: none;
+}
 #menu.dock-right { right: 15px; left: auto; }
 #menu.minimized { max-height: 48px; width: 230px; overflow: hidden; }
 #menu.route-planner-open { display: none !important;
