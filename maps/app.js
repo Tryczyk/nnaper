@@ -737,6 +737,7 @@ function toggleMenu() {
 if (btnToggleMenu) {
   btnToggleMenu.addEventListener('click', toggleMenu);
 }
+collapseMenu();
 
 function closeLocation(restoreCamera) {
   restoreLayerMenu();
