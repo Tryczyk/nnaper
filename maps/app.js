@@ -263,7 +263,7 @@ async function buildInlineTimeFilter(container) {
     Object.keys(data).sort().reverse().forEach(year => {
       const yearNode = document.createElement('div');
       yearNode.className = 'tree-node';
-      const yearHeader = createFilterTreeNode(`Rok: ${year}`, true, true);
+      const yearHeader = createFilterTreeNode(`Rok: ${year}`, false, true);
       const yearChildren = document.createElement('div');
       yearChildren.className = 'node-children collapsed';
       yearChildren.style.marginLeft = '8px';
@@ -276,7 +276,7 @@ async function buildInlineTimeFilter(container) {
         const monthNode = document.createElement('div');
         monthNode.className = 'tree-node';
         const monthName = MONTH_NAMES[month] || month;
-        const monthHeader = createFilterTreeNode(`Miesiąc: ${monthName} (${month})`, true, true);
+        const monthHeader = createFilterTreeNode(`Miesiąc: ${monthName} (${month})`, false, true);
         const monthChildren = document.createElement('div');
         monthChildren.className = 'node-children collapsed';
         monthChildren.style.marginLeft = '8px';
@@ -293,7 +293,7 @@ async function buildInlineTimeFilter(container) {
 
           const dayCheckbox = document.createElement('input');
           dayCheckbox.type = 'checkbox';
-          dayCheckbox.checked = true;
+          dayCheckbox.checked = false;
           dayCheckbox.value = dateStr;
           dayCheckbox.style.accentColor = '#38bdf8';
           dayCheckbox.style.marginRight = '6px';
@@ -349,7 +349,7 @@ async function buildInlineTimeFilter(container) {
     });
 
     syncGpsMasterCheckbox();
-    applyTrackDateFilter(allGpsDayCheckboxes, true);
+    applyTrackDateFilter(allGpsDayCheckboxes, false);
 
   } catch (err) {
     container.innerHTML = `<span style="color:#ef4444;font-size:11px;">Brak połączenia z API dat.</span>`;
@@ -393,7 +393,7 @@ function autoBuildTree() {
 
     const pCheckbox = document.createElement('input');
     pCheckbox.type = 'checkbox';
-    pCheckbox.checked = true;
+    pCheckbox.checked = groupName.trim() === 'GPS' ? false : true;
 
     const pTitle = document.createElement('span');
     pTitle.innerText = groupName;
