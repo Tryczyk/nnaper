@@ -15,8 +15,8 @@ const map = new maplibregl.Map({
   zoom: 13,
   minZoom: 1,
   maxZoom: 18,
-  pitch: 42,
-  bearing: -15,
+  pitch: 0,
+  bearing: 0,
   maxPitch: 60,
   fadeDuration: 0,
   attributionControl: false,
@@ -372,7 +372,8 @@ function autoBuildTree() {
       layer.id === 'bg' ||
       layer.id.endsWith('-outline-line') ||
       layer.id.startsWith('sat-') ||
-      layer.id.startsWith('GPS / Ślad trasy / ')
+      layer.id.startsWith('GPS / Ślad trasy / ') ||
+      layer.id.startsWith('Budynki')
     ) return;
 
     const parts = layer.id.split('/').map(p => p.trim());
@@ -777,6 +778,87 @@ collapseRightMenu();
 window.collapseRightMenu = collapseRightMenu;
 window.expandRightMenu = expandRightMenu;
 
+/* ------------------- PRZEŁĄCZNIKI 3D (MAPA 3D & BUDYNKI 3D) ------------------- */
+const btnToggle3DMap = document.getElementById('btn-toggle-3d-map');
+const btnToggle3DBuildings = document.getElementById('btn-toggle-3d-buildings');
+const BUILDINGS_3D_LAYER_ID = 'Budynki/Bryły 3D';
+
+let is3DMapEnabled = false;
+let is3DBuildingsEnabled = false;
+
+function update3DButtonsUI() {
+  if (btnToggle3DMap) {
+    btnToggle3DMap.classList.toggle('active', is3DMapEnabled);
+    btnToggle3DMap.setAttribute('aria-pressed', is3DMapEnabled ? 'true' : 'false');
+  }
+  if (btnToggle3DBuildings) {
+    btnToggle3DBuildings.classList.toggle('active', is3DBuildingsEnabled);
+    btnToggle3DBuildings.setAttribute('aria-pressed', is3DBuildingsEnabled ? 'true' : 'false');
+  }
+}
+
+function set3DMap(enabled) {
+  is3DMapEnabled = !!enabled;
+  update3DButtonsUI();
+
+  try {
+    if (is3DMapEnabled) {
+      map.setTerrain({ source: 'terrain-dem', exaggeration: 0.85 });
+      if (map.getPitch() < 15) {
+        map.easeTo({ pitch: 45, duration: 600 });
+      }
+    } else {
+      if (typeof map.getTerrain === 'function' && map.getTerrain()) {
+        map.setTerrain(null);
+      }
+      if (map.getPitch() > 0) {
+        map.easeTo({ pitch: 0, duration: 600 });
+      }
+    }
+  } catch (err) {
+    console.warn('Błąd zmiany trybu terenu 3D:', err);
+  }
+}
+
+function apply3DBuildingsVisibility() {
+  try {
+    if (map.getLayer(BUILDINGS_3D_LAYER_ID)) {
+      const targetVis = is3DBuildingsEnabled ? 'visible' : 'none';
+      const currentVis = map.getLayoutProperty(BUILDINGS_3D_LAYER_ID, 'visibility');
+      if (currentVis !== targetVis) {
+        map.setLayoutProperty(BUILDINGS_3D_LAYER_ID, 'visibility', targetVis);
+      }
+    }
+  } catch (err) {
+    // Styl może być w trakcie aktualizacji
+  }
+}
+
+function set3DBuildings(enabled) {
+  is3DBuildingsEnabled = !!enabled;
+  update3DButtonsUI();
+  apply3DBuildingsVisibility();
+}
+
+map.on('styledata', apply3DBuildingsVisibility);
+
+if (btnToggle3DMap) {
+  btnToggle3DMap.addEventListener('click', () => {
+    set3DMap(!is3DMapEnabled);
+  });
+}
+
+if (btnToggle3DBuildings) {
+  btnToggle3DBuildings.addEventListener('click', () => {
+    set3DBuildings(!is3DBuildingsEnabled);
+  });
+}
+
+update3DButtonsUI();
+apply3DBuildingsVisibility();
+window.set3DMap = set3DMap;
+window.set3DBuildings = set3DBuildings;
+
 function closeLocation(restoreCamera) {
   restoreLayerMenu();
   if (searchMarker) {
@@ -1014,7 +1096,8 @@ map.on('load', () => {
     }
   });
 
-  map.setTerrain({ source: 'terrain-dem', exaggeration: 0.85 });
+  set3DMap(false);
+  set3DBuildings(false);
 
   autoBuildTree();
 });

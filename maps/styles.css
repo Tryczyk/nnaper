@@ -978,6 +978,95 @@ html {
   border-color: #38bdf8;
 }
 
+/* PRZEŁĄCZNIKI 3D W PRAWYM PANELU */
+.menu-section-divider {
+  height: 1px;
+  background: #334155;
+  margin: 6px 0;
+}
+
+.menu-toggle-btn {
+  width: 100%;
+  margin-bottom: 6px;
+  padding: 7px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-radius: 5px;
+  font-size: 11.5px;
+  font-weight: bold;
+  cursor: pointer;
+  box-sizing: border-box;
+  user-select: none;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+
+  /* Stan wyłączony - szary */
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: #94a3b8;
+}
+
+.menu-toggle-btn:hover {
+  background: #273549;
+  border-color: #475569;
+  color: #cbd5e1;
+}
+
+.menu-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.toggle-switch {
+  position: relative;
+  width: 28px;
+  height: 16px;
+  border-radius: 9px;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+
+  /* Stan wyłączony - szary tor */
+  background: #334155;
+  border: 1px solid #475569;
+}
+
+.toggle-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #64748b;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), background 0.2s ease;
+}
+
+/* Stan włączony - jaśniejszy (żywy błękit / jasne podświetlenie) */
+.menu-toggle-btn.active {
+  background: #0284c7;
+  border-color: #38bdf8;
+  color: #ffffff;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.35);
+}
+
+.menu-toggle-btn.active:hover {
+  background: #0369a1;
+  border-color: #7dd3fc;
+}
+
+.menu-toggle-btn.active .toggle-switch {
+  background: #0ea5e9;
+  border-color: #bae6fd;
+}
+
+.menu-toggle-btn.active .toggle-switch::after {
+  transform: translateX(12px);
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
 /* KONTROLKI NAWIGACJI MAPY (PRZYBLIŻANIE, KOMPAS) */
 .maplibregl-ctrl-bottom-right {
   bottom: 15px !important;

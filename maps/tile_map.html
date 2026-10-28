@@ -8,7 +8,7 @@
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
   <script src="https://unpkg.com/pmtiles@3.0.7/dist/pmtiles.js"></script>
-  <link rel="stylesheet" href="styles.css?v=20261028_colors20" />
+  <link rel="stylesheet" href="styles.css?v=20261028_3dtoggles" />
 </head>
 
 <body>
@@ -52,6 +52,19 @@
       </button>
       <button id="btn-open-planner-menu" class="menu-action-btn">
         Planowanie trasy
+      </button>
+
+      <div class="menu-section-divider"></div>
+
+      <button id="btn-toggle-3d-map" class="menu-toggle-btn" type="button" aria-pressed="false"
+        title="Włącz lub wyłącz widok 3D (ukształtowanie terenu i perspektywa 3D)">
+        <span class="menu-toggle-label">Mapa 3D</span>
+        <span class="toggle-switch"></span>
+      </button>
+      <button id="btn-toggle-3d-buildings" class="menu-toggle-btn" type="button" aria-pressed="false"
+        title="Włącz lub wyłącz trójwymiarowe bryły budynków">
+        <span class="menu-toggle-label">Budynki 3D</span>
+        <span class="toggle-switch"></span>
       </button>
     </div>
   </div>
@@ -120,8 +133,8 @@
 
   <script src="runtime-config.js"></script>
   <script src="runtime-config.local.js"></script>
-  <script src="layers.js"></script>
-  <script src="app.js?v=20261028_plannerleft"></script>
+  <script src="layers.js?v=20261028_hide3d"></script>
+  <script src="app.js?v=20261028_hide3d"></script>
   <script src="route-inline.js?v=20261028_opengoogle"></script>
 </body>
 

@@ -159,6 +159,7 @@ const MAP_STYLE = {
       source: 'pomorskie-tiles',
       'source-layer': 'building',
       type: 'fill-extrusion',
+      layout: { visibility: 'none' },
       paint: {
         'fill-extrusion-color': '#1e293b',
         'fill-extrusion-height': ['coalesce', ['get', 'render_height'], 6],
