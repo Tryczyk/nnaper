@@ -62,7 +62,6 @@
     routePlannerPanel.classList.add('active');
     routePlannerPanel.setAttribute('aria-hidden', 'false');
     routePlannerStats.innerText = '';
-    renderInlineRouteLists();
     renderInlineRouteMarkers();
     scheduleInlineRouteCalculation();
   }
@@ -81,7 +80,6 @@
     routePlannerPanel.classList.add('active');
     routePlannerPanel.setAttribute('aria-hidden', 'false');
     routePlannerStats.innerText = '';
-    renderInlineRouteLists();
     renderInlineRouteMarkers();
   }
 
@@ -89,10 +87,13 @@
     routePlannerPanel.classList.remove('active');
     routePlannerPanel.setAttribute('aria-hidden', 'true');
     document.getElementById('menu')?.classList.remove('route-planner-open');
-  
+
     if (routeStartSuggestions) routeStartSuggestions.innerHTML = '';
     clearInlineRouteLayer();
     clearInlineRouteMarkers();
+    inlineRouteState.points = [];
+    renderInlineRouteMarkers();
+    routePlannerStats.innerText = '';
     document.getElementById('btn-route-back-to-location').hidden = true;
     if (routeGoogleOutput) {
       routeGoogleOutput.style.display = 'none';
@@ -201,7 +202,6 @@
         input.value = place.display_name;
         suggestions.innerHTML = '';
         routePlannerHint.innerText = 'Punkt wybrany.';
-        renderInlineRouteLists();
         renderInlineRouteMarkers();
         scheduleInlineRouteCalculation();
       });
@@ -285,8 +285,14 @@
       lon: loc.lon,
       lat: loc.lat
     };
-    inlineRouteState.points.splice(inlineRouteState.points.length - 1, 0, { type: 'stop', place });
-    renderInlineRouteLists();
+    if (inlineRouteState.points.length === 0) {
+      inlineRouteState.points.push({ type: 'start', place });
+    } else {
+      inlineRouteState.points.push({ type: 'destination', place });
+      inlineRouteState.points.forEach((entry, pointIndex) => {
+        entry.type = pointIndex === 0 ? 'start' : (pointIndex === inlineRouteState.points.length - 1 ? 'destination' : 'stop');
+      });
+    }
     renderInlineRouteMarkers();
     scheduleInlineRouteCalculation();
     reverseGeocodeInlinePoint(place);
@@ -297,16 +303,16 @@
       const updated = await fetchReverseGeocode(place, 3000);
       if (updated) {
         Object.assign(place, updated);
-        renderInlineRouteLists();
+        renderInlineRouteMarkers();
       } else if (!place.display_name || place.display_name === 'Pobieranie adresu...') {
         place.display_name = `${Number(place.lat).toFixed(5)}, ${Number(place.lon).toFixed(5)}`;
         place.name = place.display_name;
-        renderInlineRouteLists();
+        renderInlineRouteMarkers();
       }
     } catch (error) {
       place.display_name = `${Number(place.lat).toFixed(5)}, ${Number(place.lon).toFixed(5)}`;
       place.name = place.display_name;
-      renderInlineRouteLists();
+      renderInlineRouteMarkers();
     }
   }
 
@@ -350,6 +356,7 @@
       }
     });
   });
+
   document.addEventListener('click', event => {
     if (!inlineContextMenu.contains(event.target)) inlineContextMenu.classList.remove('active');
     if (!mapContextMenu.contains(event.target)) mapContextMenu.classList.remove('active');
@@ -358,18 +365,24 @@
   function renderInlineRouteLists() {
     routePlannerStops.innerHTML = '';
     if (!inlineRouteState.points.length) {
+      const emptyBox = document.createElement('div');
+      emptyBox.style.padding = '8px 2px';
+      emptyBox.style.textAlign = 'center';
+
       const emptyPlus = document.createElement('button');
       emptyPlus.type = 'button';
-      emptyPlus.className = 'route-insert-btn';
-      emptyPlus.innerText = '+';
-      emptyPlus.title = 'Dodaj punkt trasy';
+      emptyPlus.className = 'menu-action-btn';
+      emptyPlus.style.marginTop = '0';
+      emptyPlus.innerText = '+ Dodaj punkt startowy';
+      emptyPlus.title = 'Dodaj punkt startowy trasy';
       emptyPlus.onclick = () => {
         inlineRouteState.points.push({ type: 'start', place: null });
-        renderInlineRouteLists();
+        renderInlineRouteMarkers();
         const input = routePlannerStops.querySelector('input');
         if (input) input.focus();
       };
-      routePlannerStops.appendChild(emptyPlus);
+      emptyBox.appendChild(emptyPlus);
+      routePlannerStops.appendChild(emptyBox);
     }
     inlineRouteState.points.forEach((point, index) => {
       const item = document.createElement('li');
@@ -394,7 +407,7 @@
       } else {
         const input = document.createElement('input');
         input.className = 'route-field';
-        input.placeholder = 'Wpisz miejsce startu';
+        input.placeholder = index === 0 ? 'Wpisz miejsce startu' : 'Wpisz punkt trasy';
         input.autocomplete = 'off';
         input.addEventListener('input', () => searchInlinePoint(input, point, suggestions));
         item.appendChild(input);
@@ -421,7 +434,6 @@
         inlineRouteState.points.forEach((entry, pointIndex) => {
           entry.type = pointIndex === 0 ? 'start' : pointIndex === inlineRouteState.points.length - 1 ? 'destination' : 'stop';
         });
-        renderInlineRouteLists();
         renderInlineRouteMarkers();
         scheduleInlineRouteCalculation();
       };
@@ -438,7 +450,7 @@
           inlineRouteState.points.forEach((entry, pointIndex) => {
             entry.type = pointIndex === 0 ? 'start' : pointIndex === inlineRouteState.points.length - 1 ? 'destination' : 'stop';
           });
-          renderInlineRouteLists();
+          renderInlineRouteMarkers();
           scheduleInlineRouteCalculation();
           const newInput = routePlannerStops.querySelector(`[data-point-index="${index + 1}"] input`);
           if (newInput) newInput.focus();
@@ -460,15 +472,15 @@
     inlineRouteState.points.forEach((entry, pointIndex) => {
       entry.type = pointIndex === 0 ? 'start' : pointIndex === inlineRouteState.points.length - 1 ? 'destination' : 'stop';
     });
-    renderInlineRouteLists();
     renderInlineRouteMarkers();
     scheduleInlineRouteCalculation();
   }
 
   function renderInlineRouteMarkers() {
     clearInlineRouteMarkers();
+    renderInlineRouteLists();
     const routePoints = inlineRouteState.points.filter(point => point.place);
-    inlineRouteState.points.filter(point => point.place).forEach(({ place, type }) => {
+    routePoints.forEach(({ place, type }) => {
       const pointIndex = routePoints.findIndex(point => point.place === place);
       const color = inlineRoutePointColor(pointIndex, type);
       const marker = new maplibregl.Marker({ color })
@@ -497,7 +509,6 @@
   }
 
   function bringInlineRouteLayersToFront() {
-    // Przenosimy warstwy trasy na absolutny wierzch stosu renderowania
     for (let index = 0; index < 20; index += 1) {
       const casingId = `inline-planned-route-casing-${index}`;
       const layerId = `inline-planned-route-${index}`;
@@ -528,7 +539,10 @@
     clearTimeout(inlineRouteCalculationTimer);
     inlineRouteCalculationId += 1;
     clearInlineRouteLayer();
-    if (inlineRouteState.points.filter(point => point.place).length < 2) {
+    const validPointsCount = inlineRouteState.points.filter(point => point.place).length;
+    if (validPointsCount === 0) {
+      routePlannerStats.innerText = '';
+    } else if (validPointsCount < 2) {
       routePlannerStats.innerText = 'Wybierz co najmniej dwa punkty trasy.';
     } else {
       routePlannerStats.innerText = 'Wyznaczanie trasy...';
@@ -543,7 +557,11 @@
     const points = inlineRouteState.points.map(point => point.place).filter(Boolean);
     if (points.length < 2) {
       clearInlineRouteLayer();
-      routePlannerStats.innerText = 'Wybierz co najmniej dwa punkty trasy.';
+      if (points.length === 1) {
+        routePlannerStats.innerText = 'Wybierz co najmniej dwa punkty trasy.';
+      } else {
+        routePlannerStats.innerText = '';
+      }
       return;
     }
     if (points.some(point => !Number.isFinite(Number(point.lon)) || !Number.isFinite(Number(point.lat)))) {
@@ -732,7 +750,7 @@
         .catch(() => {
           setGoogleFeedback('Link wygenerowany! Możesz go skopiować lub otworzyć.', false);
         });
-    });
+  });
   }
 
   if (btnCopyGoogleUrl) {
@@ -876,7 +894,7 @@
 
     if (routeStartSuggestions) routeStartSuggestions.innerHTML = '';
     clearInlineRouteLayer();
-    renderInlineRouteLists();
+
     renderInlineRouteMarkers();
 
     if (typeof map !== 'undefined' && coords.length > 0) {
@@ -932,14 +950,9 @@
       window.collapseRightMenu?.();
       routePlannerPanel.classList.add('active');
       routePlannerPanel.setAttribute('aria-hidden', 'false');
-      if (!inlineRouteState.points.length) {
-        inlineRouteState.points = [
-          { type: 'start', place: null },
-          { type: 'destination', place: null }
-        ];
-        renderInlineRouteLists();
-        renderInlineRouteMarkers();
-      }
+      inlineRouteState.points = [];
+      renderInlineRouteMarkers();
+      routePlannerStats.innerText = '';
       if (routeImportInput) {
         setTimeout(() => routeImportInput.focus(), 50);
       }
