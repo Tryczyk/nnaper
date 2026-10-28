@@ -109,7 +109,7 @@ const MONTH_NAMES = {
   "09": "Wrzesień", "10": "Październik", "11": "Listopad", "12": "Grudzień"
 };
 
-function createFilterTreeNode(title, checked = true) {
+function createFilterTreeNode(title, checked = true, collapsed = true) {
   const header = document.createElement('div');
   header.className = 'node-header';
   header.style.padding = '3px 6px';
@@ -129,7 +129,7 @@ function createFilterTreeNode(title, checked = true) {
   label.appendChild(text);
 
   const arrow = document.createElement('span');
-  arrow.className = 'arrow';
+  arrow.className = collapsed ? 'arrow collapsed' : 'arrow';
   arrow.innerHTML = '&#9660;';
 
   header.appendChild(label);
@@ -251,7 +251,7 @@ async function buildInlineTimeFilter(container) {
     rootNode.className = 'tree-node';
     const rootHeader = createFilterTreeNode('Wszystko', true);
     const rootChildren = document.createElement('div');
-    rootChildren.className = 'node-children';
+    rootChildren.className = 'node-children collapsed';
     rootChildren.style.marginLeft = '8px';
 
     bindFilterCollapse(rootHeader, rootChildren);
@@ -273,7 +273,7 @@ async function buildInlineTimeFilter(container) {
       yearNode.className = 'tree-node';
       const yearHeader = createFilterTreeNode(`Rok: ${year}`, true);
       const yearChildren = document.createElement('div');
-      yearChildren.className = 'node-children';
+      yearChildren.className = 'node-children collapsed';
       yearChildren.style.marginLeft = '8px';
       bindFilterCollapse(yearHeader, yearChildren);
 
@@ -285,7 +285,7 @@ async function buildInlineTimeFilter(container) {
         const monthName = MONTH_NAMES[month] || month;
         const monthHeader = createFilterTreeNode(`Miesiąc: ${monthName} (${month})`, true);
         const monthChildren = document.createElement('div');
-        monthChildren.className = 'node-children';
+        monthChildren.className = 'node-children collapsed';
         monthChildren.style.marginLeft = '8px';
         bindFilterCollapse(monthHeader, monthChildren);
 
@@ -417,14 +417,14 @@ function autoBuildTree() {
     label.appendChild(pTitle);
 
     const arrow = document.createElement('span');
-    arrow.className = 'arrow';
+    arrow.className = 'arrow collapsed';
     arrow.innerHTML = '&#9660;';
 
     header.appendChild(label);
     header.appendChild(arrow);
 
     const childrenBox = document.createElement('div');
-    childrenBox.className = 'node-children';
+    childrenBox.className = 'node-children collapsed';
 
     header.addEventListener('click', (e) => {
       if (pCheckbox && e.target === pCheckbox) return;
