@@ -26,7 +26,29 @@
   const inlineContextMenu = document.getElementById('inline-route-context-menu');
   const mapContextMenu = document.getElementById('map-context-menu');
   let mapContextLocation = null;
-  const routeSegmentColors = ['#0284c7', '#16a34a', '#f59e0b', '#9333ea', '#0891b2', '#e11d48'];
+  const routeSegmentColors = [
+    '#0284c7', // 0: Niebieski (Sky Blue)
+    '#f97316', // 1: Pomarańczowy (Vivid Orange)
+    '#10b981', // 2: Szmaragdowy (Emerald Green)
+    '#ec4899', // 3: Różowy (Hot Pink)
+    '#8b5cf6', // 4: Fioletowy (Purple)
+    '#eab308', // 5: Żółty (Bright Yellow)
+    '#06b6d4', // 6: Cyjan (Cyan)
+    '#ef4444', // 7: Czerwony (Red)
+    '#84cc16', // 8: Limonkowy (Lime Green)
+    '#d946ef', // 9: Fuksja (Fuchsia)
+    '#3b82f6', // 10: Kobaltowy (Royal Blue)
+    '#f59e0b', // 11: Bursztynowy (Amber)
+    '#14b8a6', // 12: Morski (Teal)
+    '#fb7185', // 13: Koralowy (Coral / Rose)
+    '#22c55e', // 14: Jasnozielony (Green)
+    '#a855f7', // 15: Lawendowy (Violet)
+    '#0ea5e9', // 16: Jasnobłękitny (Light Blue)
+    '#e11d48', // 17: Rubinowy (Ruby Crimson)
+    '#16a34a', // 18: Żywy zielony (Forest Green)
+    '#fdba74'  // 19: Brzoskwiniowy (Peach / Apricot)
+  ];
+  const MAX_ROUTE_SEGMENTS = 100;
   const photonUrl = (window.NNAPER_CONFIG?.PHOTON_URL || 'https://photon.komoot.io').replace(/\/$/, '');
   const photonBbox = window.NNAPER_CONFIG?.PHOTON_BBOX || '14.1,53.9,19.9,55.9';
   const photonSearchLimit = window.NNAPER_CONFIG?.PHOTON_SEARCH_LIMIT || 50;
@@ -34,9 +56,9 @@
   document.body.appendChild(inlineContextMenu);
   document.body.appendChild(mapContextMenu);
 
-  function inlineRoutePointColor(index, type = 'stop') {
-    if (type === 'destination') return '#dc2626';
-    return routeSegmentColors[Math.max(0, index) % routeSegmentColors.length];
+  function inlineRoutePointColor(index) {
+    const idx = Math.max(0, parseInt(index, 10) || 0);
+    return routeSegmentColors[idx % routeSegmentColors.length];
   }
 
   function inlineRoutePlaceLabel(place) {
@@ -390,10 +412,8 @@
       item.dataset.pointIndex = String(index);
       const place = point.place;
       const icon = index === 0 ? '○' : index === inlineRouteState.points.length - 1 ? '●' : '●';
-      const pointColor = point.type === 'destination'
-        ? '#dc2626'
-        : routeSegmentColors[index % routeSegmentColors.length];
-      item.innerHTML = `<span class="route-point-icon ${index === inlineRouteState.points.length - 1 ? 'destination' : ''}" style="color: ${pointColor}">${icon}</span>`;
+      const pointColor = inlineRoutePointColor(index);
+      item.innerHTML = `<span class="route-point-icon" style="color: ${pointColor}">${icon}</span>`;
       const suggestions = document.createElement('div');
       suggestions.className = 'route-point-suggestions';
       if (point.place) {
@@ -482,7 +502,7 @@
     const routePoints = inlineRouteState.points.filter(point => point.place);
     routePoints.forEach(({ place, type }) => {
       const pointIndex = routePoints.findIndex(point => point.place === place);
-      const color = inlineRoutePointColor(pointIndex, type);
+      const color = inlineRoutePointColor(pointIndex);
       const marker = new maplibregl.Marker({ color })
         .setLngLat([Number(place.lon), Number(place.lat)])
         .addTo(map);
@@ -498,7 +518,7 @@
   }
 
   function clearInlineRouteLayer() {
-    for (let index = 0; index < 20; index += 1) {
+    for (let index = 0; index < MAX_ROUTE_SEGMENTS; index += 1) {
       const layerId = `inline-planned-route-${index}`;
       const sourceId = `inline-planned-route-source-${index}`;
       const casingId = `inline-planned-route-casing-${index}`;
@@ -509,7 +529,7 @@
   }
 
   function bringInlineRouteLayersToFront() {
-    for (let index = 0; index < 20; index += 1) {
+    for (let index = 0; index < MAX_ROUTE_SEGMENTS; index += 1) {
       const casingId = `inline-planned-route-casing-${index}`;
       const layerId = `inline-planned-route-${index}`;
       if (map.getLayer(casingId)) {
@@ -626,7 +646,7 @@
             'line-sort-key': 100001
           },
           paint: {
-            'line-color': inlineRoutePointColor(index, routePoints[index]?.type),
+            'line-color': inlineRoutePointColor(index),
             'line-width': 5.5,
             'line-opacity': 1
           }
