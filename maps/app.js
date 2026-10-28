@@ -491,8 +491,8 @@ function autoBuildTree() {
       if (child.raw.type === 'line') {
         const lineOutlineId = `${child.id}-outline-line`;
         if (!map.getLayer(lineOutlineId) &&
-            typeof child.raw.source === 'string' &&
-            typeof child.raw['source-layer'] === 'string') {
+          typeof child.raw.source === 'string' &&
+          typeof child.raw['source-layer'] === 'string') {
           map.addLayer({
             id: lineOutlineId,
             source: child.raw.source,
@@ -594,8 +594,8 @@ function autoBuildTree() {
       if (child.raw.type === 'fill') {
         const outlineLayerId = `${child.id}-outline-line`;
         if (!map.getLayer(outlineLayerId) &&
-            typeof child.raw.source === 'string' &&
-            typeof child.raw['source-layer'] === 'string') {
+          typeof child.raw.source === 'string' &&
+          typeof child.raw['source-layer'] === 'string') {
           map.addLayer({
             id: outlineLayerId,
             source: child.raw.source,
@@ -678,6 +678,7 @@ function autoBuildTree() {
 /* ------------------- INTERFEJS OKNA ------------------- */
 const menuEl = document.getElementById('menu');
 const btnMin = document.getElementById('btn-minimize');
+const btnToggleMenu = document.getElementById('btn-toggle-menu');
 const btnBackLocation = document.getElementById('btn-back-location');
 const btnCloseLocation = document.getElementById('btn-close-location');
 const menuTitle = menuEl.querySelector('.menu-header h3');
@@ -698,7 +699,35 @@ function restoreLayerMenu() {
   autoBuildTree();
 }
 
-function minimizeMenu() {
+  function collapseMenu() {
+    menuEl.classList.add('collapsed');
+    menuEl.classList.remove('minimized');
+    if (btnMin) btnMin.innerText = '+';
+    if (btnToggleMenu) {
+      btnToggleMenu.setAttribute('title', 'Rozwiń wybierak warstw');
+      btnToggleMenu.setAttribute('aria-label', 'Rozwiń wybierak warstw');
+    }
+  }
+
+  function expandMenu() {
+    menuEl.classList.remove('collapsed');
+    menuEl.classList.remove('minimized');
+    if (btnMin) btnMin.innerText = '–';
+    if (btnToggleMenu) {
+      btnToggleMenu.setAttribute('title', 'Zwiń wybierak warstw');
+      btnToggleMenu.setAttribute('aria-label', 'Zwiń wybierak warstw');
+    }
+  }
+
+  function toggleMenu() {
+    if (menuEl.classList.contains('collapsed')) {
+      expandMenu();
+    } else {
+      collapseMenu();
+    }
+  }
+
+  function minimizeMenu() { toggleMenu(); } /*
   menuEl.classList.add('minimized');
   btnMin.innerText = '+';
 }
@@ -708,174 +737,177 @@ function expandMenu() {
   btnMin.innerText = '–';
 }
 
-btnMin.addEventListener('click', () => {
-  if (menuEl.classList.contains('minimized')) expandMenu();
-  else minimizeMenu();
-});
-
-const btnSwitch = document.getElementById('btn-switch-side');
-btnSwitch.addEventListener('click', () => {
-  const isLeft = menuEl.classList.contains('dock-left');
-  menuEl.classList.toggle('dock-left', !isLeft);
-  menuEl.classList.toggle('dock-right', isLeft);
-
-  map.removeControl(navControl);
-  navControl = new maplibregl.NavigationControl({ showCompass: true });
-  map.addControl(navControl, isLeft ? 'top-left' : 'top-right');
-});
-
-function closeLocation(restoreCamera) {
-  restoreLayerMenu();
-  if (searchMarker) {
-    searchMarker.remove();
-    searchMarker = null;
-  }
-  if (restoreCamera && previousSearchCamera) {
-    map.easeTo(previousSearchCamera);
-  }
-  previousSearchCamera = null;
-  searchInput.value = '';
-  searchCompleted = false;
-  searchResults = [];
-  suggestionsBox.innerHTML = '';
-  suggestionsBox.style.display = 'none';
-}
-
-window.restoreOriginalSearchLocation = () => closeLocation(true);
-
-btnBackLocation.addEventListener('click', () => closeLocation(true));
-btnCloseLocation.addEventListener('click', () => closeLocation(false));
-
-/* ------------------- WIZUALIZACJA SATELITÓW ------------------- */
-let activeSatelliteContext = null;
-let currentSatMode = 'local';
-
-function clearSatelliteLayers() {
-  activeSatelliteContext = null;
-  const satLines = map.getSource('satellites-lines-source');
-  if (satLines) satLines.setData({ type: 'FeatureCollection', features: [] });
-  const satPoints = map.getSource('satellites-points-source');
-  if (satPoints) satPoints.setData({ type: 'FeatureCollection', features: [] });
-}
-
-function computeSubSatellitePoint(userLon, userLat, azimuthDeg, elevationDeg) {
-  const R_E = 6371.0;
-  const H_SAT = 20200.0;
-  const R_SAT = R_E + H_SAT;
-
-  const elRad = (Math.max(0.1, elevationDeg) * Math.PI) / 180.0;
-  const azRad = (azimuthDeg * Math.PI) / 180.0;
-  const latRad = (userLat * Math.PI) / 180.0;
-  const lonRad = (userLon * Math.PI) / 180.0;
-
-  const cosArg = (R_E / R_SAT) * Math.cos(elRad);
-  const alpha = Math.acos(Math.min(1.0, Math.max(-1.0, cosArg)));
-  const gamma = alpha - elRad;
-
-  const sinLat2 = Math.sin(latRad) * Math.cos(gamma) + Math.cos(latRad) * Math.sin(gamma) * Math.cos(azRad);
-  const lat2 = Math.asin(Math.min(1.0, Math.max(-1.0, sinLat2)));
-
-  const y = Math.sin(azRad) * Math.sin(gamma) * Math.cos(latRad);
-  const x = Math.cos(gamma) - Math.sin(latRad) * Math.sin(lat2);
-  const lon2 = lonRad + Math.atan2(y, x);
-
-  let satLat = (lat2 * 180.0) / Math.PI;
-  let satLon = (lon2 * 180.0) / Math.PI;
-  satLon = ((satLon + 540.0) % 360.0) - 180.0;
-
-  return { lon: satLon, lat: satLat };
-}
-
-function renderSatelliteRays() {
-  if (!activeSatelliteContext) return;
-  const { pointLon, pointLat, satellitesList } = activeSatelliteContext;
-
-  const lineFeatures = [];
-  const pointFeatures = [];
-  const bounds = new maplibregl.LngLatBounds();
-  bounds.extend([pointLon, pointLat]);
-
-  const RAY_DISTANCE_DEG_LOCAL = 0.045;
-
-  satellitesList.forEach(sat => {
-    if (sat.azimuth === null || sat.azimuth === undefined) return;
-    let satLon, satLat, label;
-
-    if (currentSatMode === 'local') {
-      const azRad = (sat.azimuth * Math.PI) / 180.0;
-      const el = sat.elevation !== null && sat.elevation !== undefined ? sat.elevation : 45;
-      const dist = RAY_DISTANCE_DEG_LOCAL * Math.cos((el * Math.PI) / 180.0);
-      satLon = pointLon + dist * Math.sin(azRad) * 1.5;
-      satLat = pointLat + dist * Math.cos(azRad);
-      label = `PRN ${sat.prn}\n(${sat.elevation || 0}°)`;
-    } else {
-      const sub = computeSubSatellitePoint(pointLon, pointLat, sat.azimuth, sat.elevation || 0);
-      satLon = sub.lon;
-      satLat = sub.lat;
-      label = `PRN ${sat.prn} (Sub-Sat)\nEl: ${sat.elevation || 0}°`;
-    }
-
-    bounds.extend([satLon, satLat]);
-
-    lineFeatures.push({
-      type: 'Feature',
-      geometry: {
-        type: 'LineString',
-        coordinates: [[pointLon, pointLat], [satLon, satLat]]
-      },
-      properties: { prn: sat.prn, elevation: sat.elevation }
-    });
-
-    pointFeatures.push({
-      type: 'Feature',
-      geometry: {
-        type: 'Point',
-        coordinates: [satLon, satLat]
-      },
-      properties: { label, prn: sat.prn }
-    });
+*/
+  if (btnToggleMenu) btnToggleMenu.addEventListener('click', toggleMenu);
+  btnMin.addEventListener('click', toggleMenu);
+/*
+*/ (function () { /*
+*/
   });
 
-  const satLines = map.getSource('satellites-lines-source');
-  if (satLines) satLines.setData({ type: 'FeatureCollection', features: lineFeatures });
+  const btnSwitch = document.getElementById('btn-switch-side');
+  btnSwitch.addEventListener('click', () => {
+    const isLeft = menuEl.classList.contains('dock-left');
+    menuEl.classList.toggle('dock-left', !isLeft);
+    menuEl.classList.toggle('dock-right', isLeft);
 
-  const satPoints = map.getSource('satellites-points-source');
-  if (satPoints) satPoints.setData({ type: 'FeatureCollection', features: pointFeatures });
+    map.removeControl(navControl);
+    navControl = new maplibregl.NavigationControl({ showCompass: true });
+    map.addControl(navControl, isLeft ? 'top-left' : 'top-right');
+  });
 
-  if (currentSatMode === 'subpoint' && lineFeatures.length > 0) {
-    map.fitBounds(bounds, { padding: 80, maxZoom: 6, duration: 1000 });
-  } else if (currentSatMode === 'local') {
-    map.easeTo({ center: [pointLon, pointLat], zoom: 13, duration: 800 });
-  }
-}
-
-/* ------------------- POBIERANIE PEŁNYCH DANYCH Z BAZY ------------------- */
-async function loadPointFullDetails(epochId) {
-  minimizeMenu();
-  pointPanelEl.classList.add('active');
-
-  const content = document.getElementById('pp-content');
-  content.innerHTML = '<div style="color:#94a3b8;">Odpytywanie bazy danych...</div>';
-
-  try {
-    const res = await fetch(`${apiBaseUrl}/api/epoch/${epochId}`);
-    if (!res.ok) throw new Error('Błąd odpytania serwera');
-    const data = await res.json();
-    if (data.error) throw new Error(data.error);
-
-    const e = data;
-    const allSatellites = data.satellites || [];
-
-    if (e.longitude && e.latitude) {
-      activeSatelliteContext = {
-        pointLon: parseFloat(e.longitude),
-        pointLat: parseFloat(e.latitude),
-        satellitesList: allSatellites
-      };
-      renderSatelliteRays();
+  function closeLocation(restoreCamera) {
+    restoreLayerMenu();
+    if (searchMarker) {
+      searchMarker.remove();
+      searchMarker = null;
     }
+    if (restoreCamera && previousSearchCamera) {
+      map.easeTo(previousSearchCamera);
+    }
+    previousSearchCamera = null;
+    searchInput.value = '';
+    searchCompleted = false;
+    searchResults = [];
+    suggestionsBox.innerHTML = '';
+    suggestionsBox.style.display = 'none';
+  }
 
-    let html = `
+  window.restoreOriginalSearchLocation = () => closeLocation(true);
+
+  btnBackLocation.addEventListener('click', () => closeLocation(true));
+  btnCloseLocation.addEventListener('click', () => closeLocation(false));
+
+  /* ------------------- WIZUALIZACJA SATELITÓW ------------------- */
+  let activeSatelliteContext = null;
+  let currentSatMode = 'local';
+
+  function clearSatelliteLayers() {
+    activeSatelliteContext = null;
+    const satLines = map.getSource('satellites-lines-source');
+    if (satLines) satLines.setData({ type: 'FeatureCollection', features: [] });
+    const satPoints = map.getSource('satellites-points-source');
+    if (satPoints) satPoints.setData({ type: 'FeatureCollection', features: [] });
+  }
+
+  function computeSubSatellitePoint(userLon, userLat, azimuthDeg, elevationDeg) {
+    const R_E = 6371.0;
+    const H_SAT = 20200.0;
+    const R_SAT = R_E + H_SAT;
+
+    const elRad = (Math.max(0.1, elevationDeg) * Math.PI) / 180.0;
+    const azRad = (azimuthDeg * Math.PI) / 180.0;
+    const latRad = (userLat * Math.PI) / 180.0;
+    const lonRad = (userLon * Math.PI) / 180.0;
+
+    const cosArg = (R_E / R_SAT) * Math.cos(elRad);
+    const alpha = Math.acos(Math.min(1.0, Math.max(-1.0, cosArg)));
+    const gamma = alpha - elRad;
+
+    const sinLat2 = Math.sin(latRad) * Math.cos(gamma) + Math.cos(latRad) * Math.sin(gamma) * Math.cos(azRad);
+    const lat2 = Math.asin(Math.min(1.0, Math.max(-1.0, sinLat2)));
+
+    const y = Math.sin(azRad) * Math.sin(gamma) * Math.cos(latRad);
+    const x = Math.cos(gamma) - Math.sin(latRad) * Math.sin(lat2);
+    const lon2 = lonRad + Math.atan2(y, x);
+
+    let satLat = (lat2 * 180.0) / Math.PI;
+    let satLon = (lon2 * 180.0) / Math.PI;
+    satLon = ((satLon + 540.0) % 360.0) - 180.0;
+
+    return { lon: satLon, lat: satLat };
+  }
+
+  function renderSatelliteRays() {
+    if (!activeSatelliteContext) return;
+    const { pointLon, pointLat, satellitesList } = activeSatelliteContext;
+
+    const lineFeatures = [];
+    const pointFeatures = [];
+    const bounds = new maplibregl.LngLatBounds();
+    bounds.extend([pointLon, pointLat]);
+
+    const RAY_DISTANCE_DEG_LOCAL = 0.045;
+
+    satellitesList.forEach(sat => {
+      if (sat.azimuth === null || sat.azimuth === undefined) return;
+      let satLon, satLat, label;
+
+      if (currentSatMode === 'local') {
+        const azRad = (sat.azimuth * Math.PI) / 180.0;
+        const el = sat.elevation !== null && sat.elevation !== undefined ? sat.elevation : 45;
+        const dist = RAY_DISTANCE_DEG_LOCAL * Math.cos((el * Math.PI) / 180.0);
+        satLon = pointLon + dist * Math.sin(azRad) * 1.5;
+        satLat = pointLat + dist * Math.cos(azRad);
+        label = `PRN ${sat.prn}\n(${sat.elevation || 0}°)`;
+      } else {
+        const sub = computeSubSatellitePoint(pointLon, pointLat, sat.azimuth, sat.elevation || 0);
+        satLon = sub.lon;
+        satLat = sub.lat;
+        label = `PRN ${sat.prn} (Sub-Sat)\nEl: ${sat.elevation || 0}°`;
+      }
+
+      bounds.extend([satLon, satLat]);
+
+      lineFeatures.push({
+        type: 'Feature',
+        geometry: {
+          type: 'LineString',
+          coordinates: [[pointLon, pointLat], [satLon, satLat]]
+        },
+        properties: { prn: sat.prn, elevation: sat.elevation }
+      });
+
+      pointFeatures.push({
+        type: 'Feature',
+        geometry: {
+          type: 'Point',
+          coordinates: [satLon, satLat]
+        },
+        properties: { label, prn: sat.prn }
+      });
+    });
+
+    const satLines = map.getSource('satellites-lines-source');
+    if (satLines) satLines.setData({ type: 'FeatureCollection', features: lineFeatures });
+
+    const satPoints = map.getSource('satellites-points-source');
+    if (satPoints) satPoints.setData({ type: 'FeatureCollection', features: pointFeatures });
+
+    if (currentSatMode === 'subpoint' && lineFeatures.length > 0) {
+      map.fitBounds(bounds, { padding: 80, maxZoom: 6, duration: 1000 });
+    } else if (currentSatMode === 'local') {
+      map.easeTo({ center: [pointLon, pointLat], zoom: 13, duration: 800 });
+    }
+  }
+
+  /* ------------------- POBIERANIE PEŁNYCH DANYCH Z BAZY ------------------- */
+  async function loadPointFullDetails(epochId) {
+    minimizeMenu();
+    pointPanelEl.classList.add('active');
+
+    const content = document.getElementById('pp-content');
+    content.innerHTML = '<div style="color:#94a3b8;">Odpytywanie bazy danych...</div>';
+
+    try {
+      const res = await fetch(`${apiBaseUrl}/api/epoch/${epochId}`);
+      if (!res.ok) throw new Error('Błąd odpytania serwera');
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+
+      const e = data;
+      const allSatellites = data.satellites || [];
+
+      if (e.longitude && e.latitude) {
+        activeSatelliteContext = {
+          pointLon: parseFloat(e.longitude),
+          pointLat: parseFloat(e.latitude),
+          satellitesList: allSatellites
+        };
+        renderSatelliteRays();
+      }
+
+      let html = `
       <div class="sat-mode-switch">
         <span>Tryb wizualizacji satelitów:</span>
         <select id="sel-sat-mode">
@@ -901,363 +933,363 @@ async function loadPointFullDetails(epochId) {
         <div style="display:flex; flex-wrap:wrap; gap:4px; margin-top:4px;">
     `;
 
-    if (allSatellites.length > 0) {
-      allSatellites.forEach(sat => {
-        html += `
+      if (allSatellites.length > 0) {
+        allSatellites.forEach(sat => {
+          html += `
           <span class="sat-badge">
             <strong style="color:#38bdf8;">PRN ${sat.prn}:</strong> El: ${sat.elevation}°, Az: ${sat.azimuth}°
           </span>
         `;
-      });
-    } else {
-      html += `<span style="color:#64748b;">Brak wpisów satelitów w tej epoce.</span>`;
-    }
+        });
+      } else {
+        html += `<span style="color:#64748b;">Brak wpisów satelitów w tej epoce.</span>`;
+      }
 
-    html += `
+      html += `
         </div>
       </div>
 
     `;
 
-    content.innerHTML = html;
+      content.innerHTML = html;
 
-    const selMode = document.getElementById('sel-sat-mode');
-    if (selMode) {
-      selMode.addEventListener('change', (e) => {
-        currentSatMode = e.target.value;
-        renderSatelliteRays();
-      });
+      const selMode = document.getElementById('sel-sat-mode');
+      if (selMode) {
+        selMode.addEventListener('change', (e) => {
+          currentSatMode = e.target.value;
+          renderSatelliteRays();
+        });
+      }
+
+    } catch (err) {
+      content.innerHTML = `<span style="color:#ef4444;">Błąd pobierania danych: ${err.message}</span>`;
     }
-
-  } catch (err) {
-    content.innerHTML = `<span style="color:#ef4444;">Błąd pobierania danych: ${err.message}</span>`;
   }
-}
 
-/* ------------------- INICJALIZACJA ------------------- */
-map.on('load', () => {
-  // Ślad GPS
-  map.addSource('gps-track', {
-    type: 'vector',
-    tiles: [buildTrackTilesUrl('none')],
-    minzoom: 0,
-    maxzoom: 18
-  });
-
-  map.addLayer({
-    id: 'GPS / Ślad trasy',
-    source: 'gps-track',
-    'source-layer': 'gps-track',
-    type: 'circle',
-    layout: { visibility: 'none' },
-    paint: {
-      'circle-color': '#06b6d4',
-      'circle-radius': 4.5,
-      'circle-stroke-width': 0,
-      'circle-stroke-color': '#06b6d4',
-      'circle-pitch-alignment': 'map',
-      'circle-pitch-scale': 'viewport'
-    }
-  });
-
-  map.setTerrain({ source: 'terrain-dem', exaggeration: 0.85 });
-
-  autoBuildTree();
-});
-
-/* ------------------- WYSZUKIWARKA MIEJSC I GEODECODROWANIE ------------------- */
-const searchInput = document.getElementById('search-input');
-const suggestionsBox = document.getElementById('search-suggestions');
-let searchMarker = null;
-let searchTimeout = null;
-let searchRequestId = 0;
-let searchAbortController = null;
-let searchResults = [];
-let highlightedSearchIndex = -1;
-let searchCompleted = false;
-
-function getPolishPlaceLabel(value) {
-  if (!value) return value;
-  return String(value)
-    .replace(/\bPomeranian Voivodeship\b/gi, 'Pomorskie')
-    .replace(/\bPomeranian Province\b/gi, 'Pomorskie')
-    .replace(/\bwojewództwo pomorskie\b/gi, 'Pomorskie')
-    .replace(/\bPoland\b/gi, 'Polska');
-}
-
-function renderSearchResults(results) {
-  suggestionsBox.innerHTML = '';
-  searchResults = results.slice(0, 6);
-  highlightedSearchIndex = -1;
-
-  searchResults.forEach((place, index) => {
-    const div = document.createElement('div');
-    div.className = 'suggestion-item';
-    div.innerText = place.display_name;
-    div.addEventListener('click', () => selectPlace(place));
-    div.addEventListener('mouseenter', () => {
-      highlightedSearchIndex = index;
-      updateHighlightedSearchResult();
+  /* ------------------- INICJALIZACJA ------------------- */
+  map.on('load', () => {
+    // Ślad GPS
+    map.addSource('gps-track', {
+      type: 'vector',
+      tiles: [buildTrackTilesUrl('none')],
+      minzoom: 0,
+      maxzoom: 18
     });
-    suggestionsBox.appendChild(div);
+
+    map.addLayer({
+      id: 'GPS / Ślad trasy',
+      source: 'gps-track',
+      'source-layer': 'gps-track',
+      type: 'circle',
+      layout: { visibility: 'none' },
+      paint: {
+        'circle-color': '#06b6d4',
+        'circle-radius': 4.5,
+        'circle-stroke-width': 0,
+        'circle-stroke-color': '#06b6d4',
+        'circle-pitch-alignment': 'map',
+        'circle-pitch-scale': 'viewport'
+      }
+    });
+
+    map.setTerrain({ source: 'terrain-dem', exaggeration: 0.85 });
+
+    autoBuildTree();
   });
 
-  suggestionsBox.style.display = searchResults.length ? 'block' : 'none';
-}
+  /* ------------------- WYSZUKIWARKA MIEJSC I GEODECODROWANIE ------------------- */
+  const searchInput = document.getElementById('search-input');
+  const suggestionsBox = document.getElementById('search-suggestions');
+  let searchMarker = null;
+  let searchTimeout = null;
+  let searchRequestId = 0;
+  let searchAbortController = null;
+  let searchResults = [];
+  let highlightedSearchIndex = -1;
+  let searchCompleted = false;
 
-function updateHighlightedSearchResult() {
-  [...suggestionsBox.children].forEach((item, index) => {
-    item.classList.toggle('active', index === highlightedSearchIndex);
-  });
-}
-
-searchInput.addEventListener('focus', () => {
-  if (searchCompleted) {
-    searchInput.value = '';
-    suggestionsBox.innerHTML = '';
-    suggestionsBox.style.display = 'none';
-    searchResults = [];
-    highlightedSearchIndex = -1;
-    searchCompleted = false;
-    restoreLayerMenu();
+  function getPolishPlaceLabel(value) {
+    if (!value) return value;
+    return String(value)
+      .replace(/\bPomeranian Voivodeship\b/gi, 'Pomorskie')
+      .replace(/\bPomeranian Province\b/gi, 'Pomorskie')
+      .replace(/\bwojewództwo pomorskie\b/gi, 'Pomorskie')
+      .replace(/\bPoland\b/gi, 'Polska');
   }
-});
 
-searchInput.addEventListener('keydown', (e) => {
-  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-    if (!searchResults.length) return;
-    e.preventDefault();
-    const direction = e.key === 'ArrowDown' ? 1 : -1;
-    highlightedSearchIndex = (highlightedSearchIndex + direction + searchResults.length) % searchResults.length;
-    updateHighlightedSearchResult();
-    suggestionsBox.children[highlightedSearchIndex].scrollIntoView({ block: 'nearest' });
-  } else if (e.key === 'Enter') {
-    const query = searchInput.value.trim();
-    if (typeof window.parseGoogleMapsRouteUrl === 'function') {
-      const coords = window.parseGoogleMapsRouteUrl(query);
+  function renderSearchResults(results) {
+    suggestionsBox.innerHTML = '';
+    searchResults = results.slice(0, 6);
+    highlightedSearchIndex = -1;
+
+    searchResults.forEach((place, index) => {
+      const div = document.createElement('div');
+      div.className = 'suggestion-item';
+      div.innerText = place.display_name;
+      div.addEventListener('click', () => selectPlace(place));
+      div.addEventListener('mouseenter', () => {
+        highlightedSearchIndex = index;
+        updateHighlightedSearchResult();
+      });
+      suggestionsBox.appendChild(div);
+    });
+
+    suggestionsBox.style.display = searchResults.length ? 'block' : 'none';
+  }
+
+  function updateHighlightedSearchResult() {
+    [...suggestionsBox.children].forEach((item, index) => {
+      item.classList.toggle('active', index === highlightedSearchIndex);
+    });
+  }
+
+  searchInput.addEventListener('focus', () => {
+    if (searchCompleted) {
+      searchInput.value = '';
+      suggestionsBox.innerHTML = '';
+      suggestionsBox.style.display = 'none';
+      searchResults = [];
+      highlightedSearchIndex = -1;
+      searchCompleted = false;
+      restoreLayerMenu();
+    }
+  });
+
+  searchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (!searchResults.length) return;
+      e.preventDefault();
+      const direction = e.key === 'ArrowDown' ? 1 : -1;
+      highlightedSearchIndex = (highlightedSearchIndex + direction + searchResults.length) % searchResults.length;
+      updateHighlightedSearchResult();
+      suggestionsBox.children[highlightedSearchIndex].scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'Enter') {
+      const query = searchInput.value.trim();
+      if (typeof window.parseGoogleMapsRouteUrl === 'function') {
+        const coords = window.parseGoogleMapsRouteUrl(query);
+        if (coords && coords.length >= 2) {
+          e.preventDefault();
+          searchInput.value = '';
+          suggestionsBox.style.display = 'none';
+          window.loadRouteFromGoogleMapsUrl(query);
+          return;
+        }
+      }
+      if (searchResults.length) {
+        e.preventDefault();
+        selectPlace(searchResults[highlightedSearchIndex >= 0 ? highlightedSearchIndex : 0]);
+      }
+    } else if (e.key === 'Escape') {
+      suggestionsBox.style.display = 'none';
+    }
+  });
+
+  searchInput.addEventListener('paste', (e) => {
+    const text = (e.clipboardData || window.clipboardData)?.getData('text');
+    if (text && typeof window.parseGoogleMapsRouteUrl === 'function') {
+      const coords = window.parseGoogleMapsRouteUrl(text);
       if (coords && coords.length >= 2) {
         e.preventDefault();
         searchInput.value = '';
         suggestionsBox.style.display = 'none';
-        window.loadRouteFromGoogleMapsUrl(query);
-        return;
+        window.loadRouteFromGoogleMapsUrl(text);
       }
     }
-    if (searchResults.length) {
-      e.preventDefault();
-      selectPlace(searchResults[highlightedSearchIndex >= 0 ? highlightedSearchIndex : 0]);
-    }
-  } else if (e.key === 'Escape') {
-    suggestionsBox.style.display = 'none';
-  }
-});
+  });
 
-searchInput.addEventListener('paste', (e) => {
-  const text = (e.clipboardData || window.clipboardData)?.getData('text');
-  if (text && typeof window.parseGoogleMapsRouteUrl === 'function') {
-    const coords = window.parseGoogleMapsRouteUrl(text);
-    if (coords && coords.length >= 2) {
-      e.preventDefault();
-      searchInput.value = '';
+  // Debounce dla podpowiedzi (żeby nie odpytywać API przy każdym wciśnięciu klawisza)
+  searchInput.addEventListener('input', (e) => {
+    clearTimeout(searchTimeout);
+    const requestId = ++searchRequestId;
+    if (searchAbortController) searchAbortController.abort();
+    const query = e.target.value.trim();
+
+    if (query.length < 1) {
       suggestionsBox.style.display = 'none';
-      window.loadRouteFromGoogleMapsUrl(text);
-    }
-  }
-});
-
-// Debounce dla podpowiedzi (żeby nie odpytywać API przy każdym wciśnięciu klawisza)
-searchInput.addEventListener('input', (e) => {
-  clearTimeout(searchTimeout);
-  const requestId = ++searchRequestId;
-  if (searchAbortController) searchAbortController.abort();
-  const query = e.target.value.trim();
-
-  if (query.length < 1) {
-    suggestionsBox.style.display = 'none';
-    suggestionsBox.innerHTML = '';
-    return;
-  }
-
-  if (typeof window.parseGoogleMapsRouteUrl === 'function') {
-    const coords = window.parseGoogleMapsRouteUrl(query);
-    if (coords && coords.length >= 2) {
       suggestionsBox.innerHTML = '';
-      const div = document.createElement('div');
-      div.className = 'suggestion-item';
-      div.style.color = '#38bdf8';
-      div.style.fontWeight = 'bold';
-      div.innerText = `🗺️ Wczytaj trasę z linku Google Maps (${coords.length} punktów)`;
-      div.addEventListener('click', () => {
-        searchInput.value = '';
-        suggestionsBox.style.display = 'none';
-        window.loadRouteFromGoogleMapsUrl(query);
-      });
-      suggestionsBox.appendChild(div);
-      suggestionsBox.style.display = 'block';
       return;
     }
-  }
 
-  searchTimeout = setTimeout(async () => {
-    try {
-      const query = searchInput.value.trim();
-      if (query.length < 1) {
-        suggestionsBox.style.display = 'none';
+    if (typeof window.parseGoogleMapsRouteUrl === 'function') {
+      const coords = window.parseGoogleMapsRouteUrl(query);
+      if (coords && coords.length >= 2) {
         suggestionsBox.innerHTML = '';
+        const div = document.createElement('div');
+        div.className = 'suggestion-item';
+        div.style.color = '#38bdf8';
+        div.style.fontWeight = 'bold';
+        div.innerText = `🗺️ Wczytaj trasę z linku Google Maps (${coords.length} punktów)`;
+        div.addEventListener('click', () => {
+          searchInput.value = '';
+          suggestionsBox.style.display = 'none';
+          window.loadRouteFromGoogleMapsUrl(query);
+        });
+        suggestionsBox.appendChild(div);
+        suggestionsBox.style.display = 'block';
         return;
       }
+    }
 
-      const url = `${photonUrl}/api/?q=${encodeURIComponent(query)}&limit=${photonSearchLimit}&bbox=${photonBbox}`;
-      searchAbortController = new AbortController();
-      const searchAbortTimer = setTimeout(() => searchAbortController.abort(), 4000);
-      const response = await fetch(url, { signal: searchAbortController.signal });
-      clearTimeout(searchAbortTimer);
-      if (!response.ok) throw new Error(`Błąd wyszukiwania: ${response.status}`);
-      const data = await response.json();
-      if (requestId !== searchRequestId) return;
-      const uniqueResults = new Map();
-      (Array.isArray(data.features) ? data.features : []).forEach(feature => {
-        const properties = feature.properties || {};
-        const coordinates = feature.geometry && feature.geometry.coordinates;
-        if (!Array.isArray(coordinates) || coordinates.length < 2) return;
-        const addressParts = [
-          properties.street && `${properties.street}${properties.housenumber ? ` ${properties.housenumber}` : ''}`,
-          properties.city || properties.town || properties.village,
-          getPolishPlaceLabel(properties.state),
-          getPolishPlaceLabel(properties.country)
-        ].filter(Boolean);
+    searchTimeout = setTimeout(async () => {
+      try {
+        const query = searchInput.value.trim();
+        if (query.length < 1) {
+          suggestionsBox.style.display = 'none';
+          suggestionsBox.innerHTML = '';
+          return;
+        }
 
-        const place = {
-          ...properties,
-          state: getPolishPlaceLabel(properties.state),
-          country: getPolishPlaceLabel(properties.country),
-          name: properties.name || '',
-          display_name: [properties.name, ...addressParts]
-            .filter((value, index, values) => value && values.indexOf(value) === index)
-            .join(', '),
-          lon: coordinates[0],
-          lat: coordinates[1],
-          address: {
-            road: properties.street,
-            house_number: properties.housenumber,
-            city: properties.city || properties.town || properties.village,
+        const url = `${photonUrl}/api/?q=${encodeURIComponent(query)}&limit=${photonSearchLimit}&bbox=${photonBbox}`;
+        searchAbortController = new AbortController();
+        const searchAbortTimer = setTimeout(() => searchAbortController.abort(), 4000);
+        const response = await fetch(url, { signal: searchAbortController.signal });
+        clearTimeout(searchAbortTimer);
+        if (!response.ok) throw new Error(`Błąd wyszukiwania: ${response.status}`);
+        const data = await response.json();
+        if (requestId !== searchRequestId) return;
+        const uniqueResults = new Map();
+        (Array.isArray(data.features) ? data.features : []).forEach(feature => {
+          const properties = feature.properties || {};
+          const coordinates = feature.geometry && feature.geometry.coordinates;
+          if (!Array.isArray(coordinates) || coordinates.length < 2) return;
+          const addressParts = [
+            properties.street && `${properties.street}${properties.housenumber ? ` ${properties.housenumber}` : ''}`,
+            properties.city || properties.town || properties.village,
+            getPolishPlaceLabel(properties.state),
+            getPolishPlaceLabel(properties.country)
+          ].filter(Boolean);
+
+          const place = {
+            ...properties,
             state: getPolishPlaceLabel(properties.state),
             country: getPolishPlaceLabel(properties.country),
-            postcode: properties.postcode
-          }
-        };
-        const key = `${place.osm_type || ''}/${place.osm_id || ''}/${place.lat}/${place.lon}`;
-        uniqueResults.set(key, place);
-      });
-      const exactQueryParts = query.toLocaleLowerCase('pl-PL').split(/\s+/).filter(Boolean);
-      const results = [...uniqueResults.values()].filter(place =>
-        String(place.countrycode || place.country_code || '').toLocaleUpperCase('pl-PL') === 'PL' &&
-        /pomorsk|pomeranian/.test(String(place.state || '').toLocaleLowerCase('pl-PL')) &&
-        exactQueryParts.every(part => place.display_name.toLocaleLowerCase('pl-PL').includes(part))
-      );
+            name: properties.name || '',
+            display_name: [properties.name, ...addressParts]
+              .filter((value, index, values) => value && values.indexOf(value) === index)
+              .join(', '),
+            lon: coordinates[0],
+            lat: coordinates[1],
+            address: {
+              road: properties.street,
+              house_number: properties.housenumber,
+              city: properties.city || properties.town || properties.village,
+              state: getPolishPlaceLabel(properties.state),
+              country: getPolishPlaceLabel(properties.country),
+              postcode: properties.postcode
+            }
+          };
+          const key = `${place.osm_type || ''}/${place.osm_id || ''}/${place.lat}/${place.lon}`;
+          uniqueResults.set(key, place);
+        });
+        const exactQueryParts = query.toLocaleLowerCase('pl-PL').split(/\s+/).filter(Boolean);
+        const results = [...uniqueResults.values()].filter(place =>
+          String(place.countrycode || place.country_code || '').toLocaleUpperCase('pl-PL') === 'PL' &&
+          /pomorsk|pomeranian/.test(String(place.state || '').toLocaleLowerCase('pl-PL')) &&
+          exactQueryParts.every(part => place.display_name.toLocaleLowerCase('pl-PL').includes(part))
+        );
 
-      if (results.length === 0) {
-        searchResults = [];
-        suggestionsBox.style.display = 'none';
-        return;
+        if (results.length === 0) {
+          searchResults = [];
+          suggestionsBox.style.display = 'none';
+          return;
+        }
+
+        renderSearchResults(results);
+      } catch (err) {
+        if (err.name === 'AbortError') return;
+        console.error('Błąd wyszukiwania miejsca:', err);
       }
+    }, 300);
+  });
 
-      renderSearchResults(results);
-    } catch (err) {
-      if (err.name === 'AbortError') return;
-      console.error('Błąd wyszukiwania miejsca:', err);
+  // Ukrywanie podpowiedzi po kliknięciu poza wyszukiwarkę
+  document.addEventListener('click', (e) => {
+    if (!document.getElementById('search-container').contains(e.target)) {
+      suggestionsBox.style.display = 'none';
+      searchCompleted = Boolean(searchInput.value.trim());
     }
-  }, 300);
-});
+  });
 
-// Ukrywanie podpowiedzi po kliknięciu poza wyszukiwarkę
-document.addEventListener('click', (e) => {
-  if (!document.getElementById('search-container').contains(e.target)) {
+  function selectPlace(place) {
+    searchInput.value = place.display_name;
     suggestionsBox.style.display = 'none';
-    searchCompleted = Boolean(searchInput.value.trim());
-  }
-});
+    searchCompleted = true;
 
-function selectPlace(place) {
-  searchInput.value = place.display_name;
-  suggestionsBox.style.display = 'none';
-  searchCompleted = true;
+    const lon = parseFloat(place.lon);
+    const lat = parseFloat(place.lat);
 
-  const lon = parseFloat(place.lon);
-  const lat = parseFloat(place.lat);
+    if (!previousSearchCamera) {
+      previousSearchCamera = {
+        center: map.getCenter().toArray(),
+        zoom: map.getZoom(),
+        bearing: map.getBearing(),
+        pitch: map.getPitch(),
+        duration: 1200
+      };
+    }
 
-  if (!previousSearchCamera) {
-    previousSearchCamera = {
-      center: map.getCenter().toArray(),
-      zoom: map.getZoom(),
-      bearing: map.getBearing(),
-      pitch: map.getPitch(),
+    // Przesunięcie kamery na wybrane miejsce
+    map.flyTo({
+      center: [lon, lat],
+      zoom: 16,
       duration: 1200
-    };
+    });
+
+    // Dodanie lub aktualizacja pinezki wyszukiwania
+    if (searchMarker) {
+      searchMarker.setLngLat([lon, lat]);
+    } else {
+      searchMarker = new maplibregl.Marker({ color: '#f59e0b' })
+        .setLngLat([lon, lat])
+        .addTo(map);
+    }
+
+    // Wyświetlenie pełnych informacji w panelu bocznym (wykorzystujemy ten sam panel detali)
+    displayPlaceDetails(place);
   }
 
-  // Przesunięcie kamery na wybrane miejsce
-  map.flyTo({
-    center: [lon, lat],
-    zoom: 16,
-    duration: 1200
-  });
+  function displayPlaceDetails(place) {
+    const addr = place.address || {};
+    const street = addr.road || addr.street || addr.pedestrian;
+    const streetAddress = street && `${street}${addr.house_number ? ` ${addr.house_number}` : ''}`;
+    const locationName = streetAddress || place.name || place.display_name;
+    const city = addr.city || addr.town || addr.village || addr.municipality;
+    const details = [
+      ['Miejscowość', city],
+      ['Województwo', addr.state || addr.province],
+      ['Państwo', addr.country],
+      ['Kod pocztowy', addr.postcode],
+      ['Szerokość', place.lat],
+      ['Długość', place.lon],
+      ['Typ obiektu', place.type || place.osm_value],
+      ['OSM ID', place.osm_id]
+    ].filter(([, value]) => {
+      if (value === undefined || value === null || value === '') return false;
+      return !/^(brak|nieznany|unknown|n\/a)$/i.test(String(value).trim());
+    });
 
-  // Dodanie lub aktualizacja pinezki wyszukiwania
-  if (searchMarker) {
-    searchMarker.setLngLat([lon, lat]);
-  } else {
-    searchMarker = new maplibregl.Marker({ color: '#f59e0b' })
-      .setLngLat([lon, lat])
-      .addTo(map);
+    menuTitle.innerText = locationName;
+    menuBody.innerHTML = '';
+    btnSwitch.style.display = 'none';
+    btnMin.style.display = 'none';
+    btnBackLocation.style.display = '';
+    btnCloseLocation.style.display = '';
+    const table = document.createElement('table');
+    table.className = 'kv-table';
+    details.forEach(([label, value]) => {
+      const row = table.insertRow();
+      row.insertCell().innerText = label;
+      row.insertCell().innerText = String(value);
+    });
+    menuBody.appendChild(table);
+    const routeButton = document.createElement('button');
+    routeButton.className = 'route-action-btn';
+    routeButton.innerText = 'Wyznacz trasę';
+    routeButton.addEventListener('click', () => {
+      localStorage.setItem('nnaper-route-destination', JSON.stringify(place));
+      menuEl.classList.add('route-planner-open');
+      window.dispatchEvent(new CustomEvent('nnaper-route-destination-selected', { detail: place }));
+    });
+    menuBody.appendChild(routeButton);
+    expandMenu();
   }
-
-  // Wyświetlenie pełnych informacji w panelu bocznym (wykorzystujemy ten sam panel detali)
-  displayPlaceDetails(place);
-}
-
-function displayPlaceDetails(place) {
-  const addr = place.address || {};
-  const street = addr.road || addr.street || addr.pedestrian;
-  const streetAddress = street && `${street}${addr.house_number ? ` ${addr.house_number}` : ''}`;
-  const locationName = streetAddress || place.name || place.display_name;
-  const city = addr.city || addr.town || addr.village || addr.municipality;
-  const details = [
-    ['Miejscowość', city],
-    ['Województwo', addr.state || addr.province],
-    ['Państwo', addr.country],
-    ['Kod pocztowy', addr.postcode],
-    ['Szerokość', place.lat],
-    ['Długość', place.lon],
-    ['Typ obiektu', place.type || place.osm_value],
-    ['OSM ID', place.osm_id]
-  ].filter(([, value]) => {
-    if (value === undefined || value === null || value === '') return false;
-    return !/^(brak|nieznany|unknown|n\/a)$/i.test(String(value).trim());
-  });
-
-  menuTitle.innerText = locationName;
-  menuBody.innerHTML = '';
-  btnSwitch.style.display = 'none';
-  btnMin.style.display = 'none';
-  btnBackLocation.style.display = '';
-  btnCloseLocation.style.display = '';
-  const table = document.createElement('table');
-  table.className = 'kv-table';
-  details.forEach(([label, value]) => {
-    const row = table.insertRow();
-    row.insertCell().innerText = label;
-    row.insertCell().innerText = String(value);
-  });
-  menuBody.appendChild(table);
-  const routeButton = document.createElement('button');
-  routeButton.className = 'route-action-btn';
-  routeButton.innerText = 'Wyznacz trasę';
-  routeButton.addEventListener('click', () => {
-    localStorage.setItem('nnaper-route-destination', JSON.stringify(place));
-    menuEl.classList.add('route-planner-open');
-    window.dispatchEvent(new CustomEvent('nnaper-route-destination-selected', { detail: place }));
-  });
-  menuBody.appendChild(routeButton);
-  expandMenu();
-}
