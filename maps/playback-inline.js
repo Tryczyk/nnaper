@@ -396,7 +396,8 @@
     const deltaWallClock = now - lastWallClockTime;
     lastWallClockTime = now;
 
-    const mult = speedMultiplier ? parseFloat(speedMultiplier.value) : 60;
+    const rawMult = speedMultiplier ? parseFloat(speedMultiplier.value) : 60;
+    const mult = (!isNaN(rawMult) && rawMult > 0) ? rawMult : 60;
     virtualTime += deltaWallClock * mult;
 
     let targetIndex = currentIndex;
