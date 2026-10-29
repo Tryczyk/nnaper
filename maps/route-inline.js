@@ -119,10 +119,8 @@
     inlinePointColorSequence = 0;
     const p1 = { type: 'start', place: start };
     assignPointColor(p1);
-    const p2 = { type: 'destination', place: null };
-    assignPointColor(p2, p1);
     inlineRouteState = {
-      points: [p1, p2],
+      points: [p1],
       mode: null
     };
     document.getElementById('menu')?.classList.add('route-planner-open');
@@ -335,6 +333,19 @@
       lon: loc.lon,
       lat: loc.lat
     };
+
+    const emptyPoint = inlineRouteState.points.find(point => !point.place);
+    if (emptyPoint) {
+      emptyPoint.place = place;
+      inlineRouteState.points.forEach((entry, pointIndex) => {
+        entry.type = pointIndex === 0 ? 'start' : (pointIndex === inlineRouteState.points.length - 1 ? 'destination' : 'stop');
+      });
+      renderInlineRouteMarkers();
+      scheduleInlineRouteCalculation();
+      reverseGeocodeInlinePoint(place);
+      return;
+    }
+
     const prevPoint = inlineRouteState.points.length ? inlineRouteState.points[inlineRouteState.points.length - 1] : null;
     const newPoint = { type: 'destination', place };
     assignPointColor(newPoint, prevPoint, null);
@@ -600,7 +611,7 @@
     clearTimeout(inlineRouteCalculationTimer);
     inlineRouteCalculationId += 1;
     clearInlineRouteLayer();
-    const validPointsCount = inlineRouteState.points.filter(point => point.place).length;
+    const validPointsCount = inlineRouteState.points.filter(point => point && point.place).length;
     if (validPointsCount === 0) {
       routePlannerStats.innerText = '';
     } else if (validPointsCount < 2) {
