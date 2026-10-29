@@ -446,9 +446,8 @@
       item.className = `route-point-row route-${point.type}-row`;
       item.dataset.pointIndex = String(index);
       const place = point.place;
-      const icon = index === 0 ? '○' : index === inlineRouteState.points.length - 1 ? '●' : '●';
       const pointColor = assignPointColor(point);
-      item.innerHTML = `<span class="route-point-icon" style="color: ${pointColor}">${icon}</span>`;
+      item.innerHTML = `<span class="route-point-icon" style="background-color: ${pointColor};" aria-hidden="true"></span>`;
       const suggestions = document.createElement('div');
       suggestions.className = 'route-point-suggestions';
       if (point.place) {

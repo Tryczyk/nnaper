@@ -649,19 +649,17 @@ html {
 }
 
 .route-point-icon {
-  width: 16px;
-  flex: 0 0 16px;
-  color: #0284c7;
-  font-size: 18px;
-  line-height: 1;
-  text-align: center;
-  z-index: 1;
-  background: #0f172a;
-}
-
-.route-point-icon.destination {
-
-  font-size: 14px;
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  min-width: 12px;
+  min-height: 12px;
+  flex: 0 0 12px;
+  border-radius: 50%;
+  background-color: #0284c7;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.25);
+  margin: 0 2px;
+  box-sizing: border-box;
 }
 
 .route-field {
@@ -768,7 +766,7 @@ html {
 }
 
 .route-planner-list li .route-point-icon {
-  flex: 0 0 18px;
+  flex: 0 0 12px;
 }
 
 .route-planner-list li button {
