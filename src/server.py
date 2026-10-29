@@ -1,16 +1,17 @@
+from datetime import datetime
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 import psycopg
 from psycopg.rows import dict_row
 
-from constants import CORS_ORIGINS, DB_URL
+from constants import DB_URL
 
 app = FastAPI(title="nnaper API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
+    allow_origin_regex=".*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -185,25 +186,69 @@ def get_epoch_details(epoch_id: str):
 
 @app.get("/api/playback-day")
 def get_playback_day(day: str = Query(...)):
-    """Pobiera uporządkowaną listę epok telemetrycznych dla wybranego dnia z satelitami."""
+    """Pobiera uporządkowaną listę epok telemetrycznych dla wybranego dnia z satelitami (zoptymalizowana wersja JSON)."""
+    day_str = day.strip()
+    try:
+        datetime.strptime(day_str, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Nieprawidłowy format daty. Oczekiwano YYYY-MM-DD.")
+
     query = """
-    SELECT 
-        e.epoch_id,
-        to_char(e.timestamp, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS timestamp,
-        round(ST_Y(e.geom)::numeric, 6) AS lat,
-        round(ST_X(e.geom)::numeric, 6) AS lon,
-        e.altitude,
-        e.speed_kmh,
-        e.g_x,
-        e.g_y,
-        e.g_z,
-        COALESCE((SELECT json_agg(to_jsonb(sat)) FROM satellite sat WHERE sat.epoch_id = e.epoch_id), '[]'::json) AS satellites
-    FROM epochs e
-    WHERE e.timestamp >= %s::date
-      AND e.timestamp < (%s::date + INTERVAL '1 day')
-    ORDER BY e.timestamp ASC;
+    WITH day_epochs AS (
+        SELECT 
+            e.epoch_id,
+            to_char(e.timestamp, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS timestamp,
+            round(ST_Y(e.geom)::numeric, 6) AS lat,
+            round(ST_X(e.geom)::numeric, 6) AS lon,
+            e.altitude,
+            e.speed_kmh,
+            e.g_x,
+            e.g_y,
+            e.g_z
+        FROM epochs e
+        WHERE e.timestamp >= %s::date
+          AND e.timestamp < (%s::date + INTERVAL '1 day')
+        ORDER BY e.timestamp ASC
+    ),
+    day_satellites AS (
+        SELECT 
+            s.epoch_id,
+            json_agg(json_build_object(
+                'prn', s.prn,
+                'elevation', s.elevation,
+                'azimuth', s.azimuth
+            ) ORDER BY s.prn) AS sats
+        FROM satellite s
+        JOIN day_epochs de ON s.epoch_id = de.epoch_id
+        GROUP BY s.epoch_id
+    )
+    SELECT COALESCE(json_agg(
+        json_build_object(
+            'epoch_id', de.epoch_id,
+            'timestamp', de.timestamp,
+            'lat', de.lat,
+            'lon', de.lon,
+            'altitude', de.altitude,
+            'speed_kmh', de.speed_kmh,
+            'g_x', de.g_x,
+            'g_y', de.g_y,
+            'g_z', de.g_z,
+            'satellites', COALESCE(ds.sats, '[]'::json)
+        ) ORDER BY de.timestamp ASC
+    )::text, '[]')
+    FROM day_epochs de
+    LEFT JOIN day_satellites ds ON de.epoch_id = ds.epoch_id;
     """
-    with psycopg.connect(DB_URL) as conn:
-        with conn.cursor(row_factory=dict_row) as cur:
-            cur.execute(query, (day, day))
-            return cur.fetchall()
+    try:
+        with psycopg.connect(DB_URL) as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, (day_str, day_str))
+                row = cur.fetchone()
+                raw_json = row[0] if (row and row[0]) else "[]"
+                return Response(
+                    content=raw_json,
+                    media_type="application/json",
+                    headers={"Cache-Control": "public, max-age=3600"},
+                )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Błąd bazy danych: {str(e)}")

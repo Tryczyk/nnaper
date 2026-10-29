@@ -8,7 +8,7 @@
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
   <script src="https://unpkg.com/pmtiles@3.0.7/dist/pmtiles.js"></script>
-  <link rel="stylesheet" href="styles.css?v=20261029_pointcircles" />
+  <link rel="stylesheet" href="styles.css?v=20261029_hudfix2" />
 </head>
 
 <body>
@@ -47,7 +47,7 @@
     </div>
 
     <div class="menu-body">
-      <button onclick="window.location.href='playback.html'" class="menu-action-btn">
+      <button id="btn-open-playback" class="menu-action-btn">
         Replay trasy
       </button>
       <button id="btn-open-planner-menu" class="menu-action-btn">
@@ -72,6 +72,66 @@
   <div id="search-container">
     <input type="text" id="search-input" placeholder="Szukaj adresu lub miejsca..." autocomplete="off" />
     <div id="search-suggestions"></div>
+  </div>
+
+  <!-- Zintegrowany Odtwarzacz Trasy (Playback) -->
+  <div id="playback-top-bar" style="display: none;">
+    <button id="btn-close-playback" type="button" title="Zamknij odtwarzacz i wróć do zwykłej mapy">← Wróć do Mapy</button>
+    <label for="playback-date-select" style="font-size: 13px;">Dzień:</label>
+    <select id="playback-date-select"><option>Ładowanie dat...</option></select>
+    <label for="playback-sat-view" style="font-size: 13px; margin-left: 10px;">Satelity:</label>
+    <select id="playback-sat-view">
+      <option value="none">Ukryte</option>
+      <option value="local" selected>Blisko (Skyplot)</option>
+      <option value="subpoint">Daleko (Orbita MEO)</option>
+    </select>
+  </div>
+
+  <div id="playback-hud-panel" style="display: none;">
+    <div class="hud-title">Telemetria pojazdu</div>
+    <div class="hud-row"><span class="hud-label">Godzina:</span><span id="playback-hud-time" class="hud-val">--:--:--</span></div>
+    <div class="hud-row"><span class="hud-label">Prędkość:</span><span id="playback-hud-speed" class="hud-val">0.0 km/h</span></div>
+    <div class="hud-row"><span class="hud-label">Wysokość:</span><span id="playback-hud-altitude" class="hud-val">-- m</span></div>
+    <div class="hud-row"><span class="hud-label">Przeciążenie X:</span><span id="playback-hud-gx" class="hud-val">--</span></div>
+    <div class="hud-row"><span class="hud-label">Przeciążenie Y:</span><span id="playback-hud-gy" class="hud-val">--</span></div>
+    <div class="hud-row"><span class="hud-label">Przeciążenie Z:</span><span id="playback-hud-gz" class="hud-val">--</span></div>
+    <div class="hud-row"><span class="hud-label">Dystans dnia:</span><span id="playback-hud-dist" class="hud-val">0.0 km</span></div>
+    <div class="hud-row"><span class="hud-label">Śr. prędkość:</span><span id="playback-hud-avg-speed" class="hud-val">0.0 km/h</span></div>
+  </div>
+
+  <div id="playback-bottom-controls" style="display: none;">
+    <input type="range" id="playback-timeline-slider" min="0" max="100" value="0" />
+    <div class="ctrl-row">
+      <div class="ctrl-left">
+        <button id="btn-playback-play" class="btn-ctrl" type="button">▶ Odtwarzaj</button>
+        <span id="playback-hud-progress-info" style="font-size: 12px; color: #94a3b8;">0 / 0 epok</span>
+      </div>
+      <div class="ctrl-right">
+        <span style="font-size: 12px;">Tempo:</span>
+        <select id="playback-speed-multiplier" style="background:#1e293b; color:#fff; border:1px solid #475569; padding:4px 8px; border-radius:4px;">
+          <option value="1">1x (Real-time)</option>
+          <option value="2">2x</option>
+          <option value="5">5x</option>
+          <option value="10">10x</option>
+          <option value="30">30x</option>
+          <option value="60" selected>60x</option>
+        </select>
+        <label style="font-size: 12px; display: flex; align-items: center; gap: 4px; cursor: pointer;">
+          <input type="checkbox" id="chk-playback-follow" checked style="accent-color: #38bdf8;" /> Śledź kamerą
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <!-- Panel szczegółów punktu telemetrycznego (kliknięcie w ślad GPS) -->
+  <div id="point-panel">
+    <div class="point-header">
+      <h3>Szczegóły Epoki Telemetrycznej</h3>
+      <button class="action-btn" id="btn-close-point" title="Zamknij panel">✕</button>
+    </div>
+    <div class="point-body" id="pp-content">
+      <div style="color:#94a3b8;">Kliknij punkt na mapie, aby zobaczyć szczegóły.</div>
+    </div>
   </div>
 
   <div id="route-planner-panel" class="route-planner-panel" aria-hidden="true">
@@ -136,9 +196,11 @@
 
   <script src="runtime-config.js"></script>
   <script src="runtime-config.local.js"></script>
-  <script src="layers.js?v=20261028_hide3d"></script>
-  <script src="app.js?v=20261028_hide3d"></script>
-  <script src="route-inline.js?v=20261029_fixemptypoint"></script>
+  <script src="layers.js?v=20261029_integrated"></script>
+  <script src="layer-manager.js?v=20261029_integrated"></script>
+  <script src="app.js?v=20261029_hudfix2"></script>
+  <script src="playback-inline.js?v=20261029_hudfix2"></script>
+  <script src="route-inline.js?v=20261029_playbackintegrated"></script>
 </body>
 
 </html>

@@ -22,18 +22,20 @@ const map = new maplibregl.Map({
   attributionControl: false,
   style: MAP_STYLE
 });
+window.mapInstance = map;
+window.map = map;
 
 const navControl = new maplibregl.NavigationControl({ showCompass: true });
 map.addControl(navControl, 'bottom-right');
 
 function getLayerColor(layer) {
-  if (!layer.paint) return '#94a3b8';
+  if (!layer || !layer.paint) return '#94a3b8';
   const c = layer.paint['fill-color'] || layer.paint['line-color'] || layer.paint['circle-color'] || layer.paint['fill-extrusion-color'] || layer.paint['text-color'];
   return (typeof c === 'string' && c.startsWith('#')) ? c : '#94a3b8';
 }
 
 function getLayerStrokeColor(layer) {
-  if (!layer.paint) return getLayerColor(layer);
+  if (!layer || !layer.paint) return getLayerColor(layer);
   const c = layer.paint['circle-stroke-color'];
   return (typeof c === 'string' && c.startsWith('#')) ? c : getLayerColor(layer);
 }
@@ -171,14 +173,19 @@ function setTrackLayerVisibility(visibleDays) {
   trackMonthLayers.forEach(({ layerId, days }) => {
     if (map.getLayer(layerId)) {
       const activeDays = days.filter(day => visibleDays.has(day));
-      map.setLayoutProperty(layerId, 'visibility', activeDays.length ? 'visible' : 'none');
-      map.setFilter(layerId, [
-        'match',
-        ['get', 'day'],
-        activeDays,
-        true,
-        false
-      ]);
+      if (activeDays.length > 0) {
+        map.setLayoutProperty(layerId, 'visibility', 'visible');
+        map.setFilter(layerId, [
+          'match',
+          ['get', 'day'],
+          activeDays,
+          true,
+          false
+        ]);
+      } else {
+        map.setLayoutProperty(layerId, 'visibility', 'none');
+        map.setFilter(layerId, ['==', ['get', 'day'], '__NO_DAY_ACTIVE__']);
+      }
     }
   });
 }
@@ -202,6 +209,8 @@ function updateTrackPaintProperty(property, value) {
     if (map.getLayer(layerId)) map.setPaintProperty(layerId, property, value);
   });
 }
+window.updateTrackPaintProperty = updateTrackPaintProperty;
+window.bindGpsMasterCheckbox = (cb) => { gpsMasterCheckbox = cb; };
 
 function addTrackMonthLayers(months) {
   months.forEach(({ key, days }) => {
@@ -232,6 +241,23 @@ function addTrackMonthLayers(months) {
         'circle-pitch-scale': 'viewport'
       }
     });
+
+    map.on('click', layerId, (e) => {
+      if (!e.features || !e.features.length) return;
+      const feat = e.features[0];
+      const epochId = feat.properties?.epoch_id;
+      if (epochId) {
+        loadPointFullDetails(epochId);
+      }
+    });
+
+    map.on('mouseenter', layerId, () => {
+      map.getCanvas().style.cursor = 'pointer';
+    });
+    map.on('mouseleave', layerId, () => {
+      map.getCanvas().style.cursor = '';
+    });
+
     trackMonthLayers.set(key, { layerId, days });
     trackLayerIds.add(layerId);
   });
@@ -361,333 +387,12 @@ async function buildInlineTimeFilter(container) {
 
 /* ------------------- GENEROWANIE DRZEWKA WARSTW ------------------- */
 function autoBuildTree() {
-  const container = document.getElementById('tree-container');
-  container.innerHTML = '';
-
-  const layers = map.getStyle().layers || [];
-  const groups = {};
-
-  layers.forEach(layer => {
-    if (
-      layer.id === 'bg' ||
-      layer.id.endsWith('-outline-line') ||
-      layer.id.startsWith('sat-') ||
-      layer.id.startsWith('GPS / Ślad trasy / ') ||
-      layer.id.startsWith('Budynki')
-    ) return;
-
-    const parts = layer.id.split('/').map(p => p.trim());
-    const groupName = parts.length > 1 ? parts[0] : 'Inne';
-    const leafTitle = parts.length > 1 ? parts[1] : layer.id.trim();
-
-    if (!groups[groupName]) groups[groupName] = [];
-    groups[groupName].push({ id: layer.id, title: leafTitle, raw: JSON.parse(JSON.stringify(layer)) });
-  });
-
-  Object.keys(groups).forEach(groupName => {
-    const childList = groups[groupName];
-    const node = document.createElement('div');
-    node.className = 'tree-node';
-
-    const header = document.createElement('div');
-    header.className = 'node-header';
-
-    const label = document.createElement('div');
-    label.className = 'node-label';
-
-    const pCheckbox = document.createElement('input');
-    pCheckbox.type = 'checkbox';
-    pCheckbox.checked = groupName.trim() === 'GPS' ? false : true;
-    pCheckbox.addEventListener('click', (e) => {
-      e.stopPropagation();
-    });
-
-    const pTitle = document.createElement('span');
-    pTitle.innerText = groupName;
-
-    label.appendChild(pCheckbox);
-    label.appendChild(pTitle);
-
-    const arrow = document.createElement('span');
-    arrow.className = 'arrow collapsed';
-    arrow.innerHTML = '&#9660;';
-
-    header.appendChild(label);
-    header.appendChild(arrow);
-
-    const childrenBox = document.createElement('div');
-    childrenBox.className = 'node-children collapsed';
-
-    header.addEventListener('click', (e) => {
-      if (pCheckbox && e.target === pCheckbox) return;
-      childrenBox.classList.toggle('collapsed');
-      arrow.classList.toggle('collapsed');
-    });
-
-    const childInputs = [];
-
-    childList.forEach(child => {
-      const leafBox = document.createElement('div');
-      leafBox.className = 'leaf-container';
-
-      const leaf = document.createElement('div');
-      leaf.className = 'leaf-item';
-
-      const leftDiv = document.createElement('div');
-      leftDiv.className = 'leaf-left';
-
-      const cCheckbox = child.id === 'GPS / Ślad trasy'
-        ? null
-        : document.createElement('input');
-      if (cCheckbox) {
-        cCheckbox.type = 'checkbox';
-        cCheckbox.checked = true;
-      }
-
-      if (cCheckbox) {
-        childInputs.push(cCheckbox);
-        leftDiv.appendChild(cCheckbox);
-      }
-
-      const initialColor = getLayerColor(child.raw);
-      const mainColorPicker = document.createElement('input');
-      mainColorPicker.type = 'color';
-      mainColorPicker.className = 'color-picker';
-      mainColorPicker.value = initialColor;
-      mainColorPicker.title = 'Kolor obiektu';
-
-      mainColorPicker.addEventListener('input', (e) => {
-        const col = e.target.value;
-        if (child.raw.type === 'line') map.setPaintProperty(child.id, 'line-color', col);
-        else if (child.raw.type === 'fill') map.setPaintProperty(child.id, 'fill-color', col);
-        else if (child.raw.type === 'circle') {
-          if (child.id === 'GPS / Ślad trasy') updateTrackPaintProperty('circle-color', col);
-          else map.setPaintProperty(child.id, 'circle-color', col);
-        }
-        else if (child.raw.type === 'fill-extrusion') map.setPaintProperty(child.id, 'fill-extrusion-color', col);
-        else if (child.raw.type === 'symbol') map.setPaintProperty(child.id, 'text-color', col);
-      });
-
-      const cTitle = document.createElement('span');
-      cTitle.innerText = child.title;
-
-      leftDiv.appendChild(mainColorPicker);
-      leftDiv.appendChild(cTitle);
-      leaf.appendChild(leftDiv);
-      leafBox.appendChild(leaf);
-
-      const ctrlDiv = document.createElement('div');
-      ctrlDiv.className = 'leaf-controls';
-
-      // Linie
-      if (child.raw.type === 'line') {
-        const lineOutlineId = `${child.id}-outline-line`;
-        if (!map.getLayer(lineOutlineId) &&
-          typeof child.raw.source === 'string' &&
-          typeof child.raw['source-layer'] === 'string') {
-          map.addLayer({
-            id: lineOutlineId,
-            source: child.raw.source,
-            'source-layer': child.raw['source-layer'],
-            type: 'line',
-            filter: child.raw.filter || ['all'],
-            paint: {
-              'line-color': initialColor,
-              'line-width': 0.0,
-              'line-gap-width': (child.raw.paint && child.raw.paint['line-width']) ? child.raw.paint['line-width'] : 1.5,
-              'line-opacity': 0.0
-            }
-          }, child.id);
-        }
-
-        const row = document.createElement('div');
-        row.className = 'control-row';
-        const sizeLabel = document.createElement('span'); sizeLabel.innerText = 'Grubość:';
-        const sizeInput = document.createElement('input');
-        sizeInput.type = 'range'; sizeInput.min = '0.5'; sizeInput.max = '15'; sizeInput.step = '0.5';
-        sizeInput.value = (child.raw.paint && child.raw.paint['line-width']) ? child.raw.paint['line-width'] : '2.0';
-        sizeInput.addEventListener('input', (e) => {
-          const val = parseFloat(e.target.value);
-          map.setPaintProperty(child.id, 'line-width', val);
-          if (map.getLayer(lineOutlineId)) map.setPaintProperty(lineOutlineId, 'line-gap-width', val);
-        });
-        row.appendChild(sizeLabel); row.appendChild(sizeInput);
-        ctrlDiv.appendChild(row);
-
-        ctrlDiv.appendChild(createDashControls(child.id, false));
-
-        const rowOut = document.createElement('div');
-        rowOut.className = 'control-row';
-        const outLabel = document.createElement('span'); outLabel.innerText = 'Obwódka:';
-        const outColor = document.createElement('input'); outColor.type = 'color'; outColor.className = 'color-picker'; outColor.value = initialColor;
-        outColor.addEventListener('input', (e) => map.setPaintProperty(lineOutlineId, 'line-color', e.target.value));
-
-        const outWidth = document.createElement('input'); outWidth.type = 'range'; outWidth.min = '0'; outWidth.max = '6'; outWidth.step = '0.5'; outWidth.value = '0';
-        outWidth.addEventListener('input', (e) => {
-          const val = parseFloat(e.target.value);
-          map.setPaintProperty(lineOutlineId, 'line-width', val);
-          map.setPaintProperty(lineOutlineId, 'line-opacity', val > 0 ? 1.0 : 0.0);
-        });
-        rowOut.appendChild(outLabel); rowOut.appendChild(outColor); rowOut.appendChild(outWidth);
-        ctrlDiv.appendChild(rowOut);
-
-        ctrlDiv.appendChild(createDashControls(lineOutlineId, false));
-      }
-
-      // Punkty
-      if (child.raw.type === 'circle') {
-        const rowSize = document.createElement('div');
-        rowSize.className = 'control-row';
-        const sizeLabel = document.createElement('span'); sizeLabel.innerText = 'Rozmiar:';
-        const sizeInput = document.createElement('input');
-        sizeInput.type = 'range'; sizeInput.min = '1'; sizeInput.max = '20'; sizeInput.step = '0.5';
-        sizeInput.value = (child.raw.paint && typeof child.raw.paint['circle-radius'] === 'number') ? child.raw.paint['circle-radius'] : '4.5';
-        sizeInput.addEventListener('input', (e) => {
-          const value = parseFloat(e.target.value);
-          if (child.id === 'GPS / Ślad trasy') updateTrackPaintProperty('circle-radius', value);
-          else map.setPaintProperty(child.id, 'circle-radius', value);
-        });
-        rowSize.appendChild(sizeLabel); rowSize.appendChild(sizeInput);
-        ctrlDiv.appendChild(rowSize);
-
-        const rowStroke = document.createElement('div');
-        rowStroke.className = 'control-row';
-        const strokeLabel = document.createElement('span'); strokeLabel.innerText = 'Obwódka:';
-        const strokeColorPicker = document.createElement('input'); strokeColorPicker.type = 'color'; strokeColorPicker.className = 'color-picker'; strokeColorPicker.value = getLayerStrokeColor(child.raw);
-        strokeColorPicker.addEventListener('input', (e) => {
-          if (child.id === 'GPS / Ślad trasy') updateTrackPaintProperty('circle-stroke-color', e.target.value);
-          else map.setPaintProperty(child.id, 'circle-stroke-color', e.target.value);
-        });
-        const strokeWidthInput = document.createElement('input'); strokeWidthInput.type = 'range'; strokeWidthInput.min = '0'; strokeWidthInput.max = '8'; strokeWidthInput.step = '0.5'; strokeWidthInput.value = '0';
-        strokeWidthInput.addEventListener('input', (e) => {
-          const value = parseFloat(e.target.value);
-          if (child.id === 'GPS / Ślad trasy') updateTrackPaintProperty('circle-stroke-width', value);
-          else map.setPaintProperty(child.id, 'circle-stroke-width', value);
-        });
-        rowStroke.appendChild(strokeLabel); rowStroke.appendChild(strokeColorPicker); rowStroke.appendChild(strokeWidthInput);
-        ctrlDiv.appendChild(rowStroke);
-
-        if (child.id === 'GPS / Ślad trasy') {
-          const timeSection = document.createElement('div');
-          timeSection.className = 'time-filter-section';
-          const timeTitle = document.createElement('span');
-          timeTitle.className = 'time-filter-title';
-          timeTitle.innerText = 'FILTR CZASU:';
-          const timeTreeHolder = document.createElement('div');
-          timeTreeHolder.innerHTML = '<em style="color:#64748b;font-size:11px;">Ładowanie dat...</em>';
-          timeSection.appendChild(timeTitle);
-          timeSection.appendChild(timeTreeHolder);
-          ctrlDiv.appendChild(timeSection);
-          buildInlineTimeFilter(timeTreeHolder);
-        }
-      }
-
-      // Obszary
-      if (child.raw.type === 'fill') {
-        const outlineLayerId = `${child.id}-outline-line`;
-        if (!map.getLayer(outlineLayerId) &&
-          typeof child.raw.source === 'string' &&
-          typeof child.raw['source-layer'] === 'string') {
-          map.addLayer({
-            id: outlineLayerId,
-            source: child.raw.source,
-            'source-layer': child.raw['source-layer'],
-            type: 'line',
-            filter: child.raw.filter || ['all'],
-            paint: {
-              'line-color': initialColor,
-              'line-width': 0.0,
-              'line-opacity': 0.0
-            }
-          });
-        }
-
-        const row = document.createElement('div');
-        row.className = 'control-row';
-        const outlineLabel = document.createElement('span'); outlineLabel.innerText = 'Obwódka:';
-        const outlineColor = document.createElement('input'); outlineColor.type = 'color'; outlineColor.className = 'color-picker'; outlineColor.value = initialColor;
-        outlineColor.addEventListener('input', (e) => map.setPaintProperty(outlineLayerId, 'line-color', e.target.value));
-        const outlineWidth = document.createElement('input'); outlineWidth.type = 'range'; outlineWidth.min = '0'; outlineWidth.max = '8'; outlineWidth.step = '0.5'; outlineWidth.value = '0';
-        outlineWidth.addEventListener('input', (e) => {
-          const val = parseFloat(e.target.value);
-          map.setPaintProperty(outlineLayerId, 'line-width', val);
-          map.setPaintProperty(outlineLayerId, 'line-opacity', val > 0 ? 1.0 : 0.0);
-        });
-        row.appendChild(outlineLabel); row.appendChild(outlineColor); row.appendChild(outlineWidth);
-        ctrlDiv.appendChild(row);
-
-        ctrlDiv.appendChild(createDashControls(outlineLayerId, false));
-      }
-
-      // Etykiety
-      if (child.raw.type === 'symbol') {
-        const rowSize = document.createElement('div');
-        rowSize.className = 'control-row';
-        const sizeLabel = document.createElement('span'); sizeLabel.innerText = 'Wielkość:';
-        const textSizeInput = document.createElement('input');
-        textSizeInput.type = 'range'; textSizeInput.min = '8'; textSizeInput.max = '28'; textSizeInput.step = '1';
-        textSizeInput.value = (child.raw.layout && child.raw.layout['text-size']) ? child.raw.layout['text-size'] : '12';
-        textSizeInput.addEventListener('input', (e) => map.setLayoutProperty(child.id, 'text-size', parseFloat(e.target.value)));
-        rowSize.appendChild(sizeLabel); rowSize.appendChild(textSizeInput);
-        ctrlDiv.appendChild(rowSize);
-      }
-
-      leafBox.appendChild(ctrlDiv);
-      childrenBox.appendChild(leafBox);
-
-      if (cCheckbox) {
-        cCheckbox.addEventListener('change', () => {
-          const vis = cCheckbox.checked ? 'visible' : 'none';
-          if (map.getLayer(child.id)) map.setLayoutProperty(child.id, 'visibility', vis);
-          if (map.getLayer(`${child.id}-outline-line`)) map.setLayoutProperty(`${child.id}-outline-line`, 'visibility', vis);
-          if (pCheckbox) {
-            const checkedCount = childInputs.filter(i => i.checked).length;
-            pCheckbox.checked = checkedCount === childInputs.length;
-            pCheckbox.indeterminate = checkedCount > 0 && checkedCount < childInputs.length;
-          }
-        });
-      }
-    });
-
-    if (pCheckbox) {
-      if (groupName.trim() === 'GPS') {
-        gpsMasterCheckbox = pCheckbox;
-        pCheckbox.addEventListener('change', () => {
-          const isChecked = pCheckbox.checked;
-          pCheckbox.indeterminate = false;
-          allGpsDayCheckboxes.forEach(cb => { cb.checked = isChecked; });
-          allGpsYearCheckboxes.forEach(cb => {
-            cb.checked = isChecked;
-            cb.indeterminate = false;
-          });
-          const filterSection = document.querySelector('.time-filter-section');
-          if (filterSection) {
-            filterSection.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-              cb.checked = isChecked;
-              cb.indeterminate = false;
-            });
-          }
-          applyTrackDateFilter(allGpsDayCheckboxes, isChecked);
-        });
-      } else {
-        pCheckbox.addEventListener('change', () => {
-          const isChecked = pCheckbox.checked;
-          pCheckbox.indeterminate = false;
-          childInputs.forEach((ci, idx) => {
-            ci.checked = isChecked;
-            const targetId = childList[idx].id;
-            const vis = isChecked ? 'visible' : 'none';
-            if (map.getLayer(targetId)) map.setLayoutProperty(targetId, 'visibility', vis);
-            if (map.getLayer(`${targetId}-outline-line`)) map.setLayoutProperty(`${targetId}-outline-line`, 'visibility', vis);
-          });
-        });
-      }
-    }
-
-    node.appendChild(header);
-    node.appendChild(childrenBox);
-    container.appendChild(node);
-  });
+  if (window.LayerManager) {
+    window.LayerManager.applyCustomizationsToMap(map);
+    window.LayerManager.buildLayerTree(map, 'tree-container', { onRenderGps: buildInlineTimeFilter });
+    window.LayerManager.setup3DControls(map, { resetPitchOnMap3D: true });
+    window.LayerManager.setupSync(map, 'tree-container');
+  }
 }
 
 /* ------------------- INTERFEJS OKNA ------------------- */
@@ -779,83 +484,35 @@ window.collapseRightMenu = collapseRightMenu;
 window.expandRightMenu = expandRightMenu;
 
 /* ------------------- PRZEŁĄCZNIKI 3D (MAPA 3D & BUDYNKI 3D) ------------------- */
-const btnToggle3DMap = document.getElementById('btn-toggle-3d-map');
-const btnToggle3DBuildings = document.getElementById('btn-toggle-3d-buildings');
 const BUILDINGS_3D_LAYER_ID = 'Budynki/Bryły 3D';
 
-let is3DMapEnabled = false;
-let is3DBuildingsEnabled = false;
-
-function update3DButtonsUI() {
-  if (btnToggle3DMap) {
-    btnToggle3DMap.classList.toggle('active', is3DMapEnabled);
-    btnToggle3DMap.setAttribute('aria-pressed', is3DMapEnabled ? 'true' : 'false');
-  }
-  if (btnToggle3DBuildings) {
-    btnToggle3DBuildings.classList.toggle('active', is3DBuildingsEnabled);
-    btnToggle3DBuildings.setAttribute('aria-pressed', is3DBuildingsEnabled ? 'true' : 'false');
-  }
-}
-
 function set3DMap(enabled) {
-  is3DMapEnabled = !!enabled;
-  update3DButtonsUI();
-
-  try {
-    if (is3DMapEnabled) {
-      map.setTerrain({ source: 'terrain-dem', exaggeration: 0.85 });
-      if (map.getPitch() < 15) {
-        map.easeTo({ pitch: 45, duration: 600 });
-      }
-    } else {
-      if (typeof map.getTerrain === 'function' && map.getTerrain()) {
-        map.setTerrain(null);
-      }
-      if (map.getPitch() > 0) {
-        map.easeTo({ pitch: 0, duration: 600 });
-      }
-    }
-  } catch (err) {
-    console.warn('Błąd zmiany trybu terenu 3D:', err);
-  }
-}
-
-function apply3DBuildingsVisibility() {
-  try {
-    if (map.getLayer(BUILDINGS_3D_LAYER_ID)) {
-      const targetVis = is3DBuildingsEnabled ? 'visible' : 'none';
-      const currentVis = map.getLayoutProperty(BUILDINGS_3D_LAYER_ID, 'visibility');
-      if (currentVis !== targetVis) {
-        map.setLayoutProperty(BUILDINGS_3D_LAYER_ID, 'visibility', targetVis);
-      }
-    }
-  } catch (err) {
-    // Styl może być w trakcie aktualizacji
+  if (window.LayerManager) {
+    window.LayerManager.set3DMap(map, enabled, true);
   }
 }
 
 function set3DBuildings(enabled) {
-  is3DBuildingsEnabled = !!enabled;
-  update3DButtonsUI();
-  apply3DBuildingsVisibility();
+  if (window.LayerManager) {
+    window.LayerManager.set3DBuildings(map, enabled);
+  }
+}
+
+function apply3DBuildingsVisibility() {
+  const cfg = window.LayerManager ? window.LayerManager.getStoredConfig() : {};
+  const isEnabled = !!cfg.settings3D?.buildings3D;
+  try {
+    if (map.getLayer(BUILDINGS_3D_LAYER_ID)) {
+      const targetVis = isEnabled ? 'visible' : 'none';
+      if (map.getLayoutProperty(BUILDINGS_3D_LAYER_ID, 'visibility') !== targetVis) {
+        map.setLayoutProperty(BUILDINGS_3D_LAYER_ID, 'visibility', targetVis);
+      }
+    }
+  } catch (err) {}
 }
 
 map.on('styledata', apply3DBuildingsVisibility);
 
-if (btnToggle3DMap) {
-  btnToggle3DMap.addEventListener('click', () => {
-    set3DMap(!is3DMapEnabled);
-  });
-}
-
-if (btnToggle3DBuildings) {
-  btnToggle3DBuildings.addEventListener('click', () => {
-    set3DBuildings(!is3DBuildingsEnabled);
-  });
-}
-
-update3DButtonsUI();
-apply3DBuildingsVisibility();
 window.set3DMap = set3DMap;
 window.set3DBuildings = set3DBuildings;
 
@@ -985,13 +642,23 @@ function renderSatelliteRays() {
 }
 
 /* ------------------- POBIERANIE PEŁNYCH DANYCH Z BAZY ------------------- */
+const pointPanelEl = document.getElementById('point-panel');
+const btnClosePoint = document.getElementById('btn-close-point');
+
+if (btnClosePoint) {
+  btnClosePoint.addEventListener('click', () => {
+    if (pointPanelEl) pointPanelEl.classList.remove('active');
+    clearSatelliteLayers();
+  });
+}
+
 async function loadPointFullDetails(epochId) {
   collapseMenu();
   collapseRightMenu();
-  pointPanelEl.classList.add('active');
+  if (pointPanelEl) pointPanelEl.classList.add('active');
 
   const content = document.getElementById('pp-content');
-  content.innerHTML = '<div style="color:#94a3b8;">Odpytywanie bazy danych...</div>';
+  if (content) content.innerHTML = '<div style="color:#94a3b8;">Odpytywanie bazy danych...</div>';
 
   try {
     const res = await fetch(`${apiBaseUrl}/api/epoch/${epochId}`);
@@ -1011,6 +678,21 @@ async function loadPointFullDetails(epochId) {
       renderSatelliteRays();
     }
 
+    const formatG = (val) => {
+      if (val === null || val === undefined || isNaN(Number(val))) return 'Brak danych';
+      const num = Number(val);
+      const sign = num > 0 ? '+' : '';
+      return `${sign}${num.toFixed(3)} G`;
+    };
+
+    const altStr = (e.altitude !== null && e.altitude !== undefined && !isNaN(Number(e.altitude)))
+      ? `${Number(e.altitude).toFixed(1)} m`
+      : 'Brak danych';
+
+    const spdStr = (e.speed_kmh !== null && e.speed_kmh !== undefined && !isNaN(Number(e.speed_kmh)))
+      ? `${Number(e.speed_kmh).toFixed(1)} km/h`
+      : '0.0 km/h';
+
     let html = `
       <div class="sat-mode-switch">
         <span>Tryb wizualizacji satelitów:</span>
@@ -1021,14 +703,16 @@ async function loadPointFullDetails(epochId) {
       </div>
 
       <div class="section-box">
-        <h4>Tabela EPOCHS</h4>
+        <h4>Szczegóły Epoki (GPS / Telemetria)</h4>
         <table class="kv-table">
-          <tr><td>epoch_id</td><td>${e.epoch_id}</td></tr>
-          <tr><td>timestamp</td><td>${e.timestamp || 'NULL'}</td></tr>
-          <tr><td>latitude / longitude</td><td>${Number(e.latitude).toFixed(6)}, ${Number(e.longitude).toFixed(6)}</td></tr>
-          <tr><td>altitude</td><td>${e.altitude ?? 'NULL'} m</td></tr>
-          <tr><td>speed_kmh</td><td>${e.speed_kmh ?? '0'} km/h</td></tr>
-          <tr><td>gsensord</td><td>X: ${e.g_x ?? 'NULL'}, Y: ${e.g_y ?? 'NULL'}, Z: ${e.g_z ?? 'NULL'}</td></tr>
+          <tr><td>ID Epoki</td><td>${e.epoch_id}</td></tr>
+          <tr><td>Czas pomiaru</td><td>${e.timestamp || 'Brak'}</td></tr>
+          <tr><td>Współrzędne</td><td>${Number(e.latitude).toFixed(6)}, ${Number(e.longitude).toFixed(6)}</td></tr>
+          <tr><td>Wysokość n.p.m.</td><td>${altStr}</td></tr>
+          <tr><td>Prędkość</td><td>${spdStr}</td></tr>
+          <tr><td>Przeciążenie X</td><td>${formatG(e.g_x)}</td></tr>
+          <tr><td>Przeciążenie Y</td><td>${formatG(e.g_y)}</td></tr>
+          <tr><td>Przeciążenie Z</td><td>${formatG(e.g_z)}</td></tr>
         </table>
       </div>
 
@@ -1052,10 +736,9 @@ async function loadPointFullDetails(epochId) {
     html += `
         </div>
       </div>
-
     `;
 
-    content.innerHTML = html;
+    if (content) content.innerHTML = html;
 
     const selMode = document.getElementById('sel-sat-mode');
     if (selMode) {
@@ -1066,7 +749,7 @@ async function loadPointFullDetails(epochId) {
     }
 
   } catch (err) {
-    content.innerHTML = `<span style="color:#ef4444;">Błąd pobierania danych: ${err.message}</span>`;
+    if (content) content.innerHTML = `<span style="color:#ef4444;">Błąd pobierania danych: ${err.message}</span>`;
   }
 }
 
@@ -1096,8 +779,21 @@ map.on('load', () => {
     }
   });
 
-  set3DMap(false);
-  set3DBuildings(false);
+  map.on('click', 'GPS / Ślad trasy', (e) => {
+    if (!e.features || !e.features.length) return;
+    const feat = e.features[0];
+    const epochId = feat.properties?.epoch_id;
+    if (epochId) {
+      loadPointFullDetails(epochId);
+    }
+  });
+
+  map.on('mouseenter', 'GPS / Ślad trasy', () => {
+    map.getCanvas().style.cursor = 'pointer';
+  });
+  map.on('mouseleave', 'GPS / Ślad trasy', () => {
+    map.getCanvas().style.cursor = '';
+  });
 
   autoBuildTree();
 });
@@ -1202,7 +898,6 @@ searchInput.addEventListener('paste', (e) => {
   }
 });
 
-// Debounce dla podpowiedzi (żeby nie odpytywać API przy każdym wciśnięciu klawisza)
 searchInput.addEventListener('input', (e) => {
   clearTimeout(searchTimeout);
   const requestId = ++searchRequestId;
@@ -1307,7 +1002,6 @@ searchInput.addEventListener('input', (e) => {
   }, 300);
 });
 
-// Ukrywanie podpowiedzi po kliknięciu poza wyszukiwarkę
 document.addEventListener('click', (e) => {
   if (!document.getElementById('search-container').contains(e.target)) {
     suggestionsBox.style.display = 'none';
@@ -1333,14 +1027,12 @@ function selectPlace(place) {
     };
   }
 
-  // Przesunięcie kamery na wybrane miejsce
   map.flyTo({
     center: [lon, lat],
     zoom: 16,
     duration: 1200
   });
 
-  // Dodanie lub aktualizacja pinezki wyszukiwania
   if (searchMarker) {
     searchMarker.setLngLat([lon, lat]);
   } else {
@@ -1349,7 +1041,6 @@ function selectPlace(place) {
       .addTo(map);
   }
 
-  // Wyświetlenie pełnych informacji w panelu bocznym (wykorzystujemy ten sam panel detali)
   displayPlaceDetails(place);
 }
 

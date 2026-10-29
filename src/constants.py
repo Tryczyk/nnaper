@@ -21,7 +21,7 @@ _cors_env = os.getenv("CORS_ORIGINS", "").strip()
 CORS_ORIGINS = (
     [origin.strip() for origin in _cors_env.split(",") if origin.strip()]
     if _cors_env
-    else ["http://localhost:8080", "http://127.0.0.1:8080"]
+    else ["*"]
 )
 
 DEFAULT_PROFILE_USERNAME = os.getenv("DEFAULT_PROFILE_USERNAME", "admin")

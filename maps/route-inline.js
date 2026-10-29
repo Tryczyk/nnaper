@@ -1015,6 +1015,7 @@
 
   if (btnOpenPlannerMenu) {
     btnOpenPlannerMenu.addEventListener('click', () => {
+      if (typeof window.closePlaybackMode === 'function') window.closePlaybackMode();
       document.getElementById('menu')?.classList.add('route-planner-open');
       window.collapseRightMenu?.();
       routePlannerPanel.classList.add('active');
