@@ -1165,13 +1165,14 @@ body.playback-mode #menu:not(.collapsed) ~ #playback-top-bar {
 #playback-hud-panel {
   display: none !important;
   position: absolute;
-  top: 15px;
-  right: 15px;
+  top: 70px;
+  left: 45px;
+  right: auto;
   z-index: 25;
   background: rgba(15, 23, 42, 0.95);
   backdrop-filter: blur(8px);
   border: 1px solid #334155;
-  padding: 12px 16px;
+  padding: 10px 14px;
   border-radius: 8px;
   width: 250px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
@@ -1179,17 +1180,17 @@ body.playback-mode #menu:not(.collapsed) ~ #playback-top-bar {
   flex-direction: column !important;
   gap: 6px;
   box-sizing: border-box;
-  transition: right 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: left 0.28s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 body.playback-mode #playback-hud-panel {
   display: flex !important;
 }
 
-/* Odsunięcie HUD-a w lewo, gdy prawy panel jest rozwinięty */
-body.playback-mode:has(#menu-right:not(.collapsed)) #playback-hud-panel,
-body.playback-mode #menu-right:not(.collapsed) ~ #playback-hud-panel {
-  right: 280px !important;
+/* Odsunięcie HUD-a w prawo razem z paskiem daty, gdy lewy panel jest rozwinięty */
+body.playback-mode:has(#menu:not(.collapsed)) #playback-hud-panel,
+body.playback-mode #menu:not(.collapsed) ~ #playback-hud-panel {
+  left: 280px !important;
 }
 
 .hud-title {
@@ -1201,6 +1202,42 @@ body.playback-mode #menu-right:not(.collapsed) ~ #playback-hud-panel {
   letter-spacing: 0.06em;
   color: #38bdf8;
   border-bottom: 1px solid #334155;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  user-select: none;
+}
+
+#btn-toggle-hud {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 0 4px;
+  font-size: 12px;
+  line-height: 1;
+  border-radius: 4px;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+#btn-toggle-hud:hover {
+  color: #38bdf8;
+  background: #334155;
+}
+
+#playback-hud-panel.hud-collapsed #playback-hud-body {
+  display: none !important;
+}
+
+#playback-hud-panel.hud-collapsed {
+  padding-bottom: 8px;
+  width: 190px;
+}
+
+#playback-hud-panel.hud-collapsed .hud-title {
+  margin: 0;
+  padding-bottom: 0;
+  border-bottom: none;
 }
 
 .hud-row {

@@ -8,7 +8,7 @@
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
   <script src="https://unpkg.com/pmtiles@3.0.7/dist/pmtiles.js"></script>
-  <link rel="stylesheet" href="styles.css?v=20261029_hudfix2" />
+  <link rel="stylesheet" href="styles.css?v=20261029_hud_left" />
 </head>
 
 <body>
@@ -88,15 +88,20 @@
   </div>
 
   <div id="playback-hud-panel" style="display: none;">
-    <div class="hud-title">Telemetria pojazdu</div>
-    <div class="hud-row"><span class="hud-label">Godzina:</span><span id="playback-hud-time" class="hud-val">--:--:--</span></div>
-    <div class="hud-row"><span class="hud-label">Prędkość:</span><span id="playback-hud-speed" class="hud-val">0.0 km/h</span></div>
-    <div class="hud-row"><span class="hud-label">Wysokość:</span><span id="playback-hud-altitude" class="hud-val">-- m</span></div>
-    <div class="hud-row"><span class="hud-label">Przeciążenie X:</span><span id="playback-hud-gx" class="hud-val">--</span></div>
-    <div class="hud-row"><span class="hud-label">Przeciążenie Y:</span><span id="playback-hud-gy" class="hud-val">--</span></div>
-    <div class="hud-row"><span class="hud-label">Przeciążenie Z:</span><span id="playback-hud-gz" class="hud-val">--</span></div>
-    <div class="hud-row"><span class="hud-label">Dystans dnia:</span><span id="playback-hud-dist" class="hud-val">0.0 km</span></div>
-    <div class="hud-row"><span class="hud-label">Śr. prędkość:</span><span id="playback-hud-avg-speed" class="hud-val">0.0 km/h</span></div>
+    <div class="hud-title">
+      <span>Telemetria pojazdu</span>
+      <button id="btn-toggle-hud" type="button" title="Zwiń / rozwiń telemetrię" aria-label="Zwiń telemetrię">▾</button>
+    </div>
+    <div id="playback-hud-body">
+      <div class="hud-row"><span class="hud-label">Godzina:</span><span id="playback-hud-time" class="hud-val">--:--:--</span></div>
+      <div class="hud-row"><span class="hud-label">Prędkość:</span><span id="playback-hud-speed" class="hud-val">0.0 km/h</span></div>
+      <div class="hud-row"><span class="hud-label">Wysokość:</span><span id="playback-hud-altitude" class="hud-val">-- m</span></div>
+      <div class="hud-row"><span class="hud-label">Przeciążenie X:</span><span id="playback-hud-gx" class="hud-val">--</span></div>
+      <div class="hud-row"><span class="hud-label">Przeciążenie Y:</span><span id="playback-hud-gy" class="hud-val">--</span></div>
+      <div class="hud-row"><span class="hud-label">Przeciążenie Z:</span><span id="playback-hud-gz" class="hud-val">--</span></div>
+      <div class="hud-row"><span class="hud-label">Dystans dnia:</span><span id="playback-hud-dist" class="hud-val">0.0 km</span></div>
+      <div class="hud-row"><span class="hud-label">Śr. prędkość:</span><span id="playback-hud-avg-speed" class="hud-val">0.0 km/h</span></div>
+    </div>
   </div>
 
   <div id="playback-bottom-controls" style="display: none;">
@@ -198,8 +203,8 @@
   <script src="runtime-config.local.js"></script>
   <script src="layers.js?v=20261029_integrated"></script>
   <script src="layer-manager.js?v=20261029_integrated"></script>
-  <script src="app.js?v=20261029_hudfix2"></script>
-  <script src="playback-inline.js?v=20261029_hudfix2"></script>
+  <script src="app.js?v=20261029_hud_left"></script>
+  <script src="playback-inline.js?v=20261029_hud_left"></script>
   <script src="route-inline.js?v=20261029_playbackintegrated"></script>
 </body>
 

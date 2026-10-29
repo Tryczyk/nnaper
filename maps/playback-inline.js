@@ -467,7 +467,12 @@
 
     document.body.classList.add('playback-mode');
     if (topBarEl) topBarEl.style.display = 'flex';
-    if (hudPanelEl) hudPanelEl.style.display = 'flex';
+    if (hudPanelEl) {
+      hudPanelEl.style.display = 'flex';
+      hudPanelEl.classList.remove('hud-collapsed');
+      const btnToggleHud = document.getElementById('btn-toggle-hud');
+      if (btnToggleHud) btnToggleHud.innerText = '▾';
+    }
     if (bottomControlsEl) bottomControlsEl.style.display = 'flex';
 
     ensureSatelliteLayers();
@@ -558,6 +563,14 @@
   if (satViewSelect) {
     satViewSelect.addEventListener('change', () => {
       if (trackData[currentIndex]) updateSatellitesDisplay(trackData[currentIndex]);
+    });
+  }
+
+  const btnToggleHud = document.getElementById('btn-toggle-hud');
+  if (btnToggleHud && hudPanelEl) {
+    btnToggleHud.addEventListener('click', () => {
+      hudPanelEl.classList.toggle('hud-collapsed');
+      btnToggleHud.innerText = hudPanelEl.classList.contains('hud-collapsed') ? '▸' : '▾';
     });
   }
 
