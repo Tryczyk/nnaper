@@ -1,21 +1,47 @@
+from contextlib import asynccontextmanager
 from datetime import datetime
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 import psycopg
 from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 
-from constants import DB_URL
+from constants import DB_URL, CORS_ORIGINS
 
-app = FastAPI(title="nnaper API")
+pool: ConnectionPool | None = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global pool
+    pool = ConnectionPool(
+        conninfo=DB_URL,
+        min_size=2,
+        max_size=20,
+        open=True,
+    )
+    yield
+    if pool is not None:
+        pool.close()
+
+
+def get_db():
+    if pool is not None:
+        return pool.connection()
+    return psycopg.connect(DB_URL)
+
+
+app = FastAPI(title="nnaper API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=".*",
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 @app.get("/api/dates-tree")
 def get_dates_tree():
@@ -28,7 +54,7 @@ def get_dates_tree():
         ORDER BY y DESC, m DESC, d DESC;
     """
     tree = {}
-    with psycopg.connect(DB_URL) as conn:
+    with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(query)
             for y, m, d in cur.fetchall():
@@ -37,46 +63,6 @@ def get_dates_tree():
                 d_str = str(d).zfill(2)
                 tree.setdefault(y_str, {}).setdefault(m_str, []).append(d_str)
     return tree
-
-@app.get("/api/track")
-def get_track(days: str = Query(None)):
-    where_clauses = []
-    params = []
-    if days:
-        if days == "none":
-            where_clauses.append("1 = 0")
-        else:
-            day_list = [d.strip() for d in days.split(",") if d.strip()]
-            where_clauses.append("timestamp::date = ANY(%s::date[])")
-            params.append(day_list)
-
-    query = f"""
-        SELECT json_build_object(
-            'type', 'FeatureCollection',
-            'features', COALESCE(json_agg(
-                json_build_object(
-                    'type', 'Feature',
-                    'geometry', ST_AsGeoJSON(geom)::json,
-                    'properties', json_build_object(
-                        'epoch_id', epoch_id,
-                        'day', timestamp::date,
-                        'timestamp', timestamp,
-                        'latitude', round(ST_Y(geom)::numeric, 6),
-                        'longitude', round(ST_X(geom)::numeric, 6),
-                        'altitude', altitude,
-                        'speed_kmh', speed_kmh
-                    )
-                )
-            ), '[]'::json)
-        ) AS geojson
-        FROM epochs
-        {"WHERE " + " AND ".join(where_clauses) if where_clauses else ""};
-    """
-    with psycopg.connect(DB_URL) as conn:
-        with conn.cursor(row_factory=dict_row) as cur:
-            cur.execute(query, params)
-            row = cur.fetchone()
-            return row["geojson"]
 
 
 @app.get("/api/track/{z}/{x}/{y}.pbf")
@@ -134,7 +120,7 @@ def get_track_tile(z: int, x: int, y: int, days: str = Query(None)):
     # ST_TileEnvelope is used once for the CTE and once for the index-friendly
     # bounding-box predicate, so both sets of placeholders are intentional.
     params = [z, x, y] + params
-    with psycopg.connect(DB_URL) as conn:
+    with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute("SET LOCAL max_parallel_workers_per_gather = 0")
             cur.execute(query, params)
@@ -175,7 +161,7 @@ def get_epoch_details(epoch_id: str):
     FROM epochs e
     WHERE e.epoch_id = %(eid)s;
     """
-    with psycopg.connect(DB_URL) as conn:
+    with get_db() as conn:
         with conn.cursor(row_factory=dict_row) as cur:
             cur.execute(query, {"eid": epoch_id})
             row = cur.fetchone()
@@ -240,7 +226,7 @@ def get_playback_day(day: str = Query(...)):
     LEFT JOIN day_satellites ds ON de.epoch_id = ds.epoch_id;
     """
     try:
-        with psycopg.connect(DB_URL) as conn:
+        with get_db() as conn:
             with conn.cursor() as cur:
                 cur.execute(query, (day_str, day_str))
                 row = cur.fetchone()
