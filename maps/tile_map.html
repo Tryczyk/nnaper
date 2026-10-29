@@ -8,7 +8,7 @@
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
   <script src="https://unpkg.com/pmtiles@3.0.7/dist/pmtiles.js"></script>
-  <link rel="stylesheet" href="styles.css?v=20261029_hud_stats" />
+  <link rel="stylesheet" href="styles.css?v=20261029_gmeter" />
 </head>
 
 <body>
@@ -96,9 +96,44 @@
       <div class="hud-row"><span class="hud-label">Godzina:</span><span id="playback-hud-time" class="hud-val">--:--:--</span></div>
       <div class="hud-row"><span class="hud-label">Prędkość:</span><span id="playback-hud-speed" class="hud-val">0.0 km/h</span></div>
       <div class="hud-row"><span class="hud-label">Wysokość:</span><span id="playback-hud-altitude" class="hud-val">-- m</span></div>
-      <div class="hud-row"><span class="hud-label">Przeciążenie X:</span><span id="playback-hud-gx" class="hud-val">--</span></div>
-      <div class="hud-row"><span class="hud-label">Przeciążenie Y:</span><span id="playback-hud-gy" class="hud-val">--</span></div>
-      <div class="hud-row"><span class="hud-label">Przeciążenie Z:</span><span id="playback-hud-gz" class="hud-val">--</span></div>
+      <div class="hud-g-meter-container">
+        <div class="g-circle-wrapper" id="g-circle-wrapper" title="2D G-Meter (przeciążenia boczne i wzdłużne)">
+          <div class="g-circle-target">
+            <div class="g-circle-ring ring-1"></div>
+            <div class="g-circle-cross-h"></div>
+            <div class="g-circle-cross-v"></div>
+            <div class="g-circle-dot" id="g-circle-dot"></div>
+          </div>
+          <span class="g-circle-sub">G-METER</span>
+        </div>
+        <div class="g-bars-wrapper">
+          <div class="g-bar-row">
+            <span class="g-axis-label" title="Przeciążenie wzdłużne X">X</span>
+            <div class="g-bar-track" id="g-track-x" title="Przeciążenie X">
+              <div class="g-bar-center"></div>
+              <div class="g-bar-fill" id="g-fill-x"></div>
+              <div class="g-bar-cursor" id="g-cursor-x"></div>
+            </div>
+          </div>
+          <div class="g-bar-row">
+            <span class="g-axis-label" title="Przeciążenie boczne Y">Y</span>
+            <div class="g-bar-track" id="g-track-y" title="Przeciążenie Y">
+              <div class="g-bar-center"></div>
+              <div class="g-bar-fill" id="g-fill-y"></div>
+              <div class="g-bar-cursor" id="g-cursor-y"></div>
+            </div>
+          </div>
+          <div class="g-bar-row">
+            <span class="g-axis-label" title="Przeciążenie pionowe Z">Z</span>
+            <div class="g-bar-track" id="g-track-z" title="Przeciążenie Z">
+              <div class="g-bar-center"></div>
+              <div class="g-bar-gravity" title="1.0 G (Grawitacja)"></div>
+              <div class="g-bar-fill" id="g-fill-z"></div>
+              <div class="g-bar-cursor" id="g-cursor-z"></div>
+            </div>
+          </div>
+        </div>
+      </div>
       
       <div class="hud-divider"><span>Statystyki dnia</span></div>
 
@@ -209,7 +244,7 @@
   <script src="layers.js?v=20261029_integrated"></script>
   <script src="layer-manager.js?v=20261029_integrated"></script>
   <script src="app.js?v=20261029_hud_left"></script>
-  <script src="playback-inline.js?v=20261029_hud_stats"></script>
+  <script src="playback-inline.js?v=20261029_gmeter"></script>
   <script src="route-inline.js?v=20261029_playbackintegrated"></script>
 </body>
 

@@ -59,6 +59,101 @@
   const hudMaxGxyz = document.getElementById('playback-hud-max-gxyz');
   const hudProgressInfo = document.getElementById('playback-hud-progress-info');
 
+  const gCircleDot = document.getElementById('g-circle-dot');
+  const gCircleWrapper = document.getElementById('g-circle-wrapper');
+  const gTrackX = document.getElementById('g-track-x');
+  const gFillX = document.getElementById('g-fill-x');
+  const gCursorX = document.getElementById('g-cursor-x');
+  const gTrackY = document.getElementById('g-track-y');
+  const gFillY = document.getElementById('g-fill-y');
+  const gCursorY = document.getElementById('g-cursor-y');
+  const gTrackZ = document.getElementById('g-track-z');
+  const gFillZ = document.getElementById('g-fill-z');
+  const gCursorZ = document.getElementById('g-cursor-z');
+
+  function getGColor(absVal) {
+    if (absVal < 0.35) return '#38bdf8';
+    if (absVal < 0.75) return '#f59e0b';
+    return '#ef4444';
+  }
+
+  function updateBarAxis(val, fillEl, cursorEl, trackEl, axisLabel) {
+    if (!fillEl || !cursorEl) return;
+    if (val === null || val === undefined || isNaN(Number(val))) {
+      fillEl.style.width = '0%';
+      fillEl.style.left = '50%';
+      cursorEl.style.left = '50%';
+      if (trackEl) trackEl.title = `Przeciążenie ${axisLabel}: brak danych`;
+      return;
+    }
+
+    const num = Number(val);
+    const clamped = Math.max(-1.5, Math.min(1.5, num));
+    const offsetPct = (clamped / 1.5) * 50; // od -50% do +50%
+    const absOffset = Math.abs(offsetPct);
+    const color = getGColor(Math.abs(num));
+
+    if (offsetPct >= 0) {
+      fillEl.style.left = '50%';
+      fillEl.style.width = `${absOffset.toFixed(1)}%`;
+    } else {
+      fillEl.style.left = `${(50 - absOffset).toFixed(1)}%`;
+      fillEl.style.width = `${absOffset.toFixed(1)}%`;
+    }
+    fillEl.style.backgroundColor = color;
+
+    const cursorLeft = Math.max(2, Math.min(98, 50 + offsetPct));
+    cursorEl.style.left = `${cursorLeft.toFixed(1)}%`;
+    cursorEl.style.boxShadow = `0 0 6px ${color}`;
+
+    if (trackEl) {
+      const sign = num > 0 ? '+' : '';
+      trackEl.title = `Przeciążenie ${axisLabel}: ${sign}${num.toFixed(3)} G`;
+    }
+  }
+
+  function updateGraphicalGForces(gxRaw, gyRaw, gzRaw) {
+    const gx = (gxRaw !== null && gxRaw !== undefined) ? Number(gxRaw) : NaN;
+    const gy = (gyRaw !== null && gyRaw !== undefined) ? Number(gyRaw) : NaN;
+    const gz = (gzRaw !== null && gzRaw !== undefined) ? Number(gzRaw) : NaN;
+
+    updateBarAxis(gx, gFillX, gCursorX, gTrackX, 'X');
+    updateBarAxis(gy, gFillY, gCursorY, gTrackY, 'Y');
+    updateBarAxis(gz, gFillZ, gCursorZ, gTrackZ, 'Z');
+
+    if (gCircleDot) {
+      if (isNaN(gx) && isNaN(gy)) {
+        gCircleDot.style.transform = 'translate(21px, 21px)';
+        gCircleDot.style.backgroundColor = '#38bdf8';
+        gCircleDot.style.boxShadow = '0 0 8px #38bdf8, 0 0 2px #fff';
+      } else {
+        const valX = isNaN(gx) ? 0 : gx;
+        const valY = isNaN(gy) ? 0 : gy;
+
+        let dx = (valY / 1.5) * 21;
+        let dy = (-valX / 1.5) * 21;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > 21) {
+          dx = (dx / dist) * 21;
+          dy = (dy / dist) * 21;
+        }
+
+        const posX = 21 + dx;
+        const posY = 21 + dy;
+        gCircleDot.style.transform = `translate(${posX.toFixed(1)}px, ${posY.toFixed(1)}px)`;
+
+        const g2D = Math.sqrt(valX * valX + valY * valY);
+        const color = getGColor(g2D);
+        gCircleDot.style.backgroundColor = color;
+        gCircleDot.style.boxShadow = `0 0 8px ${color}, 0 0 2px #fff`;
+
+        if (gCircleWrapper) {
+          gCircleWrapper.title = `2D G-Force: ${g2D.toFixed(3)} G (X: ${formatSensorValue(gxRaw)}, Y: ${formatSensorValue(gyRaw)})`;
+        }
+      }
+    }
+  }
+
   const slider = document.getElementById('playback-timeline-slider');
   const btnPlay = document.getElementById('btn-playback-play');
   const speedMultiplier = document.getElementById('playback-speed-multiplier');
@@ -251,9 +346,7 @@
         ? '-- m'
         : `${Number(pt.altitude).toFixed(1)} m`;
     }
-    if (hudGx) hudGx.innerText = formatSensorValue(pt.g_x);
-    if (hudGy) hudGy.innerText = formatSensorValue(pt.g_y);
-    if (hudGz) hudGz.innerText = formatSensorValue(pt.g_z);
+    updateGraphicalGForces(pt.g_x, pt.g_y, pt.g_z);
     if (hudProgressInfo) hudProgressInfo.innerText = `${index + 1} / ${trackData.length} epok`;
     if (slider) slider.value = index;
 
@@ -336,9 +429,7 @@
         if (hudSpeed) hudSpeed.innerText = '0.0 km/h';
         if (hudAltitude) hudAltitude.innerText = '-- m';
         if (hudTime) hudTime.innerText = '--:--:--';
-        if (hudGx) hudGx.innerText = '--';
-        if (hudGy) hudGy.innerText = '--';
-        if (hudGz) hudGz.innerText = '--';
+        updateGraphicalGForces(null, null, null);
         if (hudMaxSpeed) hudMaxSpeed.innerText = '0.0 km/h';
         if (hudMaxAltitude) hudMaxAltitude.innerText = '-- m';
         if (hudMaxG) hudMaxG.innerText = '--';
