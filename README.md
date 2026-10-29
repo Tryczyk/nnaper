@@ -46,7 +46,7 @@ Aplikacja do przetwarzania i analizy danych lokalizacyjnych GPS w formacie **NME
 
 4. **Zintegrowany odtwarzacz trasy (Playback & HUD):**
 
-   * Odtwarzacz trasy GPS jest w pełni zintegrowany z główną mapą (`maps/tile_map.html`, uruchamiany przyciskiem *Replay trasy* lub parametrem `?mode=playback`; plik `maps/playback.html` zachowuje kompatybilność jako automatyczne przekierowanie).
+   * Odtwarzacz trasy GPS jest w pełni zintegrowany z główną mapą (`maps/tile_map.html`, uruchamiany przyciskiem *Replay trasy* lub parametrem `?mode=playback`).
 
    * Symulacja przejazdu samochodem wzdłuż zarejestrowanego śladu GPS z automatycznym obrotem pojazdu zgodnie z kursem.
 
@@ -69,7 +69,6 @@ nnaper/
 │   ├── layer-manager.js    # Zarządzanie stylami warstw, persystencja w localStorage i synchronizacja
 │   ├── layers.js           # Konfiguracja stylu MapLibre i definicje warstw PMTiles
 │   ├── playback-inline.js  # Zintegrowany moduł odtwarzacza trasy GPS (HUD + animacja samochodu)
-│   ├── playback.html       # Przekierowanie do zintegrowanego odtwarzacza w tile_map.html
 │   ├── route-inline.js     # Moduł planowania trasy OSRM, obsługa Google Maps i menu kontekstowego
 │   ├── runtime-config.js   # Domyślna konfiguracja runtime URL-i API, OSRM i kafelków
 │   ├── styles.css          # Style CSS paneli, HUD-a, planera i wyszukiwarki
@@ -187,7 +186,7 @@ uv run src/parser.py
 
 * **Zintegrowany odtwarzacz trasy GPS (Playback & HUD):**
 
-  <http://localhost:8080/maps/tile_map.html?mode=playback> *(lub przekierowanie przez <http://localhost:8080/maps/playback.html>)*
+  <http://localhost:8080/maps/tile_map.html?mode=playback>
 
 ## Przy pracy nad bazą lub parserem
 

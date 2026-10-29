@@ -1,7 +1,7 @@
 /**
  * LayerManager - Zsynchronizowany moduł zarządzania warstwami, stylami i trybem 3D dla NNAPER
  * Obsługuje:
- * - Persystencję w localStorage (współdzielona konfiguracja między tile_map.html a playback.html)
+ * - Persystencję konfiguracji warstw i stylów w localStorage
  * - Drzewo sterowania warstwami (widoczność, kolory, grubości, linie przerywane, obwódki, rozmiary)
  * - Przełączniki 3D (ukształtowanie terenu 3D oraz trójwymiarowe bryły budynków)
  * - Synchronizację w czasie rzeczywistym między zakładkami (window 'storage' event)
