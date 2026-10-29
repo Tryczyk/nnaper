@@ -455,6 +455,8 @@
 
     // Zamknięcie innych paneli, aby nie zasłaniały widoku
     if (typeof window.collapseRightMenu === 'function') window.collapseRightMenu();
+    if (typeof window.collapseMenu === 'function') window.collapseMenu();
+    if (btnOpenPlayback) btnOpenPlayback.innerText = 'Zakończ replay';
     const routePlanner = document.getElementById('route-planner-panel');
     if (routePlanner && routePlanner.classList.contains('active')) {
       const btnRouteClose = document.getElementById('btn-route-close');
@@ -488,6 +490,7 @@
 
     pausePlayback();
     document.body.classList.remove('playback-mode');
+    if (btnOpenPlayback) btnOpenPlayback.innerText = 'Replay trasy';
 
     if (topBarEl) topBarEl.style.display = 'none';
     if (hudPanelEl) hudPanelEl.style.display = 'none';
@@ -515,7 +518,13 @@
 
   // Podpięcie zdarzeń
   if (btnOpenPlayback) {
-    btnOpenPlayback.addEventListener('click', openPlaybackMode);
+    btnOpenPlayback.addEventListener('click', () => {
+      if (isPlaybackActive) {
+        closePlaybackMode();
+      } else {
+        openPlaybackMode();
+      }
+    });
   }
 
   if (btnClosePlayback) {

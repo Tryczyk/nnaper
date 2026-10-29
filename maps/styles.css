@@ -1105,12 +1105,13 @@ body.playback-mode #search-container {
   display: none !important;
 }
 
-body.playback-mode #menu-right {
+body.playback-mode #point-panel {
   display: none !important;
 }
 
-body.playback-mode #point-panel {
-  display: none !important;
+body.playback-mode #menu,
+body.playback-mode #menu-right {
+  z-index: 30;
 }
 
 body.playback-mode .maplibregl-ctrl-bottom-right {
@@ -1122,7 +1123,7 @@ body.playback-mode .maplibregl-ctrl-bottom-right {
   display: none !important;
   position: absolute;
   top: 15px;
-  left: 15px;
+  left: 45px;
   z-index: 20;
   align-items: center;
   gap: 10px;
@@ -1137,6 +1138,12 @@ body.playback-mode .maplibregl-ctrl-bottom-right {
 
 body.playback-mode #playback-top-bar {
   display: flex !important;
+}
+
+/* Odsunięcie paska daty w prawo, gdy lewy panel jest rozwinięty */
+body.playback-mode:has(#menu:not(.collapsed)) #playback-top-bar,
+body.playback-mode #menu:not(.collapsed) ~ #playback-top-bar {
+  left: 280px !important;
 }
 
 #playback-top-bar select,
@@ -1172,10 +1179,17 @@ body.playback-mode #playback-top-bar {
   flex-direction: column !important;
   gap: 6px;
   box-sizing: border-box;
+  transition: right 0.28s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 body.playback-mode #playback-hud-panel {
   display: flex !important;
+}
+
+/* Odsunięcie HUD-a w lewo, gdy prawy panel jest rozwinięty */
+body.playback-mode:has(#menu-right:not(.collapsed)) #playback-hud-panel,
+body.playback-mode #menu-right:not(.collapsed) ~ #playback-hud-panel {
+  right: 280px !important;
 }
 
 .hud-title {

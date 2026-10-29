@@ -369,6 +369,9 @@ if (btnToggleMenu) {
   btnToggleMenu.addEventListener('click', toggleMenu);
 }
 collapseMenu();
+window.collapseMenu = collapseMenu;
+window.expandMenu = expandMenu;
+window.toggleMenu = toggleMenu;
 
 /* ------------------- PRAWY PANEL (NAWIGACJA I TRASY) ------------------- */
 const menuRightEl = document.getElementById('menu-right');
