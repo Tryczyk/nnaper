@@ -10,7 +10,7 @@ Aplikacja do przetwarzania i analizy danych lokalizacyjnych GPS w formacie **NME
 
    * **PostGIS (`db`)**: Relacyjna baza przestrzenna zainicjalizowana schematem z pliku `init_db.sql`.
 
-   * **Backend API (`api`)**: Serwis FastAPI serwujący kafelki wektorowe w locie (`ST_AsMVT`), telemetrię epok, strukturę dat oraz zoptymalizowany strumień danych odtwarzacza (`/api/playback-day`).
+   * **Backend API (`api`)**: Serwis FastAPI z asynchroniczną pulą połączeń `psycopg-pool`, serwujący kafelki wektorowe w locie (`ST_AsMVT`), telemetrię epok, strukturę dat oraz zoptymalizowany strumień danych odtwarzacza (`/api/playback-day`).
 
    * **Silnik routingu (`osrm`)**: Lokalna usługa OSRM na porcie `5000` wyznaczająca trasy drogowe na podstawie danych OpenStreetMap.
 
@@ -24,9 +24,9 @@ Aplikacja do przetwarzania i analizy danych lokalizacyjnych GPS w formacie **NME
 
    * Skrypt `src/parser.py` odczytuje surowe logi NMEA linia po linii, grupując komunikaty (`$GPRMC`, `$GPGGA`, `$GPGSV`, `$GSENSORD`) w spójne epoki pomiarowe.
 
-   * Dokonuje walidacji jakości fixa GPS i współczynnika HDOP oraz zapisuje dane partiami bezpośrednio do bazy za pomocą protokołu `COPY`.
+   * Dokonuje walidacji jakości fixa GPS i współczynnika HDOP oraz zapisuje dane partiami za pomocą protokołu `COPY` do bufora ze stagingiem i klauzulą `ON CONFLICT (profile_id, timestamp) DO NOTHING`.
 
-   * Plik `data/state.txt` oraz unikalne ograniczenie `(profile_id, timestamp)` zapobiegają duplikatom i pozwalają na bezpieczne wznawianie pracy w dowolnym momencie.
+   * Plik `data/state.txt` oraz unikalne ograniczenie na poziomie bazy danych gwarantują brak duplikatów przy minimalnym zużyciu pamięci RAM.
 
 3. **Interfejs mapy i narzędzia wizualizacji (`maps/tile_map.html`):**
 
@@ -77,7 +77,7 @@ nnaper/
 ├── src/
 │   ├── constants.py        # Stałe konfiguracyjne i ścieżki projektu
 │   ├── parser.py           # Parsowanie NMEA i zapis epok do PostgreSQL/PostGIS (COPY)
-│   ├── server.py           # Backend FastAPI (dynamiczne MVT, telemetria epok, playback, OSRM proxy)
+│   ├── server.py           # Backend FastAPI (dynamiczne MVT, telemetria epok, playback, pula połączeń)
 │   └── utils.py            # Narzędzia pomocnicze (dekodowanie współrzędnych i czasu NMEA)
 ├── .env.example            # Wzór zmiennych środowiskowych
 ├── docker-compose.yml      # PostGIS, FastAPI, OSRM, Planetiler, Caddy i pomocniczy launcher
@@ -92,7 +92,7 @@ nnaper/
 
 * **Baza danych przestrzennych:** PostgreSQL 16 + PostGIS 3.4
 
-* **Backend API:** FastAPI, Uvicorn, sterownik `psycopg` (binary z obsługą `COPY`)
+* **Backend API:** FastAPI, Uvicorn, sterownik `psycopg` (binary z obsługą `COPY`), pula połączeń `psycopg-pool`
 
 * **Silnik routingu:** OSRM Backend (MLD)
 
