@@ -1,7 +1,7 @@
 /**
  * playback-inline.js - Zintegrowany moduł Odtwarzacza Trasy (Playback) dla NNAPER
- * Uruchamiany bezpośrednio na głównej mapie (tile_map.html).
- * Wykorzystuje istniejące warstwy, style i mechanizmy 3D z tile_map.html.
+ * Uruchamiany bezpośrednio na głównej mapie (map.html).
+ * Wykorzystuje istniejące warstwy, style i mechanizmy 3D z map.html.
  */
 
 (function () {

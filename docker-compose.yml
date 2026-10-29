@@ -144,11 +144,11 @@ services:
         condition: service_started
     entrypoint: ["/bin/sh", "-c"]
     environment:
-      - PUBLIC_MAP_URL=${TILES_PUBLIC_URL:-http://localhost:8080}/maps/tile_map.html
+      - PUBLIC_MAP_URL=${TILES_PUBLIC_URL:-http://localhost:8080}/maps/map.html
     command: >
       "apk add --no-cache curl &&
        echo '[DOCKER] Oczekiwanie na serwer mapy...' &&
-       until curl -s -f http://tiles-server:8080/maps/tile_map.html > /dev/null; do
+       until curl -s -f http://tiles-server:8080/maps/map.html > /dev/null; do
          sleep 1;
        done &&
        echo '========================================================' &&

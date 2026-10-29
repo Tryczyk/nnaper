@@ -28,7 +28,7 @@ Aplikacja do przetwarzania i analizy danych lokalizacyjnych GPS w formacie **NME
 
    * Plik `data/state.txt` oraz unikalne ograniczenie na poziomie bazy danych gwarantują brak duplikatów przy minimalnym zużyciu pamięci RAM.
 
-3. **Interfejs mapy i narzędzia wizualizacji (`maps/tile_map.html`):**
+3. **Interfejs mapy i narzędzia wizualizacji (`maps/map.html`):**
 
    * **Sterowanie warstwami podkładu (lewy panel):** Dynamiczne drzewo warstw z możliwością edycji kolorów, grubości linii, linii przerywanych, obwódek oraz widoczności elementów, zarządzane przez `maps/layer-manager.js` z persystencją w `localStorage`.
 
@@ -46,7 +46,7 @@ Aplikacja do przetwarzania i analizy danych lokalizacyjnych GPS w formacie **NME
 
 4. **Zintegrowany odtwarzacz trasy (Playback & HUD):**
 
-   * Odtwarzacz trasy GPS jest w pełni zintegrowany z główną mapą (`maps/tile_map.html`, uruchamiany przyciskiem *Replay trasy* lub parametrem `?mode=playback`).
+   * Odtwarzacz trasy GPS jest w pełni zintegrowany z główną mapą (`maps/map.html`, uruchamiany przyciskiem *Replay trasy* lub parametrem `?mode=playback`).
 
    * Symulacja przejazdu samochodem wzdłuż zarejestrowanego śladu GPS z automatycznym obrotem pojazdu zgodnie z kursem.
 
@@ -72,7 +72,7 @@ nnaper/
 │   ├── route-inline.js     # Moduł planowania trasy OSRM, obsługa Google Maps i menu kontekstowego
 │   ├── runtime-config.js   # Domyślna konfiguracja runtime URL-i API, OSRM i kafelków
 │   ├── styles.css          # Style CSS paneli, HUD-a, planera i wyszukiwarki
-│   └── tile_map.html       # Główny interfejs mapy z panelami bocznymi i odtwarzaczem
+│   └── map.html            # Główny interfejs mapy z panelami bocznymi i odtwarzaczem
 ├── src/
 │   ├── constants.py        # Stałe konfiguracyjne i ścieżki projektu
 │   ├── parser.py           # Parsowanie NMEA i zapis epok do PostgreSQL/PostGIS (COPY)
@@ -182,11 +182,11 @@ uv run src/parser.py
 
 * **Główna mapa, nawigacja i planer trasy:**
 
-  <http://localhost:8080/maps/tile_map.html>
+  <http://localhost:8080/maps/map.html>
 
 * **Zintegrowany odtwarzacz trasy GPS (Playback & HUD):**
 
-  <http://localhost:8080/maps/tile_map.html?mode=playback>
+  <http://localhost:8080/maps/map.html?mode=playback>
 
 ## Przy pracy nad bazą lub parserem
 
