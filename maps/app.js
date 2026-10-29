@@ -37,11 +37,17 @@ const MONTH_NAMES = {
 };
 
 let gpsMasterCheckbox = null;
+let gpsMasterDesiredState = null;
 let allGpsDayCheckboxes = [];
 let allGpsYearCheckboxes = [];
 
 function syncGpsMasterCheckbox() {
-  if (!gpsMasterCheckbox || allGpsDayCheckboxes.length === 0) return;
+  if (!gpsMasterCheckbox) return;
+  if (allGpsDayCheckboxes.length === 0) {
+    gpsMasterCheckbox.checked = false;
+    gpsMasterCheckbox.indeterminate = false;
+    return;
+  }
   const checkedCount = allGpsDayCheckboxes.filter(c => c.checked).length;
   const total = allGpsDayCheckboxes.length;
   gpsMasterCheckbox.checked = checkedCount === total;
@@ -135,7 +141,40 @@ function updateTrackPaintProperty(property, value) {
   });
 }
 window.updateTrackPaintProperty = updateTrackPaintProperty;
-window.bindGpsMasterCheckbox = (cb) => { gpsMasterCheckbox = cb; };
+window.bindGpsMasterCheckbox = (cb) => {
+  gpsMasterCheckbox = cb;
+  if (!gpsMasterCheckbox) return;
+
+  gpsMasterCheckbox.addEventListener('change', () => {
+    const isChecked = gpsMasterCheckbox.checked;
+    gpsMasterCheckbox.indeterminate = false;
+    gpsMasterDesiredState = isChecked;
+
+    // 1. Zaznacz/odznacz wszystkie dni
+    allGpsDayCheckboxes.forEach(c => {
+      c.checked = isChecked;
+    });
+
+    // 2. Zaznacz/odznacz nagłówki lat i miesięcy w drzewku dat
+    allGpsYearCheckboxes.forEach(c => {
+      c.checked = isChecked;
+      c.indeterminate = false;
+    });
+
+    const timeHolder = document.querySelector('.time-filter-section');
+    if (timeHolder) {
+      timeHolder.querySelectorAll('.node-header input[type="checkbox"]').forEach(c => {
+        c.checked = isChecked;
+        c.indeterminate = false;
+      });
+    }
+
+    // 3. Zastosuj filtr widoczności śladu GPS na mapie
+    applyTrackDateFilter(allGpsDayCheckboxes, isChecked);
+  });
+
+  syncGpsMasterCheckbox();
+};
 
 function addTrackMonthLayers(months) {
   months.forEach(({ key, days }) => {
@@ -302,8 +341,19 @@ async function buildInlineTimeFilter(container) {
       container.appendChild(yearNode);
     });
 
-    syncGpsMasterCheckbox();
-    applyTrackDateFilter(allGpsDayCheckboxes, false);
+    if (gpsMasterDesiredState !== null) {
+      allGpsDayCheckboxes.forEach(c => { c.checked = gpsMasterDesiredState; });
+      allGpsYearCheckboxes.forEach(c => { c.checked = gpsMasterDesiredState; c.indeterminate = false; });
+      container.querySelectorAll('.node-header input[type="checkbox"]').forEach(c => {
+        c.checked = gpsMasterDesiredState;
+        c.indeterminate = false;
+      });
+      syncGpsMasterCheckbox();
+      applyTrackDateFilter(allGpsDayCheckboxes, gpsMasterDesiredState);
+    } else {
+      syncGpsMasterCheckbox();
+      applyTrackDateFilter(allGpsDayCheckboxes, false);
+    }
 
   } catch (err) {
     container.innerHTML = `<span style="color:#ef4444;font-size:11px;">Brak połączenia z API dat.</span>`;

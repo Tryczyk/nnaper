@@ -787,31 +787,29 @@
       });
 
       // Synchronizacja checkboxa nadrzędnego grupy
-      if (pCheckbox && childInputs.length > 0) {
+      if (groupName.trim() === 'GPS') {
+        if (pCheckbox && typeof window.bindGpsMasterCheckbox === 'function') {
+          window.bindGpsMasterCheckbox(pCheckbox);
+        }
+      } else if (pCheckbox && childInputs.length > 0) {
         const checkedCount = childInputs.filter(i => i.checked).length;
         pCheckbox.checked = checkedCount === childInputs.length;
         pCheckbox.indeterminate = checkedCount > 0 && checkedCount < childInputs.length;
 
-        if (groupName.trim() === 'GPS') {
-          if (typeof window.bindGpsMasterCheckbox === 'function') {
-            window.bindGpsMasterCheckbox(pCheckbox);
-          }
-        } else {
-          pCheckbox.addEventListener('change', () => {
-            const isChecked = pCheckbox.checked;
-            pCheckbox.indeterminate = false;
-            updateCategoryVisibility(groupName, isChecked);
+        pCheckbox.addEventListener('change', () => {
+          const isChecked = pCheckbox.checked;
+          pCheckbox.indeterminate = false;
+          updateCategoryVisibility(groupName, isChecked);
 
-            childInputs.forEach((ci, idx) => {
-              ci.checked = isChecked;
-              const targetId = childList[idx].id;
-              const vis = isChecked ? 'visible' : 'none';
-              if (map.getLayer(targetId)) map.setLayoutProperty(targetId, 'visibility', vis);
-              if (map.getLayer(`${targetId}-outline-line`)) map.setLayoutProperty(`${targetId}-outline-line`, 'visibility', vis);
-              updateLayerProperty(targetId, { visibility: vis });
-            });
+          childInputs.forEach((ci, idx) => {
+            ci.checked = isChecked;
+            const targetId = childList[idx].id;
+            const vis = isChecked ? 'visible' : 'none';
+            if (map.getLayer(targetId)) map.setLayoutProperty(targetId, 'visibility', vis);
+            if (map.getLayer(`${targetId}-outline-line`)) map.setLayoutProperty(`${targetId}-outline-line`, 'visibility', vis);
+            updateLayerProperty(targetId, { visibility: vis });
           });
-        }
+        });
       }
 
       node.appendChild(header);
