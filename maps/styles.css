@@ -1174,7 +1174,7 @@ body.playback-mode #menu:not(.collapsed) ~ #playback-top-bar {
   border: 1px solid #334155;
   padding: 10px 14px;
   border-radius: 8px;
-  width: 250px;
+  width: 260px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
   color: #f8fafc;
   flex-direction: column !important;
@@ -1238,6 +1238,20 @@ body.playback-mode #menu:not(.collapsed) ~ #playback-hud-panel {
   margin: 0;
   padding-bottom: 0;
   border-bottom: none;
+}
+
+.hud-divider {
+  display: flex;
+  align-items: center;
+  margin: 6px 0 3px 0;
+  padding-top: 5px;
+  border-top: 1px solid rgba(51, 65, 85, 0.7);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #64748b;
+  text-transform: uppercase;
+  user-select: none;
 }
 
 .hud-row {

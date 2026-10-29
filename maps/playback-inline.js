@@ -53,6 +53,10 @@
   const hudGz = document.getElementById('playback-hud-gz');
   const hudDist = document.getElementById('playback-hud-dist');
   const hudAvgSpeed = document.getElementById('playback-hud-avg-speed');
+  const hudMaxSpeed = document.getElementById('playback-hud-max-speed');
+  const hudMaxAltitude = document.getElementById('playback-hud-max-altitude');
+  const hudMaxG = document.getElementById('playback-hud-max-g');
+  const hudMaxGxyz = document.getElementById('playback-hud-max-gxyz');
   const hudProgressInfo = document.getElementById('playback-hud-progress-info');
 
   const slider = document.getElementById('playback-timeline-slider');
@@ -335,6 +339,10 @@
         if (hudGx) hudGx.innerText = '--';
         if (hudGy) hudGy.innerText = '--';
         if (hudGz) hudGz.innerText = '--';
+        if (hudMaxSpeed) hudMaxSpeed.innerText = '0.0 km/h';
+        if (hudMaxAltitude) hudMaxAltitude.innerText = '-- m';
+        if (hudMaxG) hudMaxG.innerText = '--';
+        if (hudMaxGxyz) hudMaxGxyz.innerText = '--';
         if (slider) {
           slider.max = 0;
           slider.value = 0;
@@ -353,8 +361,45 @@
 
       totalDistanceDayKm = 0;
       let speedSum = 0;
+      let maxSpeed = 0;
+      let maxAltitude = -Infinity;
+      let hasAltitude = false;
+      let maxGTotal = 0;
+      let maxGx = 0;
+      let maxGy = 0;
+      let maxGz = 0;
+      let hasG = false;
+
       for (let i = 0; i < trackData.length; i++) {
-        speedSum += (trackData[i].speed_kmh || 0);
+        const pt = trackData[i];
+        const spd = Number(pt.speed_kmh) || 0;
+        speedSum += spd;
+        if (spd > maxSpeed) maxSpeed = spd;
+
+        if (pt.altitude !== null && pt.altitude !== undefined && !isNaN(Number(pt.altitude))) {
+          const alt = Number(pt.altitude);
+          if (alt > maxAltitude) maxAltitude = alt;
+          hasAltitude = true;
+        }
+
+        const gxRaw = (pt.g_x !== null && pt.g_x !== undefined) ? Number(pt.g_x) : NaN;
+        const gyRaw = (pt.g_y !== null && pt.g_y !== undefined) ? Number(pt.g_y) : NaN;
+        const gzRaw = (pt.g_z !== null && pt.g_z !== undefined) ? Number(pt.g_z) : NaN;
+
+        if (!isNaN(gxRaw) || !isNaN(gyRaw) || !isNaN(gzRaw)) {
+          hasG = true;
+          const gx = isNaN(gxRaw) ? 0 : Math.abs(gxRaw);
+          const gy = isNaN(gyRaw) ? 0 : Math.abs(gyRaw);
+          const gz = isNaN(gzRaw) ? 0 : Math.abs(gzRaw);
+
+          if (gx > maxGx) maxGx = gx;
+          if (gy > maxGy) maxGy = gy;
+          if (gz > maxGz) maxGz = gz;
+
+          const gMag = Math.sqrt(gx * gx + gy * gy + gz * gz);
+          if (gMag > maxGTotal) maxGTotal = gMag;
+        }
+
         if (i > 0) {
           totalDistanceDayKm += getDistanceKm(trackData[i - 1].lat, trackData[i - 1].lon, trackData[i].lat, trackData[i].lon);
         }
@@ -362,6 +407,10 @@
       const avgSpeed = (speedSum / trackData.length).toFixed(1);
       if (hudDist) hudDist.innerText = `${totalDistanceDayKm.toFixed(2)} km`;
       if (hudAvgSpeed) hudAvgSpeed.innerText = `${avgSpeed} km/h`;
+      if (hudMaxSpeed) hudMaxSpeed.innerText = `${maxSpeed.toFixed(1)} km/h`;
+      if (hudMaxAltitude) hudMaxAltitude.innerText = hasAltitude ? `${maxAltitude.toFixed(1)} m` : '-- m';
+      if (hudMaxG) hudMaxG.innerText = hasG ? `${maxGTotal.toFixed(3)} G` : '--';
+      if (hudMaxGxyz) hudMaxGxyz.innerText = hasG ? `${maxGx.toFixed(2)} / ${maxGy.toFixed(2)} / ${maxGz.toFixed(2)} G` : '--';
 
       if (slider) {
         slider.max = trackData.length - 1;
