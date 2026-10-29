@@ -8,7 +8,7 @@
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
   <script src="https://unpkg.com/pmtiles@3.0.7/dist/pmtiles.js"></script>
-  <link rel="stylesheet" href="styles.css?v=20261028_3dtoggles" />
+  <link rel="stylesheet" href="styles.css?v=20261029_clipboard" />
 </head>
 
 <body>
@@ -92,12 +92,15 @@
     </div>
     <div id="route-start-suggestions" class="route-start-suggestions"></div>
     <div class="route-import-box">
-      <div class="route-import-row">
-        <input type="text" id="route-import-input" class="route-field" placeholder="Wklej link do trasy Google Maps..."
-          spellcheck="false" autocomplete="off" />
-        <button type="button" id="btn-route-import" class="route-action-btn route-google-action-btn"
-          title="Wczytaj trasę z linku">Wczytaj</button>
-      </div>
+      <button type="button" id="btn-route-import-clipboard" class="route-action-btn route-import-clipboard-btn"
+        title="Wczytaj trasę Google ze schowka">
+        <svg class="clipboard-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+          <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
+        </svg>
+        <span>Wczytaj trasę Google ze schowka</span>
+      </button>
       <div id="route-import-feedback" class="route-google-feedback"></div>
     </div>
     <div id="route-planner-hint">Użyj + między punktami albo kliknij prawym przyciskiem mapę.</div>
@@ -135,7 +138,7 @@
   <script src="runtime-config.local.js"></script>
   <script src="layers.js?v=20261028_hide3d"></script>
   <script src="app.js?v=20261028_hide3d"></script>
-  <script src="route-inline.js?v=20261028_keepcolor"></script>
+  <script src="route-inline.js?v=20261029_clipboard"></script>
 </body>
 
 </html>

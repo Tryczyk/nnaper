@@ -912,48 +912,47 @@ html {
   color: #f87171;
 }
 
-.route-import-box {
-  margin: 6px 0 10px 0;
-  padding: 8px;
-  background: #0b1329;
-  border: 1px dashed #334155;
-  border-radius: 6px;
-  box-sizing: border-box;
-}
-
-.route-import-box:focus-within {
-  border-color: #0284c7;
-  border-style: solid;
-}
-
-.route-import-row {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
-
-.route-import-row .route-field {
-  flex: 1;
-  min-width: 0;
+.route-google-feedback:empty {
+  min-height: 0;
   margin-top: 0;
-  padding: 6px 8px;
-  font-size: 11px;
+}
+
+.route-import-box {
+  margin: 4px 0 8px 0;
+}
+
+.route-import-clipboard-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: 0;
+  padding: 7px 10px;
   background: #1e293b;
-  border: 1px solid #475569;
-  border-radius: 4px;
-  color: #fff;
+  border: 1px solid #38bdf8;
+  border-radius: 6px;
+  color: #38bdf8;
+  font-weight: 600;
+  font-size: 11.5px;
+  cursor: pointer;
   box-sizing: border-box;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.05s ease;
 }
 
-.route-import-row .route-field::placeholder {
-  color: #64748b;
-  font-size: 11px;
-}
-
-.route-import-row .route-field:focus {
-  outline: none;
+.route-import-clipboard-btn:hover {
+  background: #0284c7;
   border-color: #38bdf8;
-  box-shadow: 0 0 0 1px #38bdf8;
+  color: #ffffff;
+}
+
+.route-import-clipboard-btn:active {
+  background: #0369a1;
+  transform: translateY(1px);
+}
+
+.route-import-clipboard-btn .clipboard-icon {
+  flex-shrink: 0;
 }
 
 .menu-action-btn {

@@ -11,8 +11,7 @@
   const btnOpenGoogleUrl = document.getElementById('btn-open-google-url');
   const routeGoogleFeedback = document.getElementById('route-google-feedback');
   let googleFeedbackTimer = null;
-  const routeImportInput = document.getElementById('route-import-input');
-  const btnRouteImport = document.getElementById('btn-route-import');
+  const btnRouteImportClipboard = document.getElementById('btn-route-import-clipboard');
   const routeImportFeedback = document.getElementById('route-import-feedback');
   let importFeedbackTimer = null;
   const btnOpenPlannerMenu = document.getElementById('btn-open-planner-menu');
@@ -153,7 +152,6 @@
       if (routeGoogleUrl) routeGoogleUrl.value = '';
       if (btnOpenGoogleUrl) btnOpenGoogleUrl.removeAttribute('href');
     }
-    if (routeImportInput) routeImportInput.value = '';
     if (routeImportFeedback) routeImportFeedback.innerText = '';
   }
 
@@ -968,34 +966,42 @@
     return true;
   }
 
-  function handleRouteImport() {
-    if (!routeImportInput) return;
-    const input = routeImportInput.value.trim();
-    if (!input) {
-      setImportFeedback('Wklej link do trasy Google Maps.', true);
+  async function handleClipboardRouteImport() {
+    let clipText = '';
+    try {
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        clipText = await navigator.clipboard.readText();
+      } else {
+        throw new Error('Clipboard API unavailable');
+      }
+    } catch (err) {
+      console.warn('Clipboard readText failed or permission denied:', err);
+      clipText = window.prompt('Wklej link do trasy Google Maps:');
+    }
+
+    if (!clipText || !clipText.trim()) {
+      setImportFeedback('Schowek jest pusty. Skopiuj link do trasy w Google Maps.', true);
       return;
     }
-    const success = loadRouteFromGoogleMapsUrl(input);
-    if (success) {
-      routeImportInput.value = '';
+
+    loadRouteFromGoogleMapsUrl(clipText.trim());
+  }
+
+  if (btnRouteImportClipboard) {
+    btnRouteImportClipboard.addEventListener('click', handleClipboardRouteImport);
+  }
+
+  window.addEventListener('paste', (e) => {
+    if (!routePlannerPanel || !routePlannerPanel.classList.contains('active')) return;
+    const targetTag = e.target?.tagName?.toLowerCase();
+    if (targetTag === 'input' || targetTag === 'textarea') return;
+
+    const pastedText = e.clipboardData?.getData('text');
+    if (pastedText && (pastedText.includes('google.') || pastedText.includes('/dir/'))) {
+      e.preventDefault();
+      loadRouteFromGoogleMapsUrl(pastedText.trim());
     }
-  }
-
-  if (btnRouteImport) {
-    btnRouteImport.addEventListener('click', handleRouteImport);
-  }
-
-  if (routeImportInput) {
-    routeImportInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        handleRouteImport();
-      }
-    });
-    routeImportInput.addEventListener('paste', () => {
-      setTimeout(handleRouteImport, 20);
-    });
-  }
+  });
 
   if (btnOpenPlannerMenu) {
     btnOpenPlannerMenu.addEventListener('click', () => {
@@ -1007,9 +1013,7 @@
       inlinePointColorSequence = 0;
       renderInlineRouteMarkers();
       routePlannerStats.innerText = '';
-      if (routeImportInput) {
-        setTimeout(() => routeImportInput.focus(), 50);
-      }
+      if (routeImportFeedback) routeImportFeedback.innerText = '';
     });
   }
 
