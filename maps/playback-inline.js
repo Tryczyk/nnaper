@@ -1,7 +1,7 @@
 /**
  * playback-inline.js - Zintegrowany moduł Odtwarzacza Trasy (Playback) dla NNAPER
- * Uruchamiany bezpośrednio na głównej mapie (tile_map.html).
- * Wykorzystuje istniejące warstwy, style i mechanizmy 3D z tile_map.html.
+ * Uruchamiany bezpośrednio na głównej mapie (map.html).
+ * Wykorzystuje istniejące warstwy, style i mechanizmy 3D z map.html.
  */
 
 (function () {
@@ -56,7 +56,106 @@
   const hudGz = document.getElementById('playback-hud-gz');
   const hudDist = document.getElementById('playback-hud-dist');
   const hudAvgSpeed = document.getElementById('playback-hud-avg-speed');
+  const hudMaxSpeed = document.getElementById('playback-hud-max-speed');
+  const hudMaxAltitude = document.getElementById('playback-hud-max-altitude');
+  const hudMaxG = document.getElementById('playback-hud-max-g');
+  const hudMaxGxyz = document.getElementById('playback-hud-max-gxyz');
   const hudProgressInfo = document.getElementById('playback-hud-progress-info');
+
+  const gCircleDot = document.getElementById('g-circle-dot');
+  const gCircleWrapper = document.getElementById('g-circle-wrapper');
+  const gTrackX = document.getElementById('g-track-x');
+  const gFillX = document.getElementById('g-fill-x');
+  const gCursorX = document.getElementById('g-cursor-x');
+  const gTrackY = document.getElementById('g-track-y');
+  const gFillY = document.getElementById('g-fill-y');
+  const gCursorY = document.getElementById('g-cursor-y');
+  const gTrackZ = document.getElementById('g-track-z');
+  const gFillZ = document.getElementById('g-fill-z');
+  const gCursorZ = document.getElementById('g-cursor-z');
+
+  function getGColor(absVal) {
+    if (absVal < 0.35) return '#38bdf8';
+    if (absVal < 0.75) return '#f59e0b';
+    return '#ef4444';
+  }
+
+  function updateBarAxis(val, fillEl, cursorEl, trackEl, axisLabel) {
+    if (!fillEl || !cursorEl) return;
+    if (val === null || val === undefined || isNaN(Number(val))) {
+      fillEl.style.width = '0%';
+      fillEl.style.left = '50%';
+      cursorEl.style.left = '50%';
+      if (trackEl) trackEl.title = `Przeciążenie ${axisLabel}: brak danych`;
+      return;
+    }
+
+    const num = Number(val);
+    const clamped = Math.max(-1.5, Math.min(1.5, num));
+    const offsetPct = (clamped / 1.5) * 50; // od -50% do +50%
+    const absOffset = Math.abs(offsetPct);
+    const color = getGColor(Math.abs(num));
+
+    if (offsetPct >= 0) {
+      fillEl.style.left = '50%';
+      fillEl.style.width = `${absOffset.toFixed(1)}%`;
+    } else {
+      fillEl.style.left = `${(50 - absOffset).toFixed(1)}%`;
+      fillEl.style.width = `${absOffset.toFixed(1)}%`;
+    }
+    fillEl.style.backgroundColor = color;
+
+    const cursorLeft = Math.max(2, Math.min(98, 50 + offsetPct));
+    cursorEl.style.left = `${cursorLeft.toFixed(1)}%`;
+    cursorEl.style.boxShadow = `0 0 6px ${color}`;
+
+    if (trackEl) {
+      const sign = num > 0 ? '+' : '';
+      trackEl.title = `Przeciążenie ${axisLabel}: ${sign}${num.toFixed(3)} G`;
+    }
+  }
+
+  function updateGraphicalGForces(gxRaw, gyRaw, gzRaw) {
+    const gx = (gxRaw !== null && gxRaw !== undefined) ? Number(gxRaw) : NaN;
+    const gy = (gyRaw !== null && gyRaw !== undefined) ? Number(gyRaw) : NaN;
+    const gz = (gzRaw !== null && gzRaw !== undefined) ? Number(gzRaw) : NaN;
+
+    updateBarAxis(gx, gFillX, gCursorX, gTrackX, 'X');
+    updateBarAxis(gy, gFillY, gCursorY, gTrackY, 'Y');
+    updateBarAxis(gz, gFillZ, gCursorZ, gTrackZ, 'Z');
+
+    if (gCircleDot) {
+      if (isNaN(gx) && isNaN(gy)) {
+        gCircleDot.style.transform = 'translate(21px, 21px)';
+        gCircleDot.style.backgroundColor = '#38bdf8';
+        gCircleDot.style.boxShadow = '0 0 8px #38bdf8, 0 0 2px #fff';
+      } else {
+        const valX = isNaN(gx) ? 0 : gx;
+        const valY = isNaN(gy) ? 0 : gy;
+
+        let dx = (valY / 1.5) * 21;
+        let dy = (-valX / 1.5) * 21;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > 21) {
+          dx = (dx / dist) * 21;
+          dy = (dy / dist) * 21;
+        }
+
+        const posX = 21 + dx;
+        const posY = 21 + dy;
+        gCircleDot.style.transform = `translate(${posX.toFixed(1)}px, ${posY.toFixed(1)}px)`;
+
+        const g2D = Math.sqrt(valX * valX + valY * valY);
+        const color = getGColor(g2D);
+        gCircleDot.style.backgroundColor = color;
+        gCircleDot.style.boxShadow = `0 0 8px ${color}, 0 0 2px #fff`;
+
+        if (gCircleWrapper) {
+          gCircleWrapper.title = `2D G-Force: ${g2D.toFixed(3)} G (X: ${formatSensorValue(gxRaw)}, Y: ${formatSensorValue(gyRaw)})`;
+        }
+      }
+    }
+  }
 
   const slider = document.getElementById('playback-timeline-slider');
   const btnPlay = document.getElementById('btn-playback-play');
@@ -768,9 +867,7 @@
         ? '-- m'
         : `${Number(pt.altitude).toFixed(1)} m`;
     }
-    if (hudGx) hudGx.innerText = formatSensorValue(pt.g_x);
-    if (hudGy) hudGy.innerText = formatSensorValue(pt.g_y);
-    if (hudGz) hudGz.innerText = formatSensorValue(pt.g_z);
+    updateGraphicalGForces(pt.g_x, pt.g_y, pt.g_z);
     if (hudProgressInfo) hudProgressInfo.innerText = `${index + 1} / ${trackData.length} epok`;
     if (slider) slider.value = index;
 
@@ -1023,9 +1120,11 @@
         if (hudSpeed) hudSpeed.innerText = '0.0 km/h';
         if (hudAltitude) hudAltitude.innerText = '-- m';
         if (hudTime) hudTime.innerText = '--:--:--';
-        if (hudGx) hudGx.innerText = '--';
-        if (hudGy) hudGy.innerText = '--';
-        if (hudGz) hudGz.innerText = '--';
+        updateGraphicalGForces(null, null, null);
+        if (hudMaxSpeed) hudMaxSpeed.innerText = '0.0 km/h';
+        if (hudMaxAltitude) hudMaxAltitude.innerText = '-- m';
+        if (hudMaxG) hudMaxG.innerText = '--';
+        if (hudMaxGxyz) hudMaxGxyz.innerText = '--';
         if (slider) {
           slider.max = 0;
           slider.value = 0;
@@ -1044,8 +1143,45 @@
 
       totalDistanceDayKm = 0;
       let speedSum = 0;
+      let maxSpeed = 0;
+      let maxAltitude = -Infinity;
+      let hasAltitude = false;
+      let maxGTotal = 0;
+      let maxGx = 0;
+      let maxGy = 0;
+      let maxGz = 0;
+      let hasG = false;
+
       for (let i = 0; i < trackData.length; i++) {
-        speedSum += (trackData[i].speed_kmh || 0);
+        const pt = trackData[i];
+        const spd = Number(pt.speed_kmh) || 0;
+        speedSum += spd;
+        if (spd > maxSpeed) maxSpeed = spd;
+
+        if (pt.altitude !== null && pt.altitude !== undefined && !isNaN(Number(pt.altitude))) {
+          const alt = Number(pt.altitude);
+          if (alt > maxAltitude) maxAltitude = alt;
+          hasAltitude = true;
+        }
+
+        const gxRaw = (pt.g_x !== null && pt.g_x !== undefined) ? Number(pt.g_x) : NaN;
+        const gyRaw = (pt.g_y !== null && pt.g_y !== undefined) ? Number(pt.g_y) : NaN;
+        const gzRaw = (pt.g_z !== null && pt.g_z !== undefined) ? Number(pt.g_z) : NaN;
+
+        if (!isNaN(gxRaw) || !isNaN(gyRaw) || !isNaN(gzRaw)) {
+          hasG = true;
+          const gx = isNaN(gxRaw) ? 0 : Math.abs(gxRaw);
+          const gy = isNaN(gyRaw) ? 0 : Math.abs(gyRaw);
+          const gz = isNaN(gzRaw) ? 0 : Math.abs(gzRaw);
+
+          if (gx > maxGx) maxGx = gx;
+          if (gy > maxGy) maxGy = gy;
+          if (gz > maxGz) maxGz = gz;
+
+          const gMag = Math.sqrt(gx * gx + gy * gy + gz * gz);
+          if (gMag > maxGTotal) maxGTotal = gMag;
+        }
+
         if (i > 0) {
           totalDistanceDayKm += getDistanceKm(trackData[i - 1].lat, trackData[i - 1].lon, trackData[i].lat, trackData[i].lon);
         }
@@ -1053,6 +1189,10 @@
       const avgSpeed = (speedSum / trackData.length).toFixed(1);
       if (hudDist) hudDist.innerText = `${totalDistanceDayKm.toFixed(2)} km`;
       if (hudAvgSpeed) hudAvgSpeed.innerText = `${avgSpeed} km/h`;
+      if (hudMaxSpeed) hudMaxSpeed.innerText = `${maxSpeed.toFixed(1)} km/h`;
+      if (hudMaxAltitude) hudMaxAltitude.innerText = hasAltitude ? `${maxAltitude.toFixed(1)} m` : '-- m';
+      if (hudMaxG) hudMaxG.innerText = hasG ? `${maxGTotal.toFixed(3)} G` : '--';
+      if (hudMaxGxyz) hudMaxGxyz.innerText = hasG ? `${maxGx.toFixed(2)} / ${maxGy.toFixed(2)} / ${maxGz.toFixed(2)} G` : '--';
 
       if (slider) {
         slider.max = trackData.length - 1;
@@ -1149,6 +1289,8 @@
 
     // Zamknięcie innych paneli, aby nie zasłaniały widoku
     if (typeof window.collapseRightMenu === 'function') window.collapseRightMenu();
+    if (typeof window.collapseMenu === 'function') window.collapseMenu();
+    if (btnOpenPlayback) btnOpenPlayback.innerText = 'Zakończ replay';
     const routePlanner = document.getElementById('route-planner-panel');
     if (routePlanner && routePlanner.classList.contains('active')) {
       const btnRouteClose = document.getElementById('btn-route-close');
@@ -1159,7 +1301,12 @@
 
     document.body.classList.add('playback-mode');
     if (topBarEl) topBarEl.style.display = 'flex';
-    if (hudPanelEl) hudPanelEl.style.display = 'flex';
+    if (hudPanelEl) {
+      hudPanelEl.style.display = 'flex';
+      hudPanelEl.classList.remove('hud-collapsed');
+      const btnToggleHud = document.getElementById('btn-toggle-hud');
+      if (btnToggleHud) btnToggleHud.innerText = '▾';
+    }
     if (bottomControlsEl) bottomControlsEl.style.display = 'flex';
     if (chartPanelEl) chartPanelEl.style.display = 'flex';
 
@@ -1189,6 +1336,7 @@
 
     pausePlayback();
     document.body.classList.remove('playback-mode');
+    if (btnOpenPlayback) btnOpenPlayback.innerText = 'Replay trasy';
 
     if (topBarEl) topBarEl.style.display = 'none';
     if (hudPanelEl) hudPanelEl.style.display = 'none';
@@ -1321,7 +1469,13 @@
 
   // Podpięcie zdarzeń głównych
   if (btnOpenPlayback) {
-    btnOpenPlayback.addEventListener('click', openPlaybackMode);
+    btnOpenPlayback.addEventListener('click', () => {
+      if (isPlaybackActive) {
+        closePlaybackMode();
+      } else {
+        openPlaybackMode();
+      }
+    });
   }
 
   if (btnClosePlayback) {
@@ -1386,6 +1540,14 @@
   if (satViewSelect) {
     satViewSelect.addEventListener('change', () => {
       if (trackData[currentIndex]) updateSatellitesDisplay(trackData[currentIndex]);
+    });
+  }
+
+  const btnToggleHud = document.getElementById('btn-toggle-hud');
+  if (btnToggleHud && hudPanelEl) {
+    btnToggleHud.addEventListener('click', () => {
+      hudPanelEl.classList.toggle('hud-collapsed');
+      btnToggleHud.innerText = hudPanelEl.classList.contains('hud-collapsed') ? '▸' : '▾';
     });
   }
 

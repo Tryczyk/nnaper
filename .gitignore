@@ -7,5 +7,4 @@ maps/runtime-config.local.js
 *.pmtiles
 *.gz
 *.zip
-osm_data/
-/plots
+osm_data/

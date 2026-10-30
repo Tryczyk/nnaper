@@ -28,81 +28,6 @@ window.map = map;
 const navControl = new maplibregl.NavigationControl({ showCompass: true });
 map.addControl(navControl, 'bottom-right');
 
-function getLayerColor(layer) {
-  if (!layer || !layer.paint) return '#94a3b8';
-  const c = layer.paint['fill-color'] || layer.paint['line-color'] || layer.paint['circle-color'] || layer.paint['fill-extrusion-color'] || layer.paint['text-color'];
-  return (typeof c === 'string' && c.startsWith('#')) ? c : '#94a3b8';
-}
-
-function getLayerStrokeColor(layer) {
-  if (!layer || !layer.paint) return getLayerColor(layer);
-  const c = layer.paint['circle-stroke-color'];
-  return (typeof c === 'string' && c.startsWith('#')) ? c : getLayerColor(layer);
-}
-
-function updateLineDashArray(layerId, isDashed, dashLen, gapLen) {
-  if (!map.getLayer(layerId)) return;
-  if (isDashed) {
-    map.setPaintProperty(layerId, 'line-dasharray', [parseFloat(dashLen), parseFloat(gapLen)]);
-  } else {
-    map.setPaintProperty(layerId, 'line-dasharray', [1, 0]);
-  }
-}
-
-function createDashControls(targetLayerId, initialDashed = false) {
-  const box = document.createElement('div');
-  box.className = 'control-row';
-  box.style.borderTop = '1px dotted #334155';
-  box.style.paddingTop = '4px';
-
-  const checkLabel = document.createElement('label');
-  checkLabel.style.display = 'flex';
-  checkLabel.style.alignItems = 'center';
-  checkLabel.style.gap = '4px';
-  checkLabel.style.cursor = 'pointer';
-
-  const dashCheck = document.createElement('input');
-  dashCheck.type = 'checkbox';
-  dashCheck.checked = initialDashed;
-  dashCheck.style.accentColor = '#38bdf8';
-
-  const checkText = document.createElement('span');
-  checkText.innerText = 'Przerywana:';
-
-  checkLabel.appendChild(dashCheck);
-  checkLabel.appendChild(checkText);
-  box.appendChild(checkLabel);
-
-  const inputsHolder = document.createElement('div');
-  inputsHolder.style.display = initialDashed ? 'flex' : 'none';
-  inputsHolder.style.alignItems = 'center';
-  inputsHolder.style.gap = '4px';
-
-  const lDash = document.createElement('span'); lDash.innerText = 'L:';
-  const inDash = document.createElement('input');
-  inDash.type = 'range'; inDash.min = '0.5'; inDash.max = '15'; inDash.step = '0.5'; inDash.value = '3';
-
-  const lGap = document.createElement('span'); lGap.innerText = 'P:';
-  const inGap = document.createElement('input');
-  inGap.type = 'range'; inGap.min = '0.5'; inGap.max = '15'; inGap.step = '0.5'; inGap.value = '2';
-
-  const apply = () => {
-    updateLineDashArray(targetLayerId, dashCheck.checked, inDash.value, inGap.value);
-  };
-
-  dashCheck.addEventListener('change', () => {
-    inputsHolder.style.display = dashCheck.checked ? 'flex' : 'none';
-    apply();
-  });
-  inDash.addEventListener('input', apply);
-  inGap.addEventListener('input', apply);
-
-  inputsHolder.appendChild(lDash); inputsHolder.appendChild(inDash);
-  inputsHolder.appendChild(lGap); inputsHolder.appendChild(inGap);
-  box.appendChild(inputsHolder);
-
-  return box;
-}
 
 /* ------------------- FILTR CZASU & JEDYNY PRZEŁĄCZNIK ŚLADU GPS ------------------- */
 const MONTH_NAMES = {
@@ -112,11 +37,17 @@ const MONTH_NAMES = {
 };
 
 let gpsMasterCheckbox = null;
+let gpsMasterDesiredState = null;
 let allGpsDayCheckboxes = [];
 let allGpsYearCheckboxes = [];
 
 function syncGpsMasterCheckbox() {
-  if (!gpsMasterCheckbox || allGpsDayCheckboxes.length === 0) return;
+  if (!gpsMasterCheckbox) return;
+  if (allGpsDayCheckboxes.length === 0) {
+    gpsMasterCheckbox.checked = false;
+    gpsMasterCheckbox.indeterminate = false;
+    return;
+  }
   const checkedCount = allGpsDayCheckboxes.filter(c => c.checked).length;
   const total = allGpsDayCheckboxes.length;
   gpsMasterCheckbox.checked = checkedCount === total;
@@ -210,7 +141,40 @@ function updateTrackPaintProperty(property, value) {
   });
 }
 window.updateTrackPaintProperty = updateTrackPaintProperty;
-window.bindGpsMasterCheckbox = (cb) => { gpsMasterCheckbox = cb; };
+window.bindGpsMasterCheckbox = (cb) => {
+  gpsMasterCheckbox = cb;
+  if (!gpsMasterCheckbox) return;
+
+  gpsMasterCheckbox.addEventListener('change', () => {
+    const isChecked = gpsMasterCheckbox.checked;
+    gpsMasterCheckbox.indeterminate = false;
+    gpsMasterDesiredState = isChecked;
+
+    // 1. Zaznacz/odznacz wszystkie dni
+    allGpsDayCheckboxes.forEach(c => {
+      c.checked = isChecked;
+    });
+
+    // 2. Zaznacz/odznacz nagłówki lat i miesięcy w drzewku dat
+    allGpsYearCheckboxes.forEach(c => {
+      c.checked = isChecked;
+      c.indeterminate = false;
+    });
+
+    const timeHolder = document.querySelector('.time-filter-section');
+    if (timeHolder) {
+      timeHolder.querySelectorAll('.node-header input[type="checkbox"]').forEach(c => {
+        c.checked = isChecked;
+        c.indeterminate = false;
+      });
+    }
+
+    // 3. Zastosuj filtr widoczności śladu GPS na mapie
+    applyTrackDateFilter(allGpsDayCheckboxes, isChecked);
+  });
+
+  syncGpsMasterCheckbox();
+};
 
 function addTrackMonthLayers(months) {
   months.forEach(({ key, days }) => {
@@ -396,8 +360,19 @@ async function buildInlineTimeFilter(container) {
       container.appendChild(yearNode);
     });
 
-    syncGpsMasterCheckbox();
-    applyTrackDateFilter(allGpsDayCheckboxes, false);
+    if (gpsMasterDesiredState !== null) {
+      allGpsDayCheckboxes.forEach(c => { c.checked = gpsMasterDesiredState; });
+      allGpsYearCheckboxes.forEach(c => { c.checked = gpsMasterDesiredState; c.indeterminate = false; });
+      container.querySelectorAll('.node-header input[type="checkbox"]').forEach(c => {
+        c.checked = gpsMasterDesiredState;
+        c.indeterminate = false;
+      });
+      syncGpsMasterCheckbox();
+      applyTrackDateFilter(allGpsDayCheckboxes, gpsMasterDesiredState);
+    } else {
+      syncGpsMasterCheckbox();
+      applyTrackDateFilter(allGpsDayCheckboxes, false);
+    }
 
   } catch (err) {
     container.innerHTML = `<span style="color:#ef4444;font-size:11px;">Brak połączenia z API dat.</span>`;
@@ -463,6 +438,9 @@ if (btnToggleMenu) {
   btnToggleMenu.addEventListener('click', toggleMenu);
 }
 collapseMenu();
+window.collapseMenu = collapseMenu;
+window.expandMenu = expandMenu;
+window.toggleMenu = toggleMenu;
 
 /* ------------------- PRAWY PANEL (NAWIGACJA I TRASY) ------------------- */
 const menuRightEl = document.getElementById('menu-right');
@@ -561,8 +539,70 @@ btnCloseLocation.addEventListener('click', () => closeLocation(false));
 let activeSatelliteContext = null;
 let currentSatMode = 'local';
 
+function ensureSatelliteLayers() {
+  if (!map) return;
+  if (!map.getSource('satellites-lines-source')) {
+    map.addSource('satellites-lines-source', {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] }
+    });
+  }
+  if (!map.getSource('satellites-points-source')) {
+    map.addSource('satellites-points-source', {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] }
+    });
+  }
+  if (!map.getLayer('playback-sat-lines')) {
+    map.addLayer({
+      id: 'playback-sat-lines',
+      source: 'satellites-lines-source',
+      type: 'line',
+      paint: {
+        'line-color': '#f59e0b',
+        'line-width': 2.0,
+        'line-dasharray': [3, 2]
+      }
+    });
+  }
+  if (!map.getLayer('playback-sat-points')) {
+    map.addLayer({
+      id: 'playback-sat-points',
+      source: 'satellites-points-source',
+      type: 'circle',
+      paint: {
+        'circle-color': '#f59e0b',
+        'circle-radius': 5.5,
+        'circle-stroke-width': 1.5,
+        'circle-stroke-color': '#ffffff'
+      }
+    });
+  }
+  if (!map.getLayer('playback-sat-labels')) {
+    map.addLayer({
+      id: 'playback-sat-labels',
+      source: 'satellites-points-source',
+      type: 'symbol',
+      layout: {
+        'text-field': ['get', 'label'],
+        'text-size': 11,
+        'text-offset': [0, 1.2],
+        'text-anchor': 'top',
+        'text-font': ['Open Sans Bold']
+      },
+      paint: {
+        'text-color': '#fef08a',
+        'text-halo-color': '#020617',
+        'text-halo-width': 2
+      }
+    });
+  }
+}
+window.ensureSatelliteLayers = ensureSatelliteLayers;
+
 function clearSatelliteLayers() {
   activeSatelliteContext = null;
+  ensureSatelliteLayers();
   const satLines = map.getSource('satellites-lines-source');
   if (satLines) satLines.setData({ type: 'FeatureCollection', features: [] });
   const satPoints = map.getSource('satellites-points-source');
@@ -599,6 +639,7 @@ function computeSubSatellitePoint(userLon, userLat, azimuthDeg, elevationDeg) {
 
 function renderSatelliteRays() {
   if (!activeSatelliteContext) return;
+  ensureSatelliteLayers();
   const { pointLon, pointLat, satellitesList } = activeSatelliteContext;
 
   const lineFeatures = [];

@@ -169,11 +169,9 @@ def resolve_and_qualify_epoch(
 
 
 class CopyBatchBuffer:
-    def __init__(self, profile_id: str, existing_timestamps=(), previous_point=None):
+    def __init__(self, profile_id: str, previous_point=None):
         self.profile_id = profile_id
-        self.seen_epoch_keys = {
-            (profile_id, timestamp) for timestamp in existing_timestamps
-        }
+        self.batch_timestamps = set()
         self.epochs = []
         self.satellite = []
         self.last_point = previous_point
@@ -186,10 +184,10 @@ class CopyBatchBuffer:
 
         lat, lon, geom_wkt, epoch_ts, altitude, speed_kmh = result
         epoch_key = (self.profile_id, epoch_ts)
-        if epoch_key in self.seen_epoch_keys:
+        if epoch_key in self.batch_timestamps:
             return
 
-        self.seen_epoch_keys.add(epoch_key)
+        self.batch_timestamps.add(epoch_key)
         epoch_id = str(uuid.uuid4())
 
         self.epochs.append((
@@ -211,20 +209,56 @@ class CopyBatchBuffer:
                     self.satellite.append((str(uuid.uuid4()), epoch_id, sat[0], sat[1], sat[2]))
 
     def flush(self, cur):
-        if self.epochs:
-            with cur.copy("""COPY epochs (
-                epoch_id, profile_id, timestamp, geom, altitude, speed_kmh, g_x, g_y, g_z
-            ) FROM STDIN""") as copy:
-                for row in self.epochs:
-                    copy.write_row(row)
+        if not self.epochs:
+            return
+
+        cur.execute("""
+            CREATE TEMP TABLE staging_epochs (
+                LIKE epochs INCLUDING DEFAULTS
+            ) ON COMMIT DROP;
+        """)
+
+        with cur.copy("""COPY staging_epochs (
+            epoch_id, profile_id, timestamp, geom, altitude, speed_kmh, g_x, g_y, g_z
+        ) FROM STDIN""") as copy:
+            for row in self.epochs:
+                copy.write_row(row)
 
         if self.satellite:
-            with cur.copy("COPY satellite (satellite_id, epoch_id, prn, elevation, azimuth) FROM STDIN") as copy:
+            cur.execute("""
+                CREATE TEMP TABLE staging_satellite (
+                    LIKE satellite INCLUDING DEFAULTS
+                ) ON COMMIT DROP;
+            """)
+            with cur.copy("COPY staging_satellite (satellite_id, epoch_id, prn, elevation, azimuth) FROM STDIN") as copy:
                 for row in self.satellite:
                     copy.write_row(row)
 
+        # Wstawienie epok z automatycznym i bezpiecznym pomijaniem duplikatów
+        cur.execute("""
+            INSERT INTO epochs (
+                epoch_id, profile_id, timestamp, geom, altitude, speed_kmh, g_x, g_y, g_z
+            )
+            SELECT
+                epoch_id, profile_id, timestamp, geom, altitude, speed_kmh, g_x, g_y, g_z
+            FROM staging_epochs
+            ON CONFLICT (profile_id, timestamp) DO NOTHING;
+        """)
+
+        # Wstawienie satelitów tylko dla epok faktycznie zapisanych w bazie
+        if self.satellite:
+            cur.execute("""
+                INSERT INTO satellite (satellite_id, epoch_id, prn, elevation, azimuth)
+                SELECT s.satellite_id, s.epoch_id, s.prn, s.elevation, s.azimuth
+                FROM staging_satellite s
+                JOIN epochs e ON s.epoch_id = e.epoch_id;
+            """)
+
+        cur.execute("DROP TABLE IF EXISTS staging_satellite; DROP TABLE IF EXISTS staging_epochs;")
+
         self.epochs.clear()
         self.satellite.clear()
+        self.batch_timestamps.clear()
 
 
 def parse_data(data_file_path=DATA_FILE_PATH, batch_size=BATCH_SIZE):
@@ -253,30 +287,30 @@ def parse_data(data_file_path=DATA_FILE_PATH, batch_size=BATCH_SIZE):
                 cur.execute("TRUNCATE TABLE epochs CASCADE;")
                 conn.commit()
 
+            # Pobranie wyłącznie OSTATNIEGO punktu do haversine (zamiast całej bazy do RAM)
             cur.execute(
                 """
                 SELECT timestamp, ST_Y(geom), ST_X(geom)
                 FROM epochs
                 WHERE profile_id = %s
                 ORDER BY timestamp DESC
+                LIMIT 1
                 """,
                 (profile_id,),
             )
-            existing_rows = cur.fetchall()
-            existing_timestamps = [row[0] for row in existing_rows]
+            last_row = cur.fetchone()
             previous_point = None
-            if existing_rows:
+            if last_row:
                 previous_point = (
-                    existing_rows[0][0],
-                    float(existing_rows[0][1]),
-                    float(existing_rows[0][2]),
+                    last_row[0],
+                    float(last_row[1]),
+                    float(last_row[2]),
                 )
 
             epoch = RawEpoch()
             epochs_in_batch = 0
             buffer = CopyBatchBuffer(
                 profile_id=profile_id,
-                existing_timestamps=existing_timestamps,
                 previous_point=previous_point,
             )
 

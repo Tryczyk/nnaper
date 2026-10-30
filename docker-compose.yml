@@ -31,7 +31,7 @@ services:
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
       - PYTHONPATH=/app
     command: >
-      sh -c "pip install --no-cache-dir fastapi uvicorn 'psycopg[binary]' python-dotenv &&
+      sh -c "pip install --no-cache-dir fastapi uvicorn 'psycopg[binary]' psycopg-pool python-dotenv &&
              uvicorn server:app --app-dir src --host 0.0.0.0 --port 8000 --reload"
     depends_on:
       db:
@@ -144,11 +144,11 @@ services:
         condition: service_started
     entrypoint: ["/bin/sh", "-c"]
     environment:
-      - PUBLIC_MAP_URL=${TILES_PUBLIC_URL:-http://localhost:8080}/maps/tile_map.html
+      - PUBLIC_MAP_URL=${TILES_PUBLIC_URL:-http://localhost:8080}/maps/map.html
     command: >
       "apk add --no-cache curl &&
        echo '[DOCKER] Oczekiwanie na serwer mapy...' &&
-       until curl -s -f http://tiles-server:8080/maps/tile_map.html > /dev/null; do
+       until curl -s -f http://tiles-server:8080/maps/map.html > /dev/null; do
          sleep 1;
        done &&
        echo '========================================================' &&
