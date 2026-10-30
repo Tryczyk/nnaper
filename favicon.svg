@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100%" height="100%">
+  <defs>
+    <!-- Dynamiczny gradient od soczystej czerwieni do nasyconego karminu -->
+    <linearGradient id="nnaper-pin-body" x1="25%" y1="0%" x2="75%" y2="100%">
+      <stop offset="0%" stop-color="#FF383D" />
+      <stop offset="45%" stop-color="#E31E24" />
+      <stop offset="100%" stop-color="#A80F14" />
+    </linearGradient>
+    <!-- Subtelny górny połysk szkła 3D -->
+    <linearGradient id="nnaper-pin-gloss" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.45" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0" />
+    </linearGradient>
+  </defs>
+
+  <!-- Płynny, symetryczny korpus znacznika z wyciętym okręgiem w centrum -->
+  <path fill="url(#nnaper-pin-body)" stroke="#800D11" stroke-width="1.2" stroke-linejoin="round" fill-rule="evenodd" d="
+    M 50 94
+    C 45.5 81, 20 54.5, 20 36.5
+    A 30 30 0 1 1 80 36.5
+    C 80 54.5, 54.5 81, 50 94 Z
+    M 50 25
+    A 11.5 11.5 0 1 0 50 48
+    A 11.5 11.5 0 1 0 50 25 Z
+  " />
+
+  <!-- Dyskretny biały pierścień wnętrza otworu zapewniający idealną widoczność na ciemnych kartach -->
+  <circle cx="50" cy="36.5" r="11.5" fill="none" stroke="#FFFFFF" stroke-width="1" stroke-opacity="0.45" />
+
+  <!-- Górny łuk refleksu światła -->
+  <path fill="url(#nnaper-pin-gloss)" d="
+    M 26 34
+    A 24 24 0 0 1 74 34
+    C 70 20, 60 14, 50 14
+    C 40 14, 30 20, 26 34 Z
+  " />
+</svg>

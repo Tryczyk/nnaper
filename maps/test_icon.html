@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8" />
+  <title>Weryfikacja Ikon - NNAPER</title>
+  <link rel="icon" type="image/svg+xml" href="pin.svg" />
+  <style>
+    body { background: #080c14; color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; padding: 28px; }
+    h1 { font-size: 24px; color: #38bdf8; margin: 0 0 6px 0; }
+    p.lead { color: #94a3b8; font-size: 13.5px; margin: 0 0 28px 0; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 24px; }
+    .card { background: #0f172a; border: 1px solid #1e293b; border-radius: 14px; padding: 22px; display: flex; flex-direction: column; gap: 18px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); }
+    .card.active { border-color: #38bdf8; box-shadow: 0 0 20px rgba(56, 189, 248, 0.2); }
+    .card-hdr { display: flex; justify-content: space-between; align-items: center; }
+    .card-title { font-size: 16px; font-weight: 700; color: #f1f5f9; }
+    .badge-rec { font-size: 10px; padding: 3px 8px; border-radius: 6px; background: #0284c7; color: #fff; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+    .desc { font-size: 12.5px; color: #94a3b8; line-height: 1.5; }
+    
+    .tab-simulation { display: flex; flex-direction: column; gap: 10px; }
+    .tab-bar { border-radius: 8px; padding: 8px 12px; display: flex; align-items: center; gap: 10px; }
+    .tab-bar.dark { background: #181820; border: 1px solid #282834; }
+    .tab-bar.light { background: #dee2e6; border: 1px solid #ced4da; }
+    .tab { display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: 500; }
+    .tab.dark { background: #242430; color: #f8fafc; border: 1px solid #323242; }
+    .tab.light { background: #ffffff; color: #1e293b; box-shadow: 0 1px 3px rgba(0,0,0,0.15); }
+    .tab-icon { width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; }
+    .tab-close { font-size: 10px; opacity: 0.5; margin-left: 6px; }
+
+    .sizes-box { background: #090e1a; border: 1px solid #1e293b; border-radius: 10px; padding: 14px; display: flex; align-items: flex-end; gap: 16px; }
+    .size-col { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+    .size-tag { font-size: 10px; color: #64748b; font-family: ui-monospace, monospace; }
+
+    .btn-apply { background: #0284c7; color: white; border: none; padding: 8px 14px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; transition: background 0.15s; }
+    .btn-apply:hover { background: #0369a1; }
+  </style>
+</head>
+<body>
+  <h1>Weryfikacja Nowego Znacznika (Favicon) NNAPER</h1>
+  <p class="lead">Sprawdź poniższe dopracowane warianty ikony w rzeczywistym rozmiarze karty przeglądarki (16px) oraz w skali:</p>
+
+  <div class="grid" id="variants-grid"></div>
+
+  <script>
+    const candidates = [
+      {
+        id: 'opt1_perfect_pin',
+        title: 'Wariant A: Klasyczny Pin Dopracowany (Cutout + Połysk)',
+        desc: 'Idealnie symetryczna geometria z przezroczystym wycięciem w środku. Posiada subtelny gradient głębi, refleks światła oraz mikro-pierścień wokół otworu. W 100% wierny oryginalnemu motywowi Pastucha, ale wykonany perfekcyjnie wektorowo.',
+        isDefault: true,
+        svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100%" height="100%">
+  <defs>
+    <linearGradient id="opt1-body" x1="25%" y1="0%" x2="75%" y2="100%">
+      <stop offset="0%" stop-color="#FF383D" />
+      <stop offset="45%" stop-color="#E31E24" />
+      <stop offset="100%" stop-color="#A80F14" />
+    </linearGradient>
+    <linearGradient id="opt1-gloss" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.45" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0" />
+    </linearGradient>
+  </defs>
+  <path fill="url(#opt1-body)" stroke="#800D11" stroke-width="1.2" stroke-linejoin="round" fill-rule="evenodd" d="
+    M 50 94
+    C 45.5 81, 20 54.5, 20 36.5
+    A 30 30 0 1 1 80 36.5
+    C 80 54.5, 54.5 81, 50 94 Z
+    M 50 25
+    A 11.5 11.5 0 1 0 50 48
+    A 11.5 11.5 0 1 0 50 25 Z
+  " />
+  <circle cx="50" cy="36.5" r="11.5" fill="none" stroke="#FFFFFF" stroke-width="1" stroke-opacity="0.45" />
+  <path fill="url(#opt1-gloss)" d="
+    M 26 34
+    A 24 24 0 0 1 74 34
+    C 70 20, 60 14, 50 14
+    C 40 14, 30 20, 26 34 Z
+  " />
+</svg>`
+      },
+      {
+        id: 'opt2_white_core',
+        title: 'Wariant B: Nowoczesny Pin GPS (Biały rdzeń telemetryczny)',
+        desc: 'Wyjątkowo czytelny przy 16px! Posiada biały kontrastowy punkt w środku z małym czerwonym okiem celownika. Maksymalna widoczność na ciemnych kartach (Chrome Dark) oraz jasnych.',
+        isDefault: false,
+        svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100%" height="100%">
+  <defs>
+    <linearGradient id="opt2-body" x1="20%" y1="0%" x2="80%" y2="100%">
+      <stop offset="0%" stop-color="#FF3A3F" />
+      <stop offset="50%" stop-color="#E31E24" />
+      <stop offset="100%" stop-color="#A50E13" />
+    </linearGradient>
+  </defs>
+  <path fill="url(#opt2-body)" stroke="#7D0C10" stroke-width="1.2" stroke-linejoin="round" d="
+    M 50 94
+    C 45.5 81, 20 54.5, 20 36.5
+    A 30 30 0 1 1 80 36.5
+    C 80 54.5, 54.5 81, 50 94 Z
+  " />
+  <circle cx="50" cy="36.5" r="11.5" fill="#FFFFFF" />
+  <circle cx="50" cy="36.5" r="5.5" fill="#E31E24" />
+</svg>`
+      },
+      {
+        id: 'opt3_solid_clean',
+        title: 'Wariant C: Czysty Płaski Wektor (Solid Flat Minimal)',
+        desc: 'Klasyczna, czysta forma bez połysków i obrysów. Jednolity, nasycony czerwony #E31E24 z gładkim wycięciem.',
+        isDefault: false,
+        svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100%" height="100%">
+  <path fill="#E31E24" fill-rule="evenodd" d="
+    M 50 94
+    C 45.5 81, 20 54.5, 20 36.5
+    A 30 30 0 1 1 80 36.5
+    C 80 54.5, 54.5 81, 50 94 Z
+    M 50 25
+    A 11.5 11.5 0 1 0 50 48
+    A 11.5 11.5 0 1 0 50 25 Z
+  " />
+</svg>`
+      }
+    ];
+
+    const grid = document.getElementById('variants-grid');
+    candidates.forEach(c => {
+      const card = document.createElement('div');
+      card.className = 'card' + (c.isDefault ? ' active' : '');
+      card.innerHTML = `
+        <div class="card-hdr">
+          <span class="card-title">${c.title}</span>
+          ${c.isDefault ? '<span class="badge-rec">Aktywna</span>' : ''}
+        </div>
+        <div class="desc">${c.desc}</div>
+        <div class="tab-simulation">
+          <div class="tab-bar dark">
+            <div class="tab dark">
+              <div class="tab-icon">${c.svg}</div>
+              <span>NNAPER</span>
+              <span class="tab-close">✕</span>
+            </div>
+            <span style="font-size: 11px; color: #64748b; margin-left: 4px;">Karta ciemna (Chrome/Edge/Firefox)</span>
+          </div>
+          <div class="tab-bar light">
+            <div class="tab light">
+              <div class="tab-icon">${c.svg}</div>
+              <span>NNAPER</span>
+              <span class="tab-close">✕</span>
+            </div>
+            <span style="font-size: 11px; color: #64748b; margin-left: 4px;">Karta jasna</span>
+          </div>
+        </div>
+        <div class="sizes-box">
+          <div class="size-col">
+            <div style="width: 16px; height: 16px;">${c.svg}</div>
+            <span class="size-tag">16px</span>
+          </div>
+          <div class="size-col">
+            <div style="width: 24px; height: 24px;">${c.svg}</div>
+            <span class="size-tag">24px</span>
+          </div>
+          <div class="size-col">
+            <div style="width: 32px; height: 32px;">${c.svg}</div>
+            <span class="size-tag">32px</span>
+          </div>
+          <div class="size-col">
+            <div style="width: 48px; height: 48px;">${c.svg}</div>
+            <span class="size-tag">48px</span>
+          </div>
+          <div class="size-col">
+            <div style="width: 72px; height: 72px;">${c.svg}</div>
+            <span class="size-tag">72px</span>
+          </div>
+          <div class="size-col" style="margin-left: auto;">
+            <div style="width: 100px; height: 100px;">${c.svg}</div>
+            <span class="size-tag">100px</span>
+          </div>
+        </div>
+      `;
+      grid.appendChild(card);
+    });
+  </script>
+</body>
+</html>

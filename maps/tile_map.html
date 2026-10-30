@@ -4,6 +4,9 @@
 <head>
   <meta charset="utf-8" />
   <title>NNAPER</title>
+  <link rel="icon" type="image/svg+xml" href="../assets/pin.svg" />
+  <link rel="alternate icon" type="image/svg+xml" href="pin.svg" />
+  <link rel="shortcut icon" type="image/svg+xml" href="../assets/pin.svg" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
@@ -22,7 +25,10 @@
       </svg>
     </button>
     <div class="menu-header">
-      <h3>Sterowanie Warstwami</h3>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <img src="../assets/pastuch.svg" alt="NNAPER" style="width: 22px; height: 22px; object-fit: contain;" />
+        <h3 style="margin: 0;">Sterowanie Warstwami</h3>
+      </div>
       <div class="panel-actions">
         <button class="action-btn" id="btn-back-location" title="Wróć do poprzedniego widoku">←</button>
         <button class="action-btn" id="btn-close-location" title="Zamknij lokalizację">✕</button>
@@ -43,7 +49,10 @@
       </svg>
     </button>
     <div class="menu-header">
-      <h3>Trasy i Nawigacja</h3>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <img src="../assets/pastuch.svg" alt="NNAPER" style="width: 22px; height: 22px; object-fit: contain;" />
+        <h3 style="margin: 0;">Trasy i Nawigacja</h3>
+      </div>
     </div>
 
     <div class="menu-body">
@@ -249,7 +258,7 @@
     <div class="export-modal">
       <div class="export-header">
         <div class="export-title-row">
-          <span class="export-icon">📥</span>
+          <img src="../assets/pastuch.svg" alt="NNAPER" style="width: 32px; height: 32px; object-fit: contain; margin-right: 6px;" />
           <div>
             <h3>Eksport Trasy</h3>
             <p class="export-subtitle">Wybierz zakres danych, format pliku oraz styl wizualizacji</p>
