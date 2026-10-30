@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS epochs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_epochs_geom ON epochs USING GIST (geom);
+CREATE INDEX IF NOT EXISTS idx_epochs_timestamp ON epochs (timestamp ASC);
 
 CREATE TABLE IF NOT EXISTS satellite (
     satellite_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

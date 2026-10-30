@@ -8,7 +8,7 @@
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
   <script src="https://unpkg.com/pmtiles@3.0.7/dist/pmtiles.js"></script>
-  <link rel="stylesheet" href="styles.css?v=20261029_hudfix2" />
+  <link rel="stylesheet" href="styles.css?v=20261030_export" />
 </head>
 
 <body>
@@ -53,6 +53,9 @@
       <button id="btn-open-planner-menu" class="menu-action-btn">
         Planowanie trasy
       </button>
+      <button id="btn-open-export" class="menu-action-btn" title="Eksportuj trasę do HTML, PNG, SVG, GIF, GPX, CSV, GeoJSON, KML">
+        📥 Eksport trasy
+      </button>
 
       <div class="menu-section-divider"></div>
 
@@ -79,6 +82,7 @@
     <button id="btn-close-playback" type="button" title="Zamknij odtwarzacz i wróć do zwykłej mapy">← Wróć do Mapy</button>
     <label for="playback-date-select" style="font-size: 13px;">Dzień:</label>
     <select id="playback-date-select"><option>Ładowanie dat...</option></select>
+    <button id="btn-playback-export" type="button" title="Eksportuj trasy z tego dnia">📥 Eksportuj</button>
     <label for="playback-sat-view" style="font-size: 13px; margin-left: 10px;">Satelity:</label>
     <select id="playback-sat-view">
       <option value="none">Ukryte</option>
@@ -192,15 +196,167 @@
     <button id="map-context-info">Pokaż informacje o tym miejscu</button>
   </div>
 
+  <!-- Modal Eksportu Trasy -->
+  <div id="export-modal-backdrop" class="export-modal-backdrop" style="display: none;">
+    <div class="export-modal">
+      <div class="export-header">
+        <div class="export-title-row">
+          <span class="export-icon">📥</span>
+          <div>
+            <h3>Eksport Trasy</h3>
+            <p class="export-subtitle">Wybierz zakres danych oraz format pliku do pobrania</p>
+          </div>
+        </div>
+        <button id="btn-close-export" class="export-close-btn" type="button" title="Zamknij">✕</button>
+      </div>
+
+      <div class="export-body">
+        <!-- Krok 1: Zakres danych -->
+        <div class="export-section">
+          <label class="export-section-title">1. Zakres danych:</label>
+          <div class="export-scope-tabs">
+            <button type="button" class="scope-tab active" data-scope="day">Dzień</button>
+            <button type="button" class="scope-tab" data-scope="month">Miesiąc</button>
+            <button type="button" class="scope-tab" data-scope="year">Rok</button>
+            <button type="button" class="scope-tab" data-scope="all">Wszystko</button>
+            <button type="button" class="scope-tab" data-scope="active">Widoczne na mapie</button>
+          </div>
+
+          <div class="export-scope-controls">
+            <div id="export-scope-day-box" class="scope-control-box">
+              <label for="export-sel-day">Wybierz dzień:</label>
+              <select id="export-sel-day" class="export-select"><option>Ładowanie dni...</option></select>
+            </div>
+            <div id="export-scope-month-box" class="scope-control-box" style="display: none;">
+              <div style="display: flex; gap: 10px;">
+                <div style="flex: 1;">
+                  <label for="export-sel-year-m">Rok:</label>
+                  <select id="export-sel-year-m" class="export-select"></select>
+                </div>
+                <div style="flex: 1.5;">
+                  <label for="export-sel-month">Miesiąc:</label>
+                  <select id="export-sel-month" class="export-select"></select>
+                </div>
+              </div>
+            </div>
+            <div id="export-scope-year-box" class="scope-control-box" style="display: none;">
+              <label for="export-sel-year">Wybierz rok:</label>
+              <select id="export-sel-year" class="export-select"></select>
+            </div>
+            <div id="export-scope-all-box" class="scope-control-box" style="display: none;">
+              <span class="scope-info-badge">Eksport obejmie wszystkie trasy zarejestrowane w bazie danych.</span>
+            </div>
+            <div id="export-scope-active-box" class="scope-control-box" style="display: none;">
+              <span class="scope-info-badge">Eksport obejmie dni aktualnie zaznaczone w lewym filtrze warstw.</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Krok 2: Format pliku -->
+        <div class="export-section">
+          <label class="export-section-title">2. Format wyjściowy:</label>
+          <div class="export-formats-grid">
+            <div class="format-card active" data-format="html">
+              <div class="format-card-icon">🌐</div>
+              <div class="format-card-name">HTML</div>
+              <div class="format-card-desc">Interaktywna mapa offline z profilem i odtwarzaczem</div>
+              <span class="format-badge format-badge-rec">Polecane</span>
+            </div>
+            <div class="format-card" data-format="png">
+              <div class="format-card-icon">🖼️</div>
+              <div class="format-card-name">PNG</div>
+              <div class="format-card-desc">Wysokiej rozdzielczości obraz trasy z metrykami HUD</div>
+              <span class="format-badge">Obraz HD</span>
+            </div>
+            <div class="format-card" data-format="svg">
+              <div class="format-card-icon">📐</div>
+              <div class="format-card-name">SVG</div>
+              <div class="format-card-desc">Skalowalna grafika wektorowa z profilem wysokości</div>
+              <span class="format-badge">Wektor</span>
+            </div>
+            <div class="format-card" data-format="gif">
+              <div class="format-card-icon">🎬</div>
+              <div class="format-card-name">GIF</div>
+              <div class="format-card-desc">Animowany GIF z rekonstrukcją przejazdu i licznikiem</div>
+              <span class="format-badge format-badge-anim">Animacja</span>
+            </div>
+            <div class="format-card" data-format="gpx">
+              <div class="format-card-icon">🗺️</div>
+              <div class="format-card-name">GPX</div>
+              <div class="format-card-desc">Standardowy plik wymiany GPS dla Garmin, Strava itp.</div>
+              <span class="format-badge">GPS</span>
+            </div>
+            <div class="format-card" data-format="csv">
+              <div class="format-card-icon">📊</div>
+              <div class="format-card-name">CSV</div>
+              <div class="format-card-desc">Surowe punkty telemetryczne do analizy w Excelu</div>
+              <span class="format-badge">Arkusz</span>
+            </div>
+            <div class="format-card" data-format="geojson">
+              <div class="format-card-icon">🌐</div>
+              <div class="format-card-name">GeoJSON</div>
+              <div class="format-card-desc">Format GIS zgodny ze standardem RFC 7946</div>
+              <span class="format-badge">GIS</span>
+            </div>
+            <div class="format-card" data-format="kml">
+              <div class="format-card-icon">🌍</div>
+              <div class="format-card-name">KML</div>
+              <div class="format-card-desc">Ślad 3D do wizualizacji w Google Earth</div>
+              <span class="format-badge">Google Earth</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Krok 3: Opcje dodatkowe -->
+        <div id="export-options-box" class="export-section">
+          <label class="export-section-title">3. Opcje eksportu:</label>
+          <div class="export-options-list">
+            <label class="export-opt-row" id="opt-color-mode-row">
+              <span>Kolorowanie śladu:</span>
+              <select id="export-opt-color-mode" class="export-select-sm">
+                <option value="speed" selected>Według prędkości (gradient)</option>
+                <option value="altitude">Według wysokości (gradient)</option>
+                <option value="single">Jednolity błękit (#06b6d4)</option>
+              </select>
+            </label>
+            <label class="export-opt-row" id="opt-gif-speed-row" style="display: none;">
+              <span>Tempo animacji GIF:</span>
+              <select id="export-opt-gif-speed" class="export-select-sm">
+                <option value="normal" selected>Normalne (płynny przejazd)</option>
+                <option value="fast">Szybkie (skrót trasy)</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <!-- Pasek postępu / status -->
+        <div id="export-status-box" style="display: none;">
+          <div class="export-status-text" id="export-status-text">Generowanie...</div>
+          <div class="export-progress-bar">
+            <div class="export-progress-fill" id="export-progress-fill" style="width: 0%;"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="export-footer">
+        <button id="btn-cancel-export" class="export-btn-secondary" type="button">Anuluj</button>
+        <button id="btn-do-export" class="export-btn-primary" type="button">
+          <span class="btn-export-icon">📥</span> Pobierz plik
+        </button>
+      </div>
+    </div>
+  </div>
+
   <div id="map"></div>
 
   <script src="runtime-config.js"></script>
   <script src="runtime-config.local.js"></script>
   <script src="layers.js?v=20261029_integrated"></script>
   <script src="layer-manager.js?v=20261029_integrated"></script>
-  <script src="app.js?v=20261029_hudfix2"></script>
-  <script src="playback-inline.js?v=20261029_hudfix2"></script>
+  <script src="app.js?v=20261030_export"></script>
+  <script src="playback-inline.js?v=20261030_export"></script>
   <script src="route-inline.js?v=20261029_playbackintegrated"></script>
+  <script src="export-manager.js?v=20261030_export"></script>
 </body>
 
 </html>

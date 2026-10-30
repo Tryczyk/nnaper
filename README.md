@@ -50,6 +50,16 @@ Aplikacja do przetwarzania i analizy danych lokalizacyjnych GPS w formacie **NME
 
    * Skrypt generuje samodzielne, interaktywne wykresy HTML w bibliotece Plotly (m.in. trójwymiarowy rozkład przeciążeń akcelerometru 3D, biegunowy skyplot satelitów, histogramy prędkości i kursów, analiza parametrów DOP).
 
+6. **Zaawansowany eksport tras (`maps/export-manager.js`):**
+
+   * Eksport z dowolnego zakresu czasowego: wybrany dzień, miesiąc, rok, aktywne filtry lub cała baza danych ("wszystko").
+   * Obsługa wielu formatów:
+     * **HTML**: Samodzielna interaktywna mapa offline ze śladem, profilem wysokości i prędkości oraz mini-odtwarzaczem.
+     * **PNG**: Wyrenderowany obraz HD ze śladem pokolorowanym prędkością, statystykami trasy i legendą.
+     * **SVG**: Czysty wektor o nieskończonej rozdzielczości z gradientem i profilem trasy.
+     * **GIF**: Płynna animacja rekonstrukcji przejazdu pojazdu z licznikiem parametrów w czasie rzeczywistym.
+     * **GPX / CSV / GeoJSON / KML**: Standardowe formaty do analizy w arkuszach lub importu do Garmin, Strava i Google Earth.
+
 ## Struktura projektu
 
 ```
