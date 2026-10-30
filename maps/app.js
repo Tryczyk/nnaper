@@ -293,15 +293,6 @@ async function buildInlineTimeFilter(container) {
       const yearNode = document.createElement('div');
       yearNode.className = 'tree-node';
       const yearHeader = createFilterTreeNode(`Rok: ${year}`, false, true);
-      const btnExpYear = document.createElement('button');
-      btnExpYear.className = 'btn-tree-export';
-      btnExpYear.innerHTML = '📥';
-      btnExpYear.title = `Eksportuj rok ${year}`;
-      btnExpYear.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (window.ExportManager) window.ExportManager.exportScope('year', year);
-      });
-      yearHeader.element.querySelector('.node-label')?.appendChild(btnExpYear);
       const yearChildren = document.createElement('div');
       yearChildren.className = 'node-children collapsed';
       yearChildren.style.marginLeft = '8px';
@@ -315,15 +306,6 @@ async function buildInlineTimeFilter(container) {
         monthNode.className = 'tree-node';
         const monthName = MONTH_NAMES[month] || month;
         const monthHeader = createFilterTreeNode(`Miesiąc: ${monthName} (${month})`, false, true);
-        const btnExpMonth = document.createElement('button');
-        btnExpMonth.className = 'btn-tree-export';
-        btnExpMonth.innerHTML = '📥';
-        btnExpMonth.title = `Eksportuj miesiąc ${year}-${month}`;
-        btnExpMonth.addEventListener('click', (e) => {
-          e.stopPropagation();
-          if (window.ExportManager) window.ExportManager.exportScope('month', `${year}-${month}`);
-        });
-        monthHeader.element.querySelector('.node-label')?.appendChild(btnExpMonth);
         const monthChildren = document.createElement('div');
         monthChildren.className = 'node-children collapsed';
         monthChildren.style.marginLeft = '8px';
@@ -359,25 +341,27 @@ async function buildInlineTimeFilter(container) {
           const dayLabel = document.createElement('span');
           dayLabel.innerText = `Dzień: ${day}`;
 
-          const btnExpDay = document.createElement('button');
-          btnExpDay.className = 'btn-tree-export';
-          btnExpDay.innerHTML = '📥';
-          btnExpDay.title = `Eksportuj dzień ${dateStr}`;
-          btnExpDay.style.marginLeft = 'auto';
-          btnExpDay.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (window.ExportManager) window.ExportManager.exportScope('day', dateStr);
-          });
 
-          leaf.style.display = 'flex';
-          leaf.style.alignItems = 'center';
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
 
           leaf.appendChild(dayCheckbox);
           leaf.appendChild(dayLabel);
-          leaf.appendChild(btnExpDay);
           monthChildren.appendChild(leaf);
         });
 

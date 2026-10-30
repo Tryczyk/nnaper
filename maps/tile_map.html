@@ -8,7 +8,7 @@
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
   <script src="https://unpkg.com/pmtiles@3.0.7/dist/pmtiles.js"></script>
-  <link rel="stylesheet" href="styles.css?v=20261030_export" />
+  <link rel="stylesheet" href="styles.css?v=20261030_export_v3" />
 </head>
 
 <body>
@@ -53,7 +53,7 @@
       <button id="btn-open-planner-menu" class="menu-action-btn">
         Planowanie trasy
       </button>
-      <button id="btn-open-export" class="menu-action-btn" title="Eksportuj trasę do HTML, PNG, SVG, GIF, GPX, CSV, GeoJSON, KML">
+      <button id="btn-open-export" class="menu-action-btn" title="Otwórz panel eksportu trasy (HTML, PNG, SVG, GIF, GPX, CSV, GeoJSON, KML)">
         📥 Eksport trasy
       </button>
 
@@ -82,7 +82,6 @@
     <button id="btn-close-playback" type="button" title="Zamknij odtwarzacz i wróć do zwykłej mapy">← Wróć do Mapy</button>
     <label for="playback-date-select" style="font-size: 13px;">Dzień:</label>
     <select id="playback-date-select"><option>Ładowanie dat...</option></select>
-    <button id="btn-playback-export" type="button" title="Eksportuj trasy z tego dnia">📥 Eksportuj</button>
     <label for="playback-sat-view" style="font-size: 13px; margin-left: 10px;">Satelity:</label>
     <select id="playback-sat-view">
       <option value="none">Ukryte</option>
@@ -96,11 +95,12 @@
     <div class="hud-row"><span class="hud-label">Godzina:</span><span id="playback-hud-time" class="hud-val">--:--:--</span></div>
     <div class="hud-row"><span class="hud-label">Prędkość:</span><span id="playback-hud-speed" class="hud-val">0.0 km/h</span></div>
     <div class="hud-row"><span class="hud-label">Wysokość:</span><span id="playback-hud-altitude" class="hud-val">-- m</span></div>
-    <div class="hud-row"><span class="hud-label">Przeciążenie X:</span><span id="playback-hud-gx" class="hud-val">--</span></div>
-    <div class="hud-row"><span class="hud-label">Przeciążenie Y:</span><span id="playback-hud-gy" class="hud-val">--</span></div>
-    <div class="hud-row"><span class="hud-label">Przeciążenie Z:</span><span id="playback-hud-gz" class="hud-val">--</span></div>
     <div class="hud-row"><span class="hud-label">Dystans dnia:</span><span id="playback-hud-dist" class="hud-val">0.0 km</span></div>
     <div class="hud-row"><span class="hud-label">Śr. prędkość:</span><span id="playback-hud-avg-speed" class="hud-val">0.0 km/h</span></div>
+    <div id="playback-hud-gg-box" style="margin-top: 8px; padding-top: 6px; border-top: 1px solid #1e293b; display: flex; flex-direction: column; align-items: center;">
+      <div style="font-size: 9px; text-transform: uppercase; color: #64748b; font-weight: 700; margin-bottom: 4px; letter-spacing: 0.4px;">Akcelerometr (G-G)</div>
+      <canvas id="playback-hud-gg-canvas" width="80" height="80" style="background: #090d16; border-radius: 50%; border: 1px solid #334155; box-shadow: inset 0 0 8px rgba(0,0,0,0.8);"></canvas>
+    </div>
   </div>
 
   <div id="playback-bottom-controls" style="display: none;">
@@ -111,15 +111,13 @@
         <span id="playback-hud-progress-info" style="font-size: 12px; color: #94a3b8;">0 / 0 epok</span>
       </div>
       <div class="ctrl-right">
-        <span style="font-size: 12px;">Tempo:</span>
-        <select id="playback-speed-multiplier" style="background:#1e293b; color:#fff; border:1px solid #475569; padding:4px 8px; border-radius:4px;">
-          <option value="1">1x (Real-time)</option>
-          <option value="2">2x</option>
-          <option value="5">5x</option>
-          <option value="10">10x</option>
-          <option value="30">30x</option>
-          <option value="60" selected>60x</option>
-        </select>
+        <span style="font-size: 12px; color: #94a3b8;">Tempo:</span>
+        <div style="display:inline-flex; align-items:center; background:#1e293b; border:1px solid #475569; border-radius:6px; padding:2px 6px;">
+          <input type="number" id="playback-speed-multiplier" min="0.1" max="1000" step="any" value="60"
+            style="background:transparent; color:#38bdf8; border:none; width:48px; text-align:center; font-size:12px; font-weight:bold; outline:none;"
+            title="Wpisz dowolną prędkość odtwarzania z ręki (np. 1, 15, 60, 100)" />
+          <span style="font-size:11px; color:#94a3b8; font-weight:bold;">x</span>
+        </div>
         <label style="font-size: 12px; display: flex; align-items: center; gap: 4px; cursor: pointer;">
           <input type="checkbox" id="chk-playback-follow" checked style="accent-color: #38bdf8;" /> Śledź kamerą
         </label>
@@ -204,7 +202,7 @@
           <span class="export-icon">📥</span>
           <div>
             <h3>Eksport Trasy</h3>
-            <p class="export-subtitle">Wybierz zakres danych oraz format pliku do pobrania</p>
+            <p class="export-subtitle">Wybierz zakres danych, format pliku oraz styl wizualizacji</p>
           </div>
         </div>
         <button id="btn-close-export" class="export-close-btn" type="button" title="Zamknij">✕</button>
@@ -252,14 +250,14 @@
           </div>
         </div>
 
-        <!-- Krok 2: Format pliku -->
+        <!-- Krok 2: Format wyjściowy -->
         <div class="export-section">
           <label class="export-section-title">2. Format wyjściowy:</label>
           <div class="export-formats-grid">
             <div class="format-card active" data-format="html">
               <div class="format-card-icon">🌐</div>
               <div class="format-card-name">HTML</div>
-              <div class="format-card-desc">Interaktywna mapa offline z profilem i odtwarzaczem</div>
+              <div class="format-card-desc">Interaktywna mapa offline z odtwarzaczem</div>
               <span class="format-badge format-badge-rec">Polecane</span>
             </div>
             <div class="format-card" data-format="png">
@@ -271,7 +269,7 @@
             <div class="format-card" data-format="svg">
               <div class="format-card-icon">📐</div>
               <div class="format-card-name">SVG</div>
-              <div class="format-card-desc">Skalowalna grafika wektorowa z profilem wysokości</div>
+              <div class="format-card-desc">Skalowalna grafika wektorowa bezstratna</div>
               <span class="format-badge">Wektor</span>
             </div>
             <div class="format-card" data-format="gif">
@@ -309,23 +307,42 @@
 
         <!-- Krok 3: Opcje dodatkowe -->
         <div id="export-options-box" class="export-section">
-          <label class="export-section-title">3. Opcje eksportu:</label>
+          <label class="export-section-title">3. Opcje stylu i wykresów:</label>
           <div class="export-options-list">
-            <label class="export-opt-row" id="opt-color-mode-row">
+            <div class="export-opt-row" id="opt-color-mode-row">
               <span>Kolorowanie śladu:</span>
-              <select id="export-opt-color-mode" class="export-select-sm">
-                <option value="speed" selected>Według prędkości (gradient)</option>
-                <option value="altitude">Według wysokości (gradient)</option>
-                <option value="single">Jednolity błękit (#06b6d4)</option>
-              </select>
-            </label>
-            <label class="export-opt-row" id="opt-gif-speed-row" style="display: none;">
-              <span>Tempo animacji GIF:</span>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <select id="export-opt-color-mode" class="export-select-sm">
+                  <option value="speed" selected>Według prędkości (gradient)</option>
+                  <option value="altitude">Według wysokości (gradient)</option>
+                  <option value="single">Jednolity kolor</option>
+                </select>
+                <input type="color" id="export-opt-single-color" value="#06b6d4" class="color-picker" style="display: none;" title="Wybierz kolor śladu" />
+              </div>
+            </div>
+            <div class="export-opt-row" id="opt-chart-row">
+              <span>Profil wysokości:</span>
+              <label class="sidebar-chk-label" title="Dołącz profil wysokości n.p.m. z oznaczonym punktem MIN i MAX">
+                <input type="checkbox" id="export-opt-include-chart" checked />
+                <span>Dołącz profil wysokości (z Min/Max)</span>
+              </label>
+            </div>
+            <div class="export-opt-row" id="opt-gforce-row">
+              <span>Wykres przeciążeń:</span>
+              <label class="sidebar-chk-label" title="Dołącz interaktywny wykres przeciążeń Gx, Gy, Gz oraz wskaźnik G-G w pliku HTML">
+                <input type="checkbox" id="export-opt-include-gforce" checked />
+                <span>Dołącz wykres przeciążeń G (Gx, Gy, Gz)</span>
+              </label>
+            </div>
+
+            <div class="export-opt-row" id="opt-gif-speed-row" style="display: none;">
+              <span>Płynność i klatki GIF:</span>
               <select id="export-opt-gif-speed" class="export-select-sm">
-                <option value="normal" selected>Normalne (płynny przejazd)</option>
-                <option value="fast">Szybkie (skrót trasy)</option>
+                <option value="smooth" selected>Płynna (60 klatek, ~4 s)</option>
+                <option value="hd">Maksymalna płynność (90 klatek, ~5 s)</option>
+                <option value="fast">Krótka (40 klatek, ~2 s)</option>
               </select>
-            </label>
+            </div>
           </div>
         </div>
 
@@ -354,9 +371,9 @@
   <script src="layers.js?v=20261029_integrated"></script>
   <script src="layer-manager.js?v=20261029_integrated"></script>
   <script src="app.js?v=20261030_export"></script>
-  <script src="playback-inline.js?v=20261030_export"></script>
+  <script src="playback-inline.js?v=20261030_ggmeter"></script>
   <script src="route-inline.js?v=20261029_playbackintegrated"></script>
-  <script src="export-manager.js?v=20261030_export"></script>
+  <script src="export-manager.js?v=20261030_gifsmooth_minmax"></script>
 </body>
 
 </html>

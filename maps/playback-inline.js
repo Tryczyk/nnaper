@@ -257,8 +257,84 @@
       m.easeTo({ center: [pt.lon, pt.lat], duration: 50 });
     }
 
+    drawPlaybackHudGG(pt);
     updateSatellitesDisplay(pt);
   }
+  function drawPlaybackHudGG(pt) {
+    const hudCanvas = document.getElementById('playback-hud-gg-canvas');
+    if (!hudCanvas) return;
+    const ctx = hudCanvas.getContext('2d');
+    const W = hudCanvas.width, H = hudCanvas.height;
+    const cx = W / 2, cy = H / 2;
+    const r = 31;
+
+    ctx.fillStyle = '#090d16';
+    ctx.fillRect(0, 0, W, H);
+
+    // Okręgi 0.5G i 1.0G
+    ctx.strokeStyle = '#1e293b';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r * 0.5, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.strokeStyle = '#334155';
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Krzyżyk środka
+    ctx.strokeStyle = '#1e293b';
+    ctx.beginPath();
+    ctx.moveTo(cx - r, cy); ctx.lineTo(cx + r, cy);
+    ctx.moveTo(cx, cy - r); ctx.lineTo(cx, cy + r);
+    ctx.stroke();
+
+    // Oznaczenia bez cyfr
+    ctx.fillStyle = '#64748b';
+    ctx.font = '7.5px ui-monospace, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText('ACC', cx, 2);
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('BRK', cx, H - 2);
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    ctx.fillText('L', 3, cy);
+    ctx.textAlign = 'right';
+    ctx.fillText('R', W - 3, cy);
+
+    // Bieżący wektor przeciążenia
+    if (pt && pt.g_x !== null && pt.g_x !== undefined && pt.g_y !== null && pt.g_y !== undefined) {
+      const maxScale = 1.2;
+      const gx = Math.max(-maxScale, Math.min(maxScale, Number(pt.g_x)));
+      const gy = Math.max(-maxScale, Math.min(maxScale, Number(pt.g_y)));
+
+      const dotX = cx + (gy / maxScale) * r;
+      const dotY = cy - (gx / maxScale) * r;
+
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.4)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(dotX, dotY);
+      ctx.stroke();
+
+      const grad = ctx.createRadialGradient(dotX, dotY, 1, dotX, dotY, 6);
+      grad.addColorStop(0, '#38bdf8');
+      grad.addColorStop(1, 'rgba(56, 189, 248, 0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(dotX, dotY, 6, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(dotX, dotY, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
 
   async function loadDates() {
     if (!dateSelect) return;
@@ -396,7 +472,8 @@
     const deltaWallClock = now - lastWallClockTime;
     lastWallClockTime = now;
 
-    const mult = speedMultiplier ? parseFloat(speedMultiplier.value) : 60;
+    const parsedMult = speedMultiplier ? parseFloat(speedMultiplier.value) : 60;
+    const mult = (!isNaN(parsedMult) && parsedMult > 0) ? parsedMult : 60;
     virtualTime += deltaWallClock * mult;
 
     let targetIndex = currentIndex;
@@ -544,6 +621,17 @@
     dateSelect.addEventListener('change', (e) => {
       loadTrackForDay(e.target.value);
     });
+  }
+
+  if (speedMultiplier) {
+    const onSpeedChange = () => {
+      lastWallClockTime = performance.now();
+      if (trackData[currentIndex]) {
+        virtualTime = new Date(trackData[currentIndex].timestamp).getTime();
+      }
+    };
+    speedMultiplier.addEventListener('input', onSpeedChange);
+    speedMultiplier.addEventListener('change', onSpeedChange);
   }
 
   if (satViewSelect) {
