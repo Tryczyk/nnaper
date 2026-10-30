@@ -6,14 +6,14 @@
  * 2. Pełny panel eksportu (modal) z zakresem (Dzień, Miesiąc, Rok, Wszystko, Widoczne na mapie)
  *    oraz formatami wyjściowymi (HTML, PNG, SVG, GIF, GPX, CSV, GeoJSON, KML).
  * 3. Obsługa 3 trybów kolorowania śladu:
- *    - "speed" (ciągły 8-stopniowy gradient prędkości od 0 do 170+ km/h)
+ *    - "speed" (ciągły 8-stopniowy dynamiczny gradient prędkości od 0 do Vmax trasy)
  *    - "altitude" (ciągły gradient topograficzny wysokości od minAlt do maxAlt)
  *    - "single" (jednolity kolor z próbnikiem color picker umożliwiającym wybór dowolnego koloru)
  * 4. Całkowite usunięcie oznaczeń "Start" i "Meta".
  * 5. Całkowite usunięcie profilu prędkości.
  * 6. Profil wysokości dołączany tylko przy krótkich trasach (<= 60 km) w obrębie 1 dnia.
  * 7. Segmentacja tras (splitIntoContiguousSegments) zapobiegająca łączeniu długich przerw/postojów prostą linią.
- * 8. Sanityzacja prędkości (cleanAndSanitizeSpeeds) eliminująca fałszywe piki GPS i stabilizująca Vmax wokół ~170 km/h.
+ * 8. Sanityzacja prędkości (cleanAndSanitizeSpeeds) eliminująca wartości ujemne oraz piki GPS powyżej 500 km/h.
  */
 
 (function () {
@@ -226,15 +226,16 @@
   // -------------------------------------------------------------
   // 2. PALETY KOLORÓW I GRADIENTY (PRĘDKOŚĆ, WYSOKOŚĆ, JEDNOLITY)
   // -------------------------------------------------------------
-  const SPEED_STOPS = [
-    { spd: 0,   r: 6,   g: 182, b: 212 }, // #06b6d4 Cyan
-    { spd: 25,  r: 20,  g: 184, b: 166 }, // #14b8a6 Teal
-    { spd: 50,  r: 34,  g: 197, b: 94  }, // #22c55e Green
-    { spd: 75,  r: 132, g: 204, b: 22  }, // #84cc16 Lime
-    { spd: 95,  r: 234, g: 179, b: 8   }, // #eab308 Yellow
-    { spd: 115, r: 249, g: 115, b: 22  }, // #f97316 Orange
-    { spd: 135, r: 239, g: 68,  b: 68  }, // #ef4444 Red
-    { spd: 165, r: 225, g: 29,  b: 72  }  // #e11d48 Crimson
+  const SPEED_PALETTE = [
+    { pct: 0.00, r: 6,   g: 182, b: 212 }, // #06b6d4 Głęboki cyjan (0 km/h, postój)
+    { pct: 0.08, r: 14,  g: 165, b: 233 }, // #0ea5e9 Błękit / toczenie (10 km/h)
+    { pct: 0.18, r: 16,  g: 185, b: 129 }, // #10b981 Szmaragd / strefy tempo 30 (25-30 km/h)
+    { pct: 0.32, r: 34,  g: 197, b: 94  }, // #22c55e Soczysta zieleń (miasto 50 km/h)
+    { pct: 0.48, r: 132, g: 204, b: 22  }, // #84cc16 Limonka (arterie miejskie 60-70 km/h)
+    { pct: 0.64, r: 234, g: 179, b: 8   }, // #eab308 Ciepły żółty (drogi krajowe 80-90 km/h)
+    { pct: 0.78, r: 249, g: 115, b: 22  }, // #f97316 Pomarańcz (drogi ekspresowe 100-110 km/h)
+    { pct: 0.90, r: 239, g: 68,  b: 68  }, // #ef4444 Czerwień (autostrady 120-130 km/h)
+    { pct: 1.00, r: 225, g: 29,  b: 72  }  // #e11d48 Karmazyn (Vmax, 140+ km/h)
   ];
 
   const ALTITUDE_STOPS = [
@@ -254,20 +255,25 @@
     return [(num >> 16) & 255, (num >> 8) & 255, num & 255];
   }
 
-  function getSpeedRgb(spd) {
-    const clamped = Math.max(0, Math.min(165, Number(spd) || 0));
-    for (let i = 0; i < SPEED_STOPS.length - 1; i++) {
-      const s0 = SPEED_STOPS[i];
-      const s1 = SPEED_STOPS[i + 1];
-      if (clamped >= s0.spd && clamped <= s1.spd) {
-        const factor = (clamped - s0.spd) / (s1.spd - s0.spd);
+  function getSpeedRgb(spd, maxSpeed) {
+    const maxV = Math.max(10, Number(maxSpeed) || 100);
+    const validSpd = (spd !== null && spd !== undefined && !isNaN(Number(spd))) ? Number(spd) : 0;
+    const ratio = Math.max(0, Math.min(1.0, validSpd / maxV));
+    // Perceptualna krzywa gamma (0.85) rozszerza pasma prędkości miejskich i podmiejskich (30-80 km/h),
+    // zapobiegając dominacji błękitu przy dużych Vmax w zbiorczych zakresach (np. "wszystko").
+    const clamped = Math.pow(ratio, 0.85);
+    for (let i = 0; i < SPEED_PALETTE.length - 1; i++) {
+      const s0 = SPEED_PALETTE[i];
+      const s1 = SPEED_PALETTE[i + 1];
+      if (clamped >= s0.pct && clamped <= s1.pct) {
+        const factor = (clamped - s0.pct) / (s1.pct - s0.pct);
         const r = Math.round(s0.r + (s1.r - s0.r) * factor);
         const g = Math.round(s0.g + (s1.g - s0.g) * factor);
         const b = Math.round(s0.b + (s1.b - s0.b) * factor);
         return [r, g, b];
       }
     }
-    const last = SPEED_STOPS[SPEED_STOPS.length - 1];
+    const last = SPEED_PALETTE[SPEED_PALETTE.length - 1];
     return [last.r, last.g, last.b];
   }
 
@@ -295,11 +301,12 @@
   function getTrackRgb(pt, options, stats) {
     const mode = options?.colorMode || 'speed';
     if (mode === 'altitude') {
-      return getAltitudeRgb(pt.altitude, stats.minAlt, stats.maxAlt);
+      return getAltitudeRgb(pt.altitude, stats?.minAlt, stats?.maxAlt);
     } else if (mode === 'single') {
       return hexToRgb(options?.singleColor || '#06b6d4');
     } else {
-      return getSpeedRgb(pt.speed_kmh || 0);
+      const spd = (pt.color_speed !== undefined ? pt.color_speed : pt.speed_kmh) || 0;
+      return getSpeedRgb(spd, stats?.maxSpeedKmh);
     }
   }
 
@@ -317,6 +324,7 @@
   // 3. STATYSTYKI, FILTROWANIE I SEGMENTACJA TRASY
   // -------------------------------------------------------------
   function haversineDistanceKm(lat1, lon1, lat2, lon2) {
+    if (lat1 === lat2 && lon1 === lon2) return 0;
     const R = 6371.0;
     const dLat = (lat2 - lat1) * Math.PI / 180;
     const dLon = (lon2 - lon1) * Math.PI / 180;
@@ -329,21 +337,158 @@
   function cleanAndSanitizeSpeeds(points) {
     if (!points || !points.length) return;
 
+    // 1. Podstawowe oczyszczenie wartości ujemnych
     for (let i = 0; i < points.length; i++) {
       let spd = Number(points[i].speed_kmh) || 0;
       if (spd < 0) spd = 0;
-      if (spd > 260) spd = 260;
       points[i].speed_kmh = spd;
     }
 
-    // Filtr pojedynczych nierealistycznych szpilek GPS (np. natychmiastowy skok o >80 km/h powyżej 190 km/h z natychmiastowym spadkiem)
-    for (let i = 1; i < points.length - 1; i++) {
-      const prevSpd = points[i - 1].speed_kmh;
-      const currSpd = points[i].speed_kmh;
-      const nextSpd = points[i + 1].speed_kmh;
+    // 2. Dwufazowy filtr szpilek i nierealistycznych skoków prędkości (haversine position jitter)
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = 0; i < points.length; i++) {
+        const curr = points[i].speed_kmh;
+        const prev = i > 0 ? points[i - 1].speed_kmh : curr;
+        const next = i < points.length - 1 ? points[i + 1].speed_kmh : curr;
+        const neighborAvg = (prev + next) / 2;
 
-      if (currSpd > 190 && (currSpd - prevSpd > 80) && (currSpd - nextSpd > 80)) {
-        points[i].speed_kmh = (prevSpd + nextSpd) / 2;
+        // Anomalia: prędkość skokowa powyżej 180 km/h niepoparta ciągłą jazdą w otoczeniu
+        if (curr > 180 && (prev < 150 || next < 150)) {
+          points[i].speed_kmh = (prev < 150 && next < 150) ? neighborAvg : (prev < 150 ? prev : next);
+          continue;
+        }
+
+        // Szpilka: prędkość skacze o >35 km/h powyżej obu bezpośrednich sąsiadów
+        if (curr > Math.max(prev, next) + 35) {
+          points[i].speed_kmh = neighborAvg;
+        }
+      }
+    }
+
+    // 3. Bezwzględny sufit fizyczny (eliminacja jakichkolwiek artefaktów > 200 km/h)
+    for (let i = 0; i < points.length; i++) {
+      if (points[i].speed_kmh > 200) {
+        points[i].speed_kmh = 200;
+      }
+    }
+  }
+
+  // Inteligentna kompresja punktów postoju dla zbiorczych zakresów (wszystko/rok/miesiąc)
+  function optimizePointsForExport(points, scope) {
+    if (!points || points.length < 5000 || scope === 'day') {
+      return points;
+    }
+
+    const out = [points[0]];
+    let stationaryCount = 0;
+
+    for (let i = 1; i < points.length; i++) {
+      const prev = out[out.length - 1];
+      const curr = points[i];
+
+      const dLat = Math.abs(curr.lat - prev.lat);
+      const dLon = Math.abs(curr.lon - prev.lon);
+      const isStationary = (curr.speed_kmh < 1.0) && (dLat < 0.00008 && dLon < 0.00008);
+
+      if (isStationary) {
+        stationaryCount++;
+        // Zachowaj próbkę co 30 punktów postoju lub ostatni punkt tuż przed ruszeniem
+        const next = points[i + 1];
+        const isNextMoving = next && (next.speed_kmh >= 1.0 || Math.abs(next.lat - curr.lat) >= 0.00008);
+        if (stationaryCount % 30 === 0 || isNextMoving || i === points.length - 1) {
+          out.push(curr);
+        }
+      } else {
+        stationaryCount = 0;
+        out.push(curr);
+      }
+    }
+    return out;
+  }
+
+  // Przestrzenna agregacja prędkości dla nakładających się przejazdów tą samą drogą
+  function computeLocationSpeeds(points, mode = 'max') {
+    if (!points || points.length === 0) return;
+    if (mode === 'last') {
+      for (let i = 0; i < points.length; i++) {
+        points[i].color_speed = points[i].speed_kmh || 0;
+      }
+      return;
+    }
+
+    const midLat = points[0].lat;
+    const cosLat = Math.cos(midLat * Math.PI / 180);
+    // Komórka siatki przestrzennej ~45-50m (zamiast 25m), co w oknie sąsiadów 3x3 daje korytarz ~150m.
+    // Pozwala to prawidłowo łączyć wielokrotne przejazdy po wielopasmowych drogach, skrzyżowaniach i rondach.
+    const cellLat = 0.00045;
+    const cellLon = cellLat / Math.max(0.1, cosLat);
+    const grid = new Map();
+
+    // 1. Przypisz prędkości punktów do komórek siatki
+    for (let i = 0; i < points.length; i++) {
+      const p = points[i];
+      const ci = Math.floor(p.lat / cellLat);
+      const cj = Math.floor(p.lon / cellLon);
+      const key = ci + '_' + cj;
+      let cell = grid.get(key);
+      if (!cell) {
+        cell = { ci, cj, speeds: [] };
+        grid.set(key, cell);
+      }
+      cell.speeds.push(p.speed_kmh || 0);
+    }
+
+    // 2. Prekomputacja Vmax i Vavg dla każdej komórki
+    for (const cell of grid.values()) {
+      let maxS = 0;
+      let sumMoving = 0;
+      let countMoving = 0;
+      let sumAll = 0;
+
+      for (let s = 0; s < cell.speeds.length; s++) {
+        const spd = cell.speeds[s];
+        if (spd > maxS) maxS = spd;
+        sumAll += spd;
+        if (spd >= 2.0) {
+          sumMoving += spd;
+          countMoving++;
+        }
+      }
+
+      cell.maxSpeed = maxS;
+      cell.avgSpeed = countMoving > 0 ? (sumMoving / countMoving) : (sumAll / Math.max(1, cell.speeds.length));
+    }
+
+    // 3. Oblicz prędkość wizualną każdego punktu z otoczenia sąsiadów 3x3 komórek (~30m)
+    for (let i = 0; i < points.length; i++) {
+      const p = points[i];
+      const ci = Math.floor(p.lat / cellLat);
+      const cj = Math.floor(p.lon / cellLon);
+
+      if (mode === 'max') {
+        let maxV = p.speed_kmh || 0;
+        for (let di = -1; di <= 1; di++) {
+          for (let dj = -1; dj <= 1; dj++) {
+            const neighbor = grid.get((ci + di) + '_' + (cj + dj));
+            if (neighbor && neighbor.maxSpeed > maxV) {
+              maxV = neighbor.maxSpeed;
+            }
+          }
+        }
+        p.color_speed = maxV;
+      } else if (mode === 'avg') {
+        let sumV = 0;
+        let countV = 0;
+        for (let di = -1; di <= 1; di++) {
+          for (let dj = -1; dj <= 1; dj++) {
+            const neighbor = grid.get((ci + di) + '_' + (cj + dj));
+            if (neighbor) {
+              sumV += neighbor.avgSpeed;
+              countV++;
+            }
+          }
+        }
+        p.color_speed = countV > 0 ? (sumV / countV) : (p.speed_kmh || 0);
       }
     }
   }
@@ -353,16 +498,17 @@
     const segments = [];
     let currentSeg = [points[0]];
 
+    let prevTime = points[0].timestamp ? Date.parse(points[0].timestamp) : NaN;
+    let prevDate = points[0].timestamp ? points[0].timestamp.slice(0, 10) : '';
+
     for (let i = 1; i < points.length; i++) {
       const prev = points[i - 1];
       const curr = points[i];
 
-      const tPrev = new Date(prev.timestamp).getTime();
-      const tCurr = new Date(curr.timestamp).getTime();
-      const dtSec = (isNaN(tPrev) || isNaN(tCurr)) ? 0 : Math.abs(tCurr - tPrev) / 1000;
-      const dKm = haversineDistanceKm(prev.lat, prev.lon, curr.lat, curr.lon);
+      const currTime = curr.timestamp ? Date.parse(curr.timestamp) : NaN;
+      const dtSec = (isNaN(prevTime) || isNaN(currTime)) ? 0 : Math.abs(currTime - prevTime) / 1000;
+      const dKm = (prev.lat === curr.lat && prev.lon === curr.lon) ? 0 : haversineDistanceKm(prev.lat, prev.lon, curr.lat, curr.lon);
 
-      const prevDate = prev.timestamp ? prev.timestamp.slice(0, 10) : '';
       const currDate = curr.timestamp ? curr.timestamp.slice(0, 10) : '';
       const dateChanged = prevDate && currDate && prevDate !== currDate;
 
@@ -377,6 +523,9 @@
       } else {
         currentSeg.push(curr);
       }
+
+      prevTime = currTime;
+      prevDate = currDate;
     }
 
     if (currentSeg.length > 0) {
@@ -406,6 +555,8 @@
     let minLon = points[0].lon, maxLon = points[0].lon;
     let sumSpd = 0;
     let minAlt = Infinity, maxAlt = -Infinity;
+    let realisticVmax = 0;
+    const movingSpeeds = [];
 
     for (let i = 0; i < points.length; i++) {
       const p = points[i];
@@ -414,7 +565,10 @@
       if (p.lon < minLon) minLon = p.lon;
       if (p.lon > maxLon) maxLon = p.lon;
 
-      sumSpd += (p.speed_kmh || 0);
+      const s = p.speed_kmh || 0;
+      sumSpd += s;
+      if (s > realisticVmax) realisticVmax = s;
+      if (s > 5.0) movingSpeeds.push(s);
 
       if (p.altitude !== null && p.altitude !== undefined && !isNaN(Number(p.altitude))) {
         const alt = Number(p.altitude);
@@ -423,10 +577,26 @@
       }
     }
 
+    // Zabezpieczenie skali gradientu przed rzadkimi skrajnymi anomaliami w wielotysięcznych zbiorach
+    if (movingSpeeds.length >= 20) {
+      movingSpeeds.sort((a, b) => a - b);
+      const idx995 = Math.min(movingSpeeds.length - 1, Math.floor(movingSpeeds.length * 0.995));
+      const p995 = movingSpeeds[idx995];
+      if (realisticVmax > p995 + 15) {
+        realisticVmax = Math.round(p995 + 5);
+      }
+    }
+    realisticVmax = Math.min(realisticVmax, 200);
+
     const segList = segments || splitIntoContiguousSegments(points);
-    for (const seg of segList) {
+    for (let s = 0; s < segList.length; s++) {
+      const seg = segList[s];
       for (let j = 1; j < seg.length; j++) {
-        dist += haversineDistanceKm(seg[j - 1].lat, seg[j - 1].lon, seg[j].lat, seg[j].lon);
+        const pPrev = seg[j - 1];
+        const pCurr = seg[j];
+        if (pPrev.lat !== pCurr.lat || pPrev.lon !== pCurr.lon) {
+          dist += haversineDistanceKm(pPrev.lat, pPrev.lon, pCurr.lat, pCurr.lon);
+        }
       }
     }
 
@@ -434,25 +604,27 @@
     if (maxAlt === -Infinity) maxAlt = 50;
     if (maxAlt - minAlt < 5) maxAlt = minAlt + 20;
 
-    let realisticVmax = 0;
-    for (let i = 0; i < points.length; i++) {
-      const s = points[i].speed_kmh || 0;
-      if (s > realisticVmax) realisticVmax = s;
-    }
-
     let drivingSeconds = 0;
     let movingSeconds = 0;
 
-    for (const seg of segList) {
+    for (let s = 0; s < segList.length; s++) {
+      const seg = segList[s];
+      if (seg.length < 2) continue;
       let stationaryRunSec = 0;
+      let prevT = seg[0].timestamp ? Date.parse(seg[0].timestamp) : NaN;
+
       for (let j = 1; j < seg.length; j++) {
         const pPrev = seg[j - 1];
         const pCurr = seg[j];
-        const tPrev = new Date(pPrev.timestamp).getTime();
-        const tCurr = new Date(pCurr.timestamp).getTime();
-        if (isNaN(tPrev) || isNaN(tCurr)) continue;
+        const currT = pCurr.timestamp ? Date.parse(pCurr.timestamp) : NaN;
+        if (isNaN(prevT) || isNaN(currT)) {
+          prevT = currT;
+          continue;
+        }
 
-        const dtSec = (tCurr - tPrev) / 1000;
+        const dtSec = (currT - prevT) / 1000;
+        prevT = currT;
+
         // Pomiń przeskoki czasowe większe niż 180s (postój wyłączony, przerwa między podróżami)
         if (dtSec <= 0 || dtSec > 180) continue;
 
@@ -539,7 +711,8 @@
       ctx.beginPath(); ctx.moveTo(60, y); ctx.lineTo(W - 60, y); ctx.stroke();
     }
 
-    const isShortRoute = (stats.totalDistanceKm <= 60 && scopeName === 'day' && options.includeChart !== false);
+    const hasAltitude = points.some(p => p.altitude !== null && p.altitude !== undefined && !isNaN(Number(p.altitude)));
+    const includeElevation = (options.includeChart !== false) && hasAltitude;
 
     const [minLon, minLat, maxLon, maxLat] = stats.bounds;
     const midLat = (minLat + maxLat) / 2;
@@ -548,7 +721,7 @@
     const mapX = 80;
     const mapY = 120;
     const mapW = W - 160;
-    const mapH = isShortRoute ? (H - 320) : (H - 180);
+    const mapH = includeElevation ? (H - 330) : (H - 180);
 
     const spanLon = Math.max(0.0001, (maxLon - minLon) * cosLat);
     const spanLat = Math.max(0.0001, maxLat - minLat);
@@ -582,19 +755,27 @@
 
     // Właściwa trasa z dynamicznym kolorem (speed / altitude / single)
     ctx.lineWidth = 4;
+    const pngLines = [];
     for (const seg of segments) {
       for (let i = 1; i < seg.length; i++) {
         const p0 = seg[i - 1];
         const p1 = seg[i];
         const [x0, y0] = toScreen(p0.lon, p0.lat);
         const [x1, y1] = toScreen(p1.lon, p1.lat);
-
-        ctx.strokeStyle = getTrackColor(p1, options, stats);
-        ctx.beginPath();
-        ctx.moveTo(x0, y0);
-        ctx.lineTo(x1, y1);
-        ctx.stroke();
+        const col = getTrackColor(p1, options, stats);
+        const sortVal = (p1.color_speed !== undefined ? p1.color_speed : p1.speed_kmh) || 0;
+        pngLines.push({ x0, y0, x1, y1, col, sortVal });
       }
+    }
+    // Szybsze odcinki (czerwone) rysowane na wierzchu wolniejszych (zielonych)
+    pngLines.sort((a, b) => a.sortVal - b.sortVal);
+    for (let k = 0; k < pngLines.length; k++) {
+      const line = pngLines[k];
+      ctx.strokeStyle = line.col;
+      ctx.beginPath();
+      ctx.moveTo(line.x0, line.y0);
+      ctx.lineTo(line.x1, line.y1);
+      ctx.stroke();
     }
 
     // Karta informacyjna HUD (brak oznaczeń START i META)
@@ -615,14 +796,14 @@
     ctx.fillText(`Dystans: ${stats.totalDistanceKm.toFixed(2)} km   |   Czas jazdy: ${formatDuration(stats.durationSeconds)}`, 100, 96);
     ctx.fillText(`Śr. prędkość: ${stats.avgSpeedKmh.toFixed(1)} km/h   |   V max: ${stats.maxSpeedKmh.toFixed(1)} km/h`, 100, 120);
 
-    // Profil wysokości wyłącznie dla krótkich tras jednodniowych
-    if (isShortRoute) {
+    // Profil wysokości n.p.m. z oznaczonym MIN i MAX
+    if (includeElevation) {
       const chartX = 80;
-      const chartY = H - 160;
+      const chartY = H - 170;
       const chartW = W - 160;
-      const chartH = 100;
+      const chartH = 120;
 
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
       ctx.strokeStyle = '#334155';
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -631,99 +812,181 @@
       ctx.stroke();
 
       ctx.fillStyle = '#94a3b8';
-      ctx.font = '11px system-ui, sans-serif';
-      ctx.fillText(`Profil wysokości n.p.m. (Min: ${stats.minAlt.toFixed(0)}m, Max: ${stats.maxAlt.toFixed(0)}m)`, chartX + 15, chartY + 20);
+      ctx.font = 'bold 12px system-ui, sans-serif';
+      ctx.fillText('PROFIL WYSOKOŚCI N.P.M.', chartX + 15, chartY + 22);
 
       const altSpan = Math.max(10, stats.maxAlt - stats.minAlt);
-      ctx.strokeStyle = '#38bdf8';
-      ctx.lineWidth = 2;
+      ctx.fillStyle = '#64748b';
+      ctx.font = '11px monospace';
+      ctx.fillText(`(Min: ${stats.minAlt.toFixed(0)}m, Max: ${stats.maxAlt.toFixed(0)}m, Różnica: ${(stats.maxAlt - stats.minAlt).toFixed(0)}m)`, chartX + 190, chartY + 22);
+
+      const plotX = chartX + 15;
+      const plotW = chartW - 30;
+      const plotBottom = chartY + chartH - 18;
+      const plotH = chartH - 48;
+
+      let minAltIdx = 0, maxAltIdx = 0;
+      let minAltVal = Infinity, maxAltVal = -Infinity;
+
+      for (let i = 0; i < points.length; i++) {
+        const alt = (points[i].altitude !== null && points[i].altitude !== undefined && !isNaN(Number(points[i].altitude)))
+          ? Number(points[i].altitude) : stats.minAlt;
+        if (alt < minAltVal) { minAltVal = alt; minAltIdx = i; }
+        if (alt > maxAltVal) { maxAltVal = alt; maxAltIdx = i; }
+      }
+      if (minAltVal === Infinity) minAltVal = stats.minAlt;
+      if (maxAltVal === -Infinity) maxAltVal = stats.maxAlt;
+
+      // Wypełnienie gradientem pod wykresem wysokości
+      const areaGrad = ctx.createLinearGradient(0, chartY + 30, 0, plotBottom);
+      areaGrad.addColorStop(0, 'rgba(56, 189, 248, 0.25)');
+      areaGrad.addColorStop(1, 'rgba(56, 189, 248, 0.02)');
+
       ctx.beginPath();
       for (let i = 0; i < points.length; i++) {
-        const cx = chartX + 15 + (i / Math.max(1, points.length - 1)) * (chartW - 30);
-        const alt = points[i].altitude ?? stats.minAlt;
-        const cy = (chartY + chartH - 15) - ((alt - stats.minAlt) / altSpan) * (chartH - 45);
+        const cx = plotX + (i / Math.max(1, points.length - 1)) * plotW;
+        const alt = (points[i].altitude !== null && points[i].altitude !== undefined && !isNaN(Number(points[i].altitude)))
+          ? Number(points[i].altitude) : stats.minAlt;
+        const cy = plotBottom - ((alt - stats.minAlt) / altSpan) * plotH;
+        if (i === 0) ctx.moveTo(cx, cy);
+        else ctx.lineTo(cx, cy);
+      }
+      ctx.lineTo(plotX + plotW, plotBottom);
+      ctx.lineTo(plotX, plotBottom);
+      ctx.closePath();
+      ctx.fillStyle = areaGrad;
+      ctx.fill();
+
+      // Linia wykresu
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      for (let i = 0; i < points.length; i++) {
+        const cx = plotX + (i / Math.max(1, points.length - 1)) * plotW;
+        const alt = (points[i].altitude !== null && points[i].altitude !== undefined && !isNaN(Number(points[i].altitude)))
+          ? Number(points[i].altitude) : stats.minAlt;
+        const cy = plotBottom - ((alt - stats.minAlt) / altSpan) * plotH;
         if (i === 0) ctx.moveTo(cx, cy);
         else ctx.lineTo(cx, cy);
       }
       ctx.stroke();
+
+      // Punkt MAX (zielony)
+      const maxCx = plotX + (maxAltIdx / Math.max(1, points.length - 1)) * plotW;
+      const maxCy = plotBottom - ((maxAltVal - stats.minAlt) / altSpan) * plotH;
+
+      ctx.beginPath();
+      ctx.arc(maxCx, maxCy, 5, 0, Math.PI * 2);
+      ctx.fillStyle = '#10b981';
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      ctx.fillStyle = '#10b981';
+      ctx.font = 'bold 11px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      const maxLabelY = Math.max(chartY + 36, maxCy - 8);
+      ctx.fillText(`▲ MAX ${maxAltVal.toFixed(0)}m`, maxCx, maxLabelY);
+
+      // Punkt MIN (pomarańczowy)
+      const minCx = plotX + (minAltIdx / Math.max(1, points.length - 1)) * plotW;
+      const minCy = plotBottom - ((minAltVal - stats.minAlt) / altSpan) * plotH;
+
+      ctx.beginPath();
+      ctx.arc(minCx, minCy, 5, 0, Math.PI * 2);
+      ctx.fillStyle = '#f59e0b';
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      ctx.fillStyle = '#f59e0b';
+      ctx.font = 'bold 11px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      const minLabelY = Math.min(plotBottom + 13, minCy + 15);
+      ctx.fillText(`▼ MIN ${minAltVal.toFixed(0)}m`, minCx, minLabelY);
+      ctx.textAlign = 'left';
     }
 
-    // Dynamiczna Legenda w prawym górnym rogu
-    const legX = W - 320;
-    const legY = 40;
-    const legW = 240;
-    const legH = 75;
-
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
-    ctx.strokeStyle = '#334155';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.roundRect(legX, legY, legW, legH, 8);
-    ctx.fill();
-    ctx.stroke();
-
-    const gradW = legW - 30;
+    // Dynamiczna Legenda w prawym górnym rogu (wyłącznie dla trybów gradientowych: prędkość lub wysokość)
     const mode = options.colorMode || 'speed';
+    if (mode !== 'single') {
+      const legX = W - 320;
+      const legY = 40;
+      const legW = 240;
+      const legH = 75;
 
-    if (mode === 'altitude') {
-      ctx.fillStyle = '#94a3b8';
-      ctx.font = 'bold 11px system-ui, sans-serif';
-      ctx.fillText('WYSOKOŚĆ (M N.P.M.)', legX + 15, legY + 22);
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
+      ctx.strokeStyle = '#334155';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(legX, legY, legW, legH, 8);
+      ctx.fill();
+      ctx.stroke();
 
-      const altGrad = ctx.createLinearGradient(legX + 15, 0, legX + 15 + gradW, 0);
-      altGrad.addColorStop(0, '#10b981');
-      altGrad.addColorStop(0.2, '#84cc16');
-      altGrad.addColorStop(0.4, '#eab308');
-      altGrad.addColorStop(0.65, '#f97316');
-      altGrad.addColorStop(0.85, '#ef4444');
-      altGrad.addColorStop(1, '#a855f7');
+      const gradW = legW - 30;
 
-      ctx.fillStyle = altGrad;
-      ctx.fillRect(legX + 15, legY + 34, gradW, 10);
+      if (mode === 'altitude') {
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = 'bold 11px system-ui, sans-serif';
+        ctx.fillText('WYSOKOŚĆ (M N.P.M.)', legX + 15, legY + 22);
 
-      ctx.fillStyle = '#94a3b8';
-      ctx.font = '10px monospace';
-      ctx.fillText(`${stats.minAlt.toFixed(0)}m`, legX + 15, legY + 58);
-      ctx.fillText(`${((stats.minAlt + stats.maxAlt) / 2).toFixed(0)}m`, legX + 15 + gradW * 0.45, legY + 58);
-      ctx.fillText(`${stats.maxAlt.toFixed(0)}m`, legX + 15 + gradW - 35, legY + 58);
+        const altGrad = ctx.createLinearGradient(legX + 15, 0, legX + 15 + gradW, 0);
+        altGrad.addColorStop(0, '#10b981');
+        altGrad.addColorStop(0.2, '#84cc16');
+        altGrad.addColorStop(0.4, '#eab308');
+        altGrad.addColorStop(0.65, '#f97316');
+        altGrad.addColorStop(0.85, '#ef4444');
+        altGrad.addColorStop(1, '#a855f7');
 
-    } else if (mode === 'single') {
-      const sColor = options.singleColor || '#06b6d4';
-      ctx.fillStyle = '#94a3b8';
-      ctx.font = 'bold 11px system-ui, sans-serif';
-      ctx.fillText('KOLOR ŚLADU', legX + 15, legY + 22);
+        ctx.fillStyle = altGrad;
+        ctx.fillRect(legX + 15, legY + 34, gradW, 10);
 
-      ctx.fillStyle = sColor;
-      ctx.fillRect(legX + 15, legY + 34, gradW, 10);
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '10px monospace';
+        ctx.textAlign = 'left';
+        ctx.fillText(`${stats.minAlt.toFixed(0)}m`, legX + 15, legY + 58);
+        ctx.textAlign = 'center';
+        ctx.fillText(`${((stats.minAlt + stats.maxAlt) / 2).toFixed(0)}m`, legX + 15 + gradW * 0.5, legY + 58);
+        ctx.textAlign = 'right';
+        ctx.fillText(`${stats.maxAlt.toFixed(0)}m`, legX + 15 + gradW, legY + 58);
+        ctx.textAlign = 'left';
 
-      ctx.fillStyle = '#cbd5e1';
-      ctx.font = '10px monospace';
-      ctx.fillText(`Jednolity: ${sColor.toUpperCase()}`, legX + 15, legY + 58);
+      } else {
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = 'bold 11px system-ui, sans-serif';
+        ctx.fillText('PRĘDKOŚĆ (KM/H)', legX + 15, legY + 22);
 
-    } else {
-      ctx.fillStyle = '#94a3b8';
-      ctx.font = 'bold 11px system-ui, sans-serif';
-      ctx.fillText('PRĘDKOŚĆ (KM/H)', legX + 15, legY + 22);
+        const barGrad = ctx.createLinearGradient(legX + 15, 0, legX + 15 + gradW, 0);
+        barGrad.addColorStop(0.00, '#06b6d4');
+        barGrad.addColorStop(0.08, '#0ea5e9');
+        barGrad.addColorStop(0.18, '#10b981');
+        barGrad.addColorStop(0.32, '#22c55e');
+        barGrad.addColorStop(0.48, '#84cc16');
+        barGrad.addColorStop(0.64, '#eab308');
+        barGrad.addColorStop(0.78, '#f97316');
+        barGrad.addColorStop(0.90, '#ef4444');
+        barGrad.addColorStop(1.00, '#e11d48');
 
-      const barGrad = ctx.createLinearGradient(legX + 15, 0, legX + 15 + gradW, 0);
-      barGrad.addColorStop(0, '#06b6d4');
-      barGrad.addColorStop(0.2, '#14b8a6');
-      barGrad.addColorStop(0.35, '#22c55e');
-      barGrad.addColorStop(0.5, '#84cc16');
-      barGrad.addColorStop(0.65, '#eab308');
-      barGrad.addColorStop(0.8, '#f97316');
-      barGrad.addColorStop(0.92, '#ef4444');
-      barGrad.addColorStop(1, '#e11d48');
+        ctx.fillStyle = barGrad;
+        ctx.fillRect(legX + 15, legY + 34, gradW, 10);
 
-      ctx.fillStyle = barGrad;
-      ctx.fillRect(legX + 15, legY + 34, gradW, 10);
+        const maxV = Math.max(10, Math.round(stats.maxSpeedKmh || 100));
+        const v1 = Math.round(maxV * 0.33);
+        const v2 = Math.round(maxV * 0.66);
 
-      ctx.fillStyle = '#94a3b8';
-      ctx.font = '10px monospace';
-      ctx.fillText('0', legX + 15, legY + 58);
-      ctx.fillText('50', legX + 15 + gradW * 0.32, legY + 58);
-      ctx.fillText('100', legX + 15 + gradW * 0.62, legY + 58);
-      ctx.fillText('170+', legX + 15 + gradW - 25, legY + 58);
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '10px monospace';
+        ctx.textAlign = 'left';
+        ctx.fillText('0', legX + 15, legY + 58);
+        ctx.textAlign = 'center';
+        ctx.fillText(`${v1}`, legX + 15 + gradW * 0.33, legY + 58);
+        ctx.fillText(`${v2}`, legX + 15 + gradW * 0.66, legY + 58);
+        ctx.textAlign = 'right';
+        ctx.fillText(`${maxV}`, legX + 15 + gradW, legY + 58);
+        ctx.textAlign = 'left';
+      }
     }
 
     return new Promise((resolve) => {
@@ -734,7 +997,7 @@
   }
 
   // -------------------------------------------------------------
-  // 5. GENERATOR SVG (WEKTOR BEZSTRATNY)
+  // 5. GENERATOR SVG (WEKTOR BEZSTRATNY) Z TELEMETRIĄ G-FORCE
   // -------------------------------------------------------------
   function generateSvg(points, segments, stats, titleText, scopeName, options = {}) {
     const W = 1200;
@@ -743,11 +1006,43 @@
     const midLat = (minLat + maxLat) / 2;
     const cosLat = Math.cos(midLat * Math.PI / 180);
 
-    const includeElevation = options.includeChart !== false;
+    const hasAltitude = points.some(p => p.altitude !== null && p.altitude !== undefined && !isNaN(Number(p.altitude)));
+    const includeElevation = (options.includeChart !== false) && hasAltitude;
 
-    const mapX = 60, mapY = 110;
+    // Przetwarzanie i statystyki przeciążeń G
+    const gPoints = [];
+    let maxAccG = 0, maxBrkG = 0, maxLatLeftG = 0, maxLatRightG = 0, maxGMag = 0;
+    let peakGPoint = null;
+
+    if (options.includeGForce !== false) {
+      for (let i = 0; i < points.length; i++) {
+        const p = points[i];
+        if (p.g_x !== null && p.g_x !== undefined && !isNaN(Number(p.g_x)) &&
+            p.g_y !== null && p.g_y !== undefined && !isNaN(Number(p.g_y))) {
+          const gx = Number(p.g_x);
+          const gy = Number(p.g_y);
+          const mag = Math.hypot(gx, gy);
+          gPoints.push({ gx, gy, mag, lat: p.lat, lon: p.lon, i });
+
+          if (gx > maxAccG) maxAccG = gx;
+          if (gx < -maxBrkG) maxBrkG = Math.abs(gx);
+          if (gy < -maxLatLeftG) maxLatLeftG = Math.abs(gy);
+          if (gy > maxLatRightG) maxLatRightG = gy;
+          if (mag > maxGMag) {
+            maxGMag = mag;
+            peakGPoint = p;
+          }
+        }
+      }
+    }
+
+    const hasGForce = gPoints.length > 0;
+    const maxLatG = Math.max(maxLatLeftG, maxLatRightG);
+    const showBottomPanel = includeElevation || hasGForce;
+
+    const mapX = 60, mapY = 105;
     const mapW = W - 120;
-    const mapH = includeElevation ? (H - 280) : (H - 140);
+    const mapH = showBottomPanel ? 530 : 665;
 
     const spanLon = Math.max(0.0001, (maxLon - minLon) * cosLat);
     const spanLat = Math.max(0.0001, maxLat - minLat);
@@ -762,47 +1057,182 @@
       return [x.toFixed(2), y.toFixed(2)];
     }
 
-    let trackPaths = '';
+    const svgLines = [];
     for (const seg of segments) {
       for (let i = 1; i < seg.length; i++) {
         const [x0, y0] = toSvg(seg[i - 1].lon, seg[i - 1].lat);
         const [x1, y1] = toSvg(seg[i].lon, seg[i].lat);
         const col = getTrackHex(seg[i], options, stats);
-        trackPaths += `<line x1="${x0}" y1="${y0}" x2="${x1}" y2="${y1}" stroke="${col}" stroke-width="3" stroke-linecap="round"/>\n`;
+        const sortVal = (seg[i].color_speed !== undefined ? seg[i].color_speed : seg[i].speed_kmh) || 0;
+        svgLines.push({ x0, y0, x1, y1, col, sortVal });
       }
     }
+    // Szybsze odcinki (czerwone) wyżej w hierarchii DOM SVG
+    svgLines.sort((a, b) => a.sortVal - b.sortVal);
+    let trackPaths = '';
+    for (let k = 0; k < svgLines.length; k++) {
+      const line = svgLines[k];
+      trackPaths += `<line x1="${line.x0}" y1="${line.y0}" x2="${line.x1}" y2="${line.y1}" stroke="${line.col}" stroke-width="3" stroke-linecap="round"/>\n`;
+    }
 
-    let elevationSvgSection = '';
-    if (includeElevation) {
-      const chartX = 60, chartY = H - 140, chartW = W - 120, chartH = 90;
-      const altSpan = Math.max(10, stats.maxAlt - stats.minAlt);
-      let chartPolyline = '';
-      let minAltIdx = 0, maxAltIdx = 0;
-      let minAltVal = Infinity, maxAltVal = -Infinity;
+    // Znacznik szczytowego przeciążenia na trasie (beacon na mapie)
+    let peakGMarkerSvg = '';
+    if (hasGForce && peakGPoint) {
+      const [px, py] = toSvg(peakGPoint.lon, peakGPoint.lat);
+      const isNearRight = Number(px) > (mapX + mapW - 120);
+      const isNearTop = Number(py) < (mapY + 30);
+      const badgeX = isNearRight ? -100 : 10;
+      const badgeY = isNearTop ? 14 : -10;
 
-      for (let i = 0; i < points.length; i++) {
-        const cx = (chartX + 15 + (i / Math.max(1, points.length - 1)) * (chartW - 30)).toFixed(1);
-        const alt = points[i].altitude ?? stats.minAlt;
-        if (alt < minAltVal) { minAltVal = alt; minAltIdx = i; }
-        if (alt > maxAltVal) { maxAltVal = alt; maxAltIdx = i; }
-        const cy = ((chartY + chartH - 15) - ((alt - stats.minAlt) / altSpan) * (chartH - 35)).toFixed(1);
-        chartPolyline += `${cx},${cy} `;
+      peakGMarkerSvg = `
+  <!-- Znacznik szczytowego przeciążenia G na trasie -->
+  <g transform="translate(${px}, ${py})">
+    <circle r="12" fill="rgba(245, 158, 11, 0.2)"/>
+    <circle r="6" fill="#f59e0b" stroke="#ffffff" stroke-width="1.5"/>
+    <rect x="${badgeX}" y="${badgeY - 14}" width="95" height="18" rx="4" fill="rgba(15, 23, 42, 0.92)" stroke="#f59e0b" stroke-width="1"/>
+    <text x="${badgeX + 6}" y="${badgeY - 1}" fill="#f59e0b" font-size="9.5" font-weight="bold" font-family="ui-monospace, monospace">🎯 MAX ${maxGMag.toFixed(2)}G</text>
+  </g>`;
+    }
+
+    // Dolny panel telemetryczny (Profil wysokości / Wykres przeciążeń w czasie + Diagram G-G)
+    let bottomPanelSvg = '';
+    if (showBottomPanel) {
+      const panelY = 650;
+      const panelH = 110;
+
+      // Karta G-G Friction Circle (z prawej strony, gdy dane G są dostępne)
+      let ggCardSvg = '';
+      if (hasGForce) {
+        const ggX = includeElevation ? 810 : 810;
+        const ggW = 330;
+        const cx = ggX + 65;
+        const cy = panelY + 55;
+        const r = 38;
+        const scaleG = Math.max(1.2, Math.ceil(Math.max(maxLatG, Math.max(maxAccG, maxBrkG)) * 10) / 10);
+
+        const rad05 = (0.5 / scaleG) * r;
+        const rad10 = (1.0 / scaleG) * r;
+
+        // Próbkowanie chmury punktów G (do ~200 punktów dla optymalnego rozmiaru pliku SVG)
+        let scatterSvg = '';
+        const scatterStep = Math.max(1, Math.floor(gPoints.length / 200));
+        for (let k = 0; k < gPoints.length; k += scatterStep) {
+          const pt = gPoints[k];
+          const dotX = cx + (pt.gy / scaleG) * r;
+          const dotY = cy - (pt.gx / scaleG) * r;
+          scatterSvg += `<circle cx="${dotX.toFixed(1)}" cy="${dotY.toFixed(1)}" r="1.5" fill="rgba(56, 189, 248, 0.4)"/>\n`;
+        }
+
+        // Szczytowe punkty G
+        let peakDotsSvg = '';
+        if (maxLatG > 0.1) {
+          const pLat = gPoints.reduce((best, cur) => Math.abs(cur.gy) > Math.abs(best.gy) ? cur : best, gPoints[0]);
+          const plx = cx + (pLat.gy / scaleG) * r;
+          const ply = cy - (pLat.gx / scaleG) * r;
+          peakDotsSvg += `<circle cx="${plx.toFixed(1)}" cy="${ply.toFixed(1)}" r="3.5" fill="#f59e0b" stroke="#ffffff" stroke-width="1"/>\n`;
+        }
+        if (maxBrkG > 0.1) {
+          const pBrk = gPoints.reduce((best, cur) => cur.gx < best.gx ? cur : best, gPoints[0]);
+          const pbx = cx + (pBrk.gy / scaleG) * r;
+          const pby = cy - (pBrk.gx / scaleG) * r;
+          peakDotsSvg += `<circle cx="${pbx.toFixed(1)}" cy="${pby.toFixed(1)}" r="3.5" fill="#38bdf8" stroke="#ffffff" stroke-width="1"/>\n`;
+        }
+
+        ggCardSvg = `
+    <!-- Karta Diagramu G-G (Friction Circle 2D) -->
+    <rect x="${ggX}" y="${panelY}" width="${ggW}" height="${panelH}" rx="8" fill="#0f172a" stroke="#1e293b"/>
+    
+    <!-- Okręgi skali G -->
+    <circle cx="${cx}" cy="${cy}" r="${rad05.toFixed(1)}" fill="none" stroke="#1e293b" stroke-dasharray="2,2"/>
+    <text x="${cx + 2}" y="${(cy - rad05 + 8).toFixed(1)}" fill="#475569" font-size="7.5" font-family="monospace">0.5G</text>
+    <circle cx="${cx}" cy="${cy}" r="${rad10.toFixed(1)}" fill="none" stroke="#334155"/>
+    <text x="${cx + 2}" y="${(cy - rad10 + 8).toFixed(1)}" fill="#64748b" font-size="7.5" font-family="monospace">1.0G</text>
+
+    <!-- Osie i etykiety kierunków -->
+    <line x1="${cx - r - 4}" y1="${cy}" x2="${cx + r + 4}" y2="${cy}" stroke="#334155" stroke-width="1"/>
+    <line x1="${cx}" y1="${cy - r - 4}" x2="${cx}" y2="${cy + r + 4}" stroke="#334155" stroke-width="1"/>
+    <text x="${cx}" y="${cy - r - 4}" fill="#64748b" font-size="7.5" font-weight="bold" text-anchor="middle">ACC</text>
+    <text x="${cx}" y="${cy + r + 10}" fill="#64748b" font-size="7.5" font-weight="bold" text-anchor="middle">BRK</text>
+    <text x="${cx - r - 5}" y="${cy + 2.5}" fill="#64748b" font-size="7.5" font-weight="bold" text-anchor="end">L</text>
+    <text x="${cx + r + 5}" y="${cy + 2.5}" fill="#64748b" font-size="7.5" font-weight="bold" text-anchor="start">R</text>
+
+    <!-- Chmura punktów G trasy -->
+    ${scatterSvg}
+    ${peakDotsSvg}
+
+    <!-- Statystyki boczne diagramu -->
+    <text x="${ggX + 135}" y="${panelY + 22}" fill="#94a3b8" font-size="9.5" font-weight="bold" letter-spacing="0.5">DIAGRAM G-G (2D)</text>
+    <text x="${ggX + 135}" y="${panelY + 44}" fill="#cbd5e1" font-size="11" font-family="ui-monospace, monospace">Max skręt: <tspan fill="#f59e0b" font-weight="bold">${maxLatG.toFixed(2)}G</tspan></text>
+    <text x="${ggX + 135}" y="${panelY + 66}" fill="#cbd5e1" font-size="11" font-family="ui-monospace, monospace">Max ham.: <tspan fill="#38bdf8" font-weight="bold">-${maxBrkG.toFixed(2)}G</tspan></text>
+    <text x="${ggX + 135}" y="${panelY + 88}" fill="#cbd5e1" font-size="11" font-family="ui-monospace, monospace">Wypadkowe: <tspan fill="#10b981" font-weight="bold">${maxGMag.toFixed(2)}G</tspan></text>`;
       }
 
-      const minCx = (chartX + 15 + (minAltIdx / Math.max(1, points.length - 1)) * (chartW - 30)).toFixed(1);
-      const minCy = ((chartY + chartH - 15) - ((minAltVal - stats.minAlt) / altSpan) * (chartH - 35)).toFixed(1);
-      const maxCx = (chartX + 15 + (maxAltIdx / Math.max(1, points.length - 1)) * (chartW - 30)).toFixed(1);
-      const maxCy = ((chartY + chartH - 15) - ((maxAltVal - stats.minAlt) / altSpan) * (chartH - 35)).toFixed(1);
+      // Lewa karta (Profil wysokości LUB wykres przebiegu G w czasie)
+      let leftCardSvg = '';
+      const leftW = hasGForce ? 730 : 1080;
 
-      elevationSvgSection = `
-  <rect x="${chartX}" y="${chartY}" width="${chartW}" height="${chartH}" rx="8" fill="#0f172a" stroke="#1e293b"/>
-  <text x="${chartX + 15}" y="${chartY + 20}" fill="#94a3b8" font-size="11">Profil wysokości n.p.m. (Min: ${stats.minAlt.toFixed(0)}m, Max: ${stats.maxAlt.toFixed(0)}m)</text>
-  <polyline points="${chartPolyline}" fill="none" stroke="#38bdf8" stroke-width="2"/>
-  <circle cx="${maxCx}" cy="${maxCy}" r="4" fill="#10b981" stroke="#ffffff" stroke-width="1.5"/>
-  <text x="${maxCx}" y="${Math.max(chartY + 22, maxCy - 6)}" fill="#10b981" font-size="10" font-weight="bold" text-anchor="middle">▲ MAX ${maxAltVal.toFixed(0)}m</text>
-  <circle cx="${minCx}" cy="${minCy}" r="4" fill="#f59e0b" stroke="#ffffff" stroke-width="1.5"/>
-  <text x="${minCx}" y="${Math.min(chartY + chartH - 4, Number(minCy) + 14)}" fill="#f59e0b" font-size="10" font-weight="bold" text-anchor="middle">▼ MIN ${minAltVal.toFixed(0)}m</text>
-      `;
+      if (includeElevation) {
+        const altSpan = Math.max(10, stats.maxAlt - stats.minAlt);
+        let chartPolyline = '';
+        let minAltIdx = 0, maxAltIdx = 0;
+        let minAltVal = Infinity, maxAltVal = -Infinity;
+
+        for (let i = 0; i < points.length; i++) {
+          const cx = (60 + 15 + (i / Math.max(1, points.length - 1)) * (leftW - 30)).toFixed(1);
+          const alt = points[i].altitude ?? stats.minAlt;
+          if (alt < minAltVal) { minAltVal = alt; minAltIdx = i; }
+          if (alt > maxAltVal) { maxAltVal = alt; maxAltIdx = i; }
+          const cy = ((panelY + panelH - 15) - ((alt - stats.minAlt) / altSpan) * (panelH - 35)).toFixed(1);
+          chartPolyline += `${cx},${cy} `;
+        }
+
+        const minCx = (60 + 15 + (minAltIdx / Math.max(1, points.length - 1)) * (leftW - 30)).toFixed(1);
+        const minCy = ((panelY + panelH - 15) - ((minAltVal - stats.minAlt) / altSpan) * (panelH - 35)).toFixed(1);
+        const maxCx = (60 + 15 + (maxAltIdx / Math.max(1, points.length - 1)) * (leftW - 30)).toFixed(1);
+        const maxCy = ((panelY + panelH - 15) - ((maxAltVal - stats.minAlt) / altSpan) * (panelH - 35)).toFixed(1);
+
+        leftCardSvg = `
+    <!-- Karta Profilu Wysokości -->
+    <rect x="60" y="${panelY}" width="${leftW}" height="${panelH}" rx="8" fill="#0f172a" stroke="#1e293b"/>
+    <text x="75" y="${panelY + 22}" fill="#94a3b8" font-size="10.5" font-weight="bold">PROFIL WYSOKOŚCI N.P.M. (Min: ${stats.minAlt.toFixed(0)}m, Max: ${stats.maxAlt.toFixed(0)}m)</text>
+    <polyline points="${chartPolyline}" fill="none" stroke="#38bdf8" stroke-width="2"/>
+    <circle cx="${maxCx}" cy="${maxCy}" r="4" fill="#10b981" stroke="#ffffff" stroke-width="1.5"/>
+    <text x="${maxCx}" y="${Math.max(panelY + 22, Number(maxCy) - 6)}" fill="#10b981" font-size="10" font-weight="bold" text-anchor="middle">▲ MAX ${maxAltVal.toFixed(0)}m</text>
+    <circle cx="${minCx}" cy="${minCy}" r="4" fill="#f59e0b" stroke="#ffffff" stroke-width="1.5"/>
+    <text x="${minCx}" y="${Math.min(panelY + panelH - 4, Number(minCy) + 14)}" fill="#f59e0b" font-size="10" font-weight="bold" text-anchor="middle">▼ MIN ${minAltVal.toFixed(0)}m</text>`;
+      } else if (hasGForce) {
+        // Brak wysokości, ale są przeciążenia -> wykres Gx i Gy w czasie
+        const maxPlotG = Math.max(1.2, Math.ceil(Math.max(maxLatG, Math.max(maxAccG, maxBrkG)) * 10) / 10);
+        const zeroY = panelY + panelH / 2;
+        const gPlotH = panelH - 40;
+
+        let gxPointsStr = '';
+        let gyPointsStr = '';
+        const step = Math.max(1, Math.floor(gPoints.length / 300));
+
+        for (let k = 0; k < gPoints.length; k += step) {
+          const pt = gPoints[k];
+          const x = (60 + 15 + (k / Math.max(1, gPoints.length - 1)) * (leftW - 30)).toFixed(1);
+          const yGx = (zeroY - (pt.gx / maxPlotG) * (gPlotH / 2)).toFixed(1);
+          const yGy = (zeroY - (pt.gy / maxPlotG) * (gPlotH / 2)).toFixed(1);
+          gxPointsStr += `${x},${yGx} `;
+          gyPointsStr += `${x},${yGy} `;
+        }
+
+        leftCardSvg = `
+    <!-- Karta Przebiegu Przeciążeń G w Czasie -->
+    <rect x="60" y="${panelY}" width="${leftW}" height="${panelH}" rx="8" fill="#0f172a" stroke="#1e293b"/>
+    <text x="75" y="${panelY + 20}" fill="#94a3b8" font-size="10" font-weight="bold">PRZEBIEG PRZECIĄŻEŃ W CZASIE</text>
+    <text x="${leftW - 140}" y="${panelY + 20}" fill="#64748b" font-size="9.5" font-family="ui-monospace, monospace"><tspan fill="#38bdf8">─ Gx (wzdłużne)</tspan>   <tspan fill="#f59e0b">─ Gy (boczne)</tspan></text>
+    <line x1="75" y1="${zeroY}" x2="${60 + leftW - 15}" y2="${zeroY}" stroke="#334155" stroke-dasharray="3,3"/>
+    <polyline points="${gxPointsStr}" fill="none" stroke="#38bdf8" stroke-width="1.6"/>
+    <polyline points="${gyPointsStr}" fill="none" stroke="#f59e0b" stroke-width="1.6"/>`;
+      }
+
+      bottomPanelSvg = `
+  <!-- Dolny panel telemetryczny -->
+  ${leftCardSvg}
+  ${ggCardSvg}`;
     }
 
     const mode = options.colorMode || 'speed';
@@ -820,38 +1250,42 @@
       <stop offset="100%" stop-color="#a855f7" />
     </linearGradient>`;
       legendContent = `
-    <rect width="210" height="65" rx="8" fill="#0f172a" stroke="#1e293b"/>
+    <rect width="210" height="70" rx="8" fill="#0f172a" stroke="#1e293b"/>
     <text x="15" y="20" fill="#94a3b8" font-size="10" font-weight="bold">WYSOKOŚĆ (M N.P.M.)</text>
     <rect x="15" y="28" width="180" height="8" rx="2" fill="url(#legendGrad)"/>
-    <text x="15" y="50" fill="#94a3b8" font-size="9" font-family="monospace">${stats.minAlt.toFixed(0)}m</text>
-    <text x="155" y="50" fill="#94a3b8" font-size="9" font-family="monospace">${stats.maxAlt.toFixed(0)}m</text>`;
+    <text x="15" y="52" fill="#94a3b8" font-size="9" font-family="monospace">${stats.minAlt.toFixed(0)}m</text>
+    <text x="105" y="52" fill="#94a3b8" font-size="9" font-family="monospace" text-anchor="middle">${((stats.minAlt + stats.maxAlt) / 2).toFixed(0)}m</text>
+    <text x="195" y="52" fill="#94a3b8" font-size="9" font-family="monospace" text-anchor="end">${stats.maxAlt.toFixed(0)}m</text>`;
     } else if (mode === 'single') {
-      const sColor = options.singleColor || '#06b6d4';
-      legendContent = `
-    <rect width="210" height="65" rx="8" fill="#0f172a" stroke="#1e293b"/>
-    <text x="15" y="20" fill="#94a3b8" font-size="10" font-weight="bold">KOLOR ŚLADU</text>
-    <rect x="15" y="28" width="180" height="8" rx="2" fill="${sColor}"/>
-    <text x="15" y="50" fill="#cbd5e1" font-size="9" font-family="monospace">${sColor.toUpperCase()}</text>`;
+      // Dla jednolitego koloru brak okienka legendy w prawym górnym rogu
+      legendContent = '';
     } else {
+      const maxV = Math.max(10, Math.round(stats.maxSpeedKmh || 100));
+      const v1 = Math.round(maxV * 0.33);
+      const v2 = Math.round(maxV * 0.66);
       legendGradientDef = `
     <linearGradient id="legendGrad" x1="0%" y1="0%" x2="100%" y2="0%">
       <stop offset="0%" stop-color="#06b6d4" />
-      <stop offset="20%" stop-color="#14b8a6" />
-      <stop offset="35%" stop-color="#22c55e" />
-      <stop offset="50%" stop-color="#84cc16" />
-      <stop offset="65%" stop-color="#eab308" />
-      <stop offset="80%" stop-color="#f97316" />
-      <stop offset="92%" stop-color="#ef4444" />
+      <stop offset="8%" stop-color="#0ea5e9" />
+      <stop offset="18%" stop-color="#10b981" />
+      <stop offset="32%" stop-color="#22c55e" />
+      <stop offset="48%" stop-color="#84cc16" />
+      <stop offset="64%" stop-color="#eab308" />
+      <stop offset="78%" stop-color="#f97316" />
+      <stop offset="90%" stop-color="#ef4444" />
       <stop offset="100%" stop-color="#e11d48" />
     </linearGradient>`;
       legendContent = `
-    <rect width="210" height="65" rx="8" fill="#0f172a" stroke="#1e293b"/>
+    <rect width="210" height="70" rx="8" fill="#0f172a" stroke="#1e293b"/>
     <text x="15" y="20" fill="#94a3b8" font-size="10" font-weight="bold">PRĘDKOŚĆ (KM/H)</text>
     <rect x="15" y="28" width="180" height="8" rx="2" fill="url(#legendGrad)"/>
-    <text x="15" y="50" fill="#94a3b8" font-size="9" font-family="monospace">0</text>
-    <text x="95" y="50" fill="#94a3b8" font-size="9" font-family="monospace">90</text>
-    <text x="165" y="50" fill="#94a3b8" font-size="9" font-family="monospace">170+</text>`;
+    <text x="15" y="52" fill="#94a3b8" font-size="9" font-family="monospace">0</text>
+    <text x="74" y="52" fill="#94a3b8" font-size="9" font-family="monospace" text-anchor="middle">${v1}</text>
+    <text x="134" y="52" fill="#94a3b8" font-size="9" font-family="monospace" text-anchor="middle">${v2}</text>
+    <text x="195" y="52" fill="#94a3b8" font-size="9" font-family="monospace" text-anchor="end">${maxV}</text>`;
     }
+
+    const mainHudW = hasGForce ? 530 : (mode === 'single' ? 1080 : 840);
 
     const svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="background:#090d16; font-family:system-ui, -apple-system, sans-serif;">
@@ -870,18 +1304,38 @@
     ${trackPaths}
   </g>
 
-  <!-- Karta HUD / Nagłówek -->
-  <rect x="60" y="30" width="560" height="65" rx="8" fill="#0f172a" stroke="#38bdf8" stroke-width="1.5"/>
-  <text x="80" y="55" fill="#38bdf8" font-size="15" font-weight="bold">NNAPER • ${titleText.toUpperCase()}</text>
-  <text x="80" y="78" fill="#cbd5e1" font-size="12">Dystans: ${stats.totalDistanceKm.toFixed(2)} km  |  Czas jazdy: ${formatDuration(stats.durationSeconds)}  |  Śr. prędkość: ${stats.avgSpeedKmh.toFixed(1)} km/h  |  V max: ${stats.maxSpeedKmh.toFixed(1)} km/h</text>
+  ${peakGMarkerSvg}
 
-  <!-- Profil wysokości -->
-  ${elevationSvgSection}
+  <!-- Karta HUD / Nagłówek główny -->
+  <rect x="60" y="25" width="${mainHudW}" height="70" rx="8" fill="#0f172a" stroke="#38bdf8" stroke-width="1.5"/>
+  <text x="80" y="52" fill="#38bdf8" font-size="15" font-weight="bold">NNAPER • ${titleText.toUpperCase()}</text>
+  <text x="80" y="75" fill="#cbd5e1" font-size="11.5" font-family="ui-monospace, monospace">Dystans: ${stats.totalDistanceKm.toFixed(2)} km  |  Czas: ${formatDuration(stats.durationSeconds)}  |  Śr. V: ${stats.avgSpeedKmh.toFixed(1)} km/h  |  V max: ${stats.maxSpeedKmh.toFixed(1)} km/h</text>
+
+  <!-- Karta Telemetrii Przeciążeń w nagłówku -->
+  ${hasGForce ? `
+  <g transform="translate(605, 25)">
+    <rect width="310" height="70" rx="8" fill="#0f172a" stroke="#1e293b"/>
+    <text x="16" y="20" fill="#94a3b8" font-size="9.5" font-weight="bold" letter-spacing="0.5">TELEMETRIA PRZECIĄŻEŃ (G)</text>
+    <text x="16" y="42" fill="#f8fafc" font-size="12" font-family="ui-monospace, monospace">
+      <tspan fill="#10b981" font-weight="bold">|G| max: ${maxGMag.toFixed(2)}G</tspan>
+      <tspan fill="#475569"> │ </tspan>
+      <tspan fill="#f59e0b">Skręt: ${maxLatG.toFixed(2)}G</tspan>
+    </text>
+    <text x="16" y="60" fill="#94a3b8" font-size="10.5" font-family="ui-monospace, monospace">
+      <tspan fill="#38bdf8">Ham.: -${maxBrkG.toFixed(2)}G</tspan>
+      <tspan fill="#475569"> │ </tspan>
+      <tspan fill="#c084fc">Przysp.: +${maxAccG.toFixed(2)}G</tspan>
+    </text>
+  </g>` : ''}
+
+  <!-- Dolny panel z wykresami i diagramem G-G -->
+  ${bottomPanelSvg}
 
   <!-- Legenda -->
-  <g transform="translate(${W - 270}, 30)">
+  ${(mode !== 'single' && legendContent) ? `
+  <g transform="translate(${W - 270}, 25)">
     ${legendContent}
-  </g>
+  </g>` : ''}
 </svg>`;
 
     return new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
@@ -956,27 +1410,71 @@
     const allLines = [];
     for (const seg of animSegments) {
       for (let i = 1; i < seg.length; i++) {
+        const p0 = seg[i - 1];
+        const p1 = seg[i];
+        let repPt = p1;
+        if (options.colorMode === 'speed') {
+          const spd0 = (p0.color_speed !== undefined ? p0.color_speed : p0.speed_kmh) || 0;
+          const spd1 = (p1.color_speed !== undefined ? p1.color_speed : p1.speed_kmh) || 0;
+          if (spd0 > spd1) {
+            repPt = p0;
+          }
+        }
         allLines.push({
-          p0: seg[i - 1],
-          p1: seg[i],
-          color: getTrackColor(seg[i], options, stats)
+          p0,
+          p1,
+          color: getTrackColor(repPt, options, stats)
         });
       }
     }
 
-    let TOTAL_ANIM_FRAMES = 60;
-    let delayMs = 65;
-    if (options.gifSpeed === 'hd') {
-      TOTAL_ANIM_FRAMES = 90;
-      delayMs = 50;
-    } else if (options.gifSpeed === 'fast') {
-      TOTAL_ANIM_FRAMES = 40;
-      delayMs = 50;
+    const durSec = Math.max(0.5, Math.min(60, parseFloat(options.gifDurationSec) || 4.0));
+    const maxMb = (options.gifMaxMb !== undefined && options.gifMaxMb !== null && options.gifMaxMb !== '') ? parseFloat(options.gifMaxMb) : 5.0;
+    const maxBytes = (!isNaN(maxMb) && maxMb > 0) ? Math.round(maxMb * 1024 * 1024) : 0;
+    const isAutoFrames = (options.gifFramesAuto !== false && (!options.gifFrames || options.gifFrames === 'auto'));
+
+    let TOTAL_ANIM_FRAMES;
+    if (isAutoFrames) {
+      // Domyślnie maksymalna płynność (25-30 FPS zależnie od czasu trwania)
+      const targetFps = durSec <= 4.0 ? 25 : 22;
+      TOTAL_ANIM_FRAMES = Math.max(20, Math.min(250, Math.round(durSec * targetFps)));
+      // Jeśli użytkownik podał ścisły limit w MB, wstępnie dopasuj liczbę klatek do limitu (~24KB/klatka)
+      if (maxBytes > 0) {
+        const maxEstimatedFrames = Math.max(16, Math.floor((maxBytes * 0.92) / 24000));
+        if (maxEstimatedFrames < TOTAL_ANIM_FRAMES) {
+          TOTAL_ANIM_FRAMES = maxEstimatedFrames;
+        }
+      }
     } else {
-      TOTAL_ANIM_FRAMES = 60;
-      delayMs = 65;
+      TOTAL_ANIM_FRAMES = Math.max(8, Math.min(300, parseInt(options.gifFrames, 10) || 60));
     }
+
+    const delayMs = Math.max(20, Math.round((durSec * 1000) / TOTAL_ANIM_FRAMES));
     const totalLines = allLines.length;
+
+    // Analiza rozkładu klatek w poszczególnych dniach:
+    // Jeśli na dany dzień w animacji nie przypada więcej niż 1 klatka, nie wyświetlamy godziny.
+    const dayFrameCounts = {};
+    for (let f = 0; f < TOTAL_ANIM_FRAMES; f++) {
+      const progress = f / (TOTAL_ANIM_FRAMES - 1);
+      const linesToDraw = Math.round(progress * totalLines);
+      let pt = null;
+      if (linesToDraw > 0 && linesToDraw <= allLines.length) {
+        pt = allLines[linesToDraw - 1].p1;
+      } else if (allLines.length > 0) {
+        pt = allLines[0].p0;
+      } else if (points.length > 0) {
+        pt = points[0];
+      }
+
+      if (pt && pt.timestamp) {
+        const delimiter = pt.timestamp.includes('T') ? 'T' : ' ';
+        const dStr = pt.timestamp.split(delimiter)[0].trim();
+        if (dStr) {
+          dayFrameCounts[dStr] = (dayFrameCounts[dStr] || 0) + 1;
+        }
+      }
+    }
 
     for (let f = 0; f < TOTAL_ANIM_FRAMES; f++) {
       const progress = f / (TOTAL_ANIM_FRAMES - 1);
@@ -1035,32 +1533,44 @@
       ctx.fillStyle = '#38bdf8';
       ctx.fillRect(0, H - 6, W * progress, 6);
 
-      // 5. Nagłówek HUD
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
-      ctx.fillRect(mapX, 10, mapW, 50);
-      ctx.strokeStyle = '#38bdf8';
+      // 5. Nagłówek HUD (czysty i minimalistyczny - bez zbędnych prędkości, wysokości i procentów)
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.35)';
       ctx.lineWidth = 1;
-      ctx.strokeRect(mapX, 10, mapW, 50);
+      ctx.beginPath();
+      ctx.roundRect(mapX, 10, mapW, 48, 6);
+      ctx.fill();
+      ctx.stroke();
 
-      ctx.fillStyle = '#38bdf8';
-      ctx.font = 'bold 12px system-ui, sans-serif';
-      ctx.fillText(`NNAPER REPLAY • ${titleText}`, mapX + 12, 28);
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '600 11px system-ui, -apple-system, sans-serif';
+      ctx.fillText(`NNAPER REPLAY • ${titleText}`.toUpperCase(), mapX + 14, 27);
 
-      let tStr = '--:--:--';
+      // Formatowanie daty i godziny:
+      // Jeśli na ten dzień w animacji nie przypada więcej niż 1 klatka, godzina jest ukrywana.
+      let timeDisplay = '';
       if (currPt && currPt.timestamp) {
-        const parts = currPt.timestamp.split('T');
+        const delimiter = currPt.timestamp.includes('T') ? 'T' : ' ';
+        const parts = currPt.timestamp.split(delimiter);
+        const dateStr = parts[0] || '';
+        let timeStr = parts[1] ? parts[1].replace('Z', '').trim() : '';
+        if (timeStr.length > 8) timeStr = timeStr.slice(0, 8);
+
+        const framesThisDay = dateStr ? (dayFrameCounts[dateStr] || 0) : 0;
+        const showHour = framesThisDay > 1 && Boolean(timeStr);
+
         if (scopeName === 'day') {
-          tStr = parts[1] ? parts[1].replace('Z', '').slice(0, 8) : parts[0];
+          timeDisplay = showHour ? `Czas: ${timeStr}` : dateStr;
         } else {
-          tStr = `${parts[0]} ${parts[1] ? parts[1].replace('Z', '').slice(0, 5) : ''}`;
+          timeDisplay = showHour ? `${dateStr}   ${timeStr}` : dateStr;
         }
       }
-      const spdStr = (currPt && currPt.speed_kmh !== undefined) ? Number(currPt.speed_kmh).toFixed(1) : '0.0';
-      const altStr = (currPt && currPt.altitude !== null && currPt.altitude !== undefined) ? `${Number(currPt.altitude).toFixed(0)}m` : '--';
 
-      ctx.fillStyle = '#f8fafc';
-      ctx.font = '11px system-ui, sans-serif';
-      ctx.fillText(`Czas: ${tStr}   |   V: ${spdStr} km/h   |   Wys.: ${altStr}   |   Postęp: ${(progress * 100).toFixed(0)}%`, mapX + 12, 48);
+      if (timeDisplay) {
+        ctx.fillStyle = '#38bdf8';
+        ctx.font = 'bold 13px ui-monospace, SFMono-Regular, Menlo, monospace';
+        ctx.fillText(timeDisplay, mapX + 14, 46);
+      }
 
       encoder.addFrame(canvas, delayMs);
 
@@ -1077,9 +1587,62 @@
     // Pojedyncza klatka zatrzymania na ukończonej trasie (750ms pauzy przed płynnym pętleniem GIF)
     encoder.addFrame(canvas, 750);
 
-    if (onProgress) onProgress(95);
+    if (onProgress) onProgress(90);
 
-    const gifBytes = encoder.encode();
+    let gifBytes = encoder.encode();
+
+    // Adaptacyjne dopasowanie do zadanego przez użytkownika limitu wagi (MB)
+    // z zachowaniem maksymalnej płynności (downsampling klatek w pamięci bez powtórnego rysowania trasy)
+    if (maxBytes > 0 && gifBytes.length > maxBytes && encoder.frames.length > 15) {
+      if (onProgress) onProgress(93);
+
+      const lastHoldFrame = encoder.frames[encoder.frames.length - 1];
+      const animFrames = encoder.frames.slice(0, -1);
+      const curBytes = gifBytes.length;
+
+      // Wylicz docelową liczbę klatek (z marginesem bezpieczeństwa 6% na fluktuacje słownika LZW)
+      const ratio = maxBytes / curBytes;
+      let targetCount = Math.max(12, Math.floor(animFrames.length * ratio * 0.94));
+
+      if (targetCount < animFrames.length) {
+        let newDelayHund = Math.max(2, Math.round((durSec * 100) / targetCount));
+        let downsampled = [];
+        for (let k = 0; k < targetCount; k++) {
+          const srcIdx = Math.round((k * (animFrames.length - 1)) / (targetCount - 1));
+          downsampled.push({
+            data: animFrames[srcIdx].data,
+            delay: newDelayHund
+          });
+        }
+        downsampled.push(lastHoldFrame);
+
+        encoder.frames = downsampled;
+        encoder.colorMap.clear();
+        gifBytes = encoder.encode();
+
+        // Dodatkowa korekta awaryjna w przypadku trudnokompresowalnych klatek
+        if (gifBytes.length > maxBytes && encoder.frames.length > 15) {
+          const secondFrames = encoder.frames.slice(0, -1);
+          const secondRatio = maxBytes / gifBytes.length;
+          targetCount = Math.max(10, Math.floor(secondFrames.length * secondRatio * 0.93));
+          newDelayHund = Math.max(2, Math.round((durSec * 100) / targetCount));
+          downsampled = [];
+          for (let k = 0; k < targetCount; k++) {
+            const srcIdx = Math.round((k * (secondFrames.length - 1)) / (targetCount - 1));
+            downsampled.push({
+              data: secondFrames[srcIdx].data,
+              delay: newDelayHund
+            });
+          }
+          downsampled.push(lastHoldFrame);
+          encoder.frames = downsampled;
+          encoder.colorMap.clear();
+          gifBytes = encoder.encode();
+        }
+      }
+    }
+
+    if (onProgress) onProgress(100);
     return new Blob([gifBytes], { type: 'image/gif' });
   }
 
@@ -1087,27 +1650,40 @@
   // 7. GENERATOR INTERAKTYWNEGO HTML (STANDALONE)
   // -------------------------------------------------------------
   function generateHtml(points, segments, stats, titleText, scopeName, options = {}) {
-    const includeElevation = options.includeChart !== false;
+    const isSingleDay = (scopeName === 'day' || scopeName === 'active');
+    const hasAltitude = points.some(p => p.altitude !== null && p.altitude !== undefined && !isNaN(Number(p.altitude)));
+    const includeElevation = isSingleDay && (options.includeChart !== false) && hasAltitude;
     const colorMode = options.colorMode || 'speed';
     const singleColor = options.singleColor || '#06b6d4';
+    const speedOverlap = options.speedOverlap || 'max';
     const defaultSpeed = 30;
-    const includeGForce = options.includeGForce !== false;
+    const includeGForce = isSingleDay && (options.includeGForce !== false);
 
     const hasGForceData = includeGForce && points.some(p => p.g_x !== null && p.g_x !== undefined && !isNaN(Number(p.g_x)));
-    const showBottomPanel = includeElevation || hasGForceData;
+    const showBottomPanel = isSingleDay && (includeElevation || hasGForceData);
 
-    const rawJson = JSON.stringify(points);
+    // Kompaktowa reprezentacja punktów w HTML (bez zbędnych pól i bez duplikacji w segments)
+    const compactPoints = points.map(p => {
+      const item = {
+        lat: p.lat,
+        lon: p.lon,
+        speed_kmh: Math.round((p.speed_kmh || 0) * 10) / 10,
+        color_speed: Math.round(((p.color_speed !== undefined ? p.color_speed : p.speed_kmh) || 0) * 10) / 10,
+        altitude: p.altitude !== null && p.altitude !== undefined && !isNaN(p.altitude) ? Math.round(Number(p.altitude) * 10) / 10 : null,
+        timestamp: p.timestamp || null
+      };
+      if (isSingleDay) {
+        item.g_x = p.g_x !== null && p.g_x !== undefined && !isNaN(Number(p.g_x)) ? Math.round(Number(p.g_x) * 1000) / 1000 : null;
+        item.g_y = p.g_y !== null && p.g_y !== undefined && !isNaN(Number(p.g_y)) ? Math.round(Number(p.g_y) * 1000) / 1000 : null;
+        item.g_z = p.g_z !== null && p.g_z !== undefined && !isNaN(Number(p.g_z)) ? Math.round(Number(p.g_z) * 1000) / 1000 : null;
+      }
+      return item;
+    });
+
+    const segmentLengths = segments.map(seg => seg.length);
+    const rawJson = JSON.stringify(compactPoints);
+    const segLensJson = JSON.stringify(segmentLengths);
     const statsJson = JSON.stringify(stats);
-    const segsJson = JSON.stringify(segments.map(seg => seg.map(p => ({
-      lat: p.lat,
-      lon: p.lon,
-      speed_kmh: p.speed_kmh,
-      altitude: p.altitude,
-      timestamp: p.timestamp,
-      g_x: p.g_x,
-      g_y: p.g_y,
-      g_z: p.g_z
-    }))));
 
     const html = `<!DOCTYPE html>
 <html lang="pl">
@@ -1117,6 +1693,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet/leaflet-maplibre-gl.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: #090d16; color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
@@ -1184,6 +1763,22 @@
     #timeline-slider { width: 180px; accent-color: #38bdf8; cursor: pointer; }
     @media (min-width: 768px) { #timeline-slider { width: 250px; } }
 
+    #legend-card {
+      position: absolute; bottom: ${showBottomPanel ? '165px' : '20px'}; left: 16px;
+      z-index: 1000; background: rgba(15, 23, 42, 0.94); border: 1px solid #334155;
+      border-radius: 8px; padding: 7px 11px 8px 11px; box-shadow: 0 6px 20px rgba(0,0,0,0.65);
+      backdrop-filter: blur(8px); min-width: 195px; transition: bottom 0.2s ease; user-select: none;
+    }
+    #legend-card.chart-collapsed { bottom: 38px !important; }
+    .legend-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+    .legend-title { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: #94a3b8; }
+    .legend-min-btn { background: transparent; border: none; color: #64748b; font-size: 10px; cursor: pointer; padding: 0 2px; }
+    .legend-min-btn:hover { color: #f8fafc; }
+    #legend-card.collapsed #legend-body { display: none; }
+    #legend-card.collapsed { padding-bottom: 5px; }
+    .legend-bar { height: 9px; border-radius: 4px; width: 100%; margin-bottom: 4px; box-shadow: inset 0 1px 2px rgba(0,0,0,0.4); }
+    .legend-ticks { display: flex; justify-content: space-between; font-size: 9.5px; font-family: ui-monospace, monospace; color: #94a3b8; }
+
     #chart-panel {
       height: 150px; background: #0f172a; border-top: 1px solid #334155;
       padding: 6px 14px 8px 14px; display: ${showBottomPanel ? 'flex' : 'none'};
@@ -1250,6 +1845,17 @@
   <div id="main-container">
     <div id="map"></div>
 
+    <div id="legend-card" style="display: ${colorMode !== 'single' ? 'block' : 'none'};">
+      <div class="legend-header">
+        <span id="legend-title" class="legend-title">${colorMode === 'altitude' ? 'WYSOKOŚĆ (M N.P.M.)' : 'PRĘDKOŚĆ (KM/H)'}</span>
+        <button id="btn-toggle-legend" class="legend-min-btn" type="button" title="Zwiń / Rozwiń legendę">▴</button>
+      </div>
+      <div id="legend-body">
+        <div id="legend-bar" class="legend-bar"></div>
+        <div id="legend-ticks" class="legend-ticks"></div>
+      </div>
+    </div>
+
     <div id="hud-card">
       <div class="hud-header">Telemetria pojazdu</div>
       <div class="hud-line"><span class="hud-lbl">Czas:</span><span id="h-time" class="hud-v">--:--:--</span></div>
@@ -1257,7 +1863,7 @@
       <div class="hud-line"><span class="hud-lbl">Wysokość:</span><span id="h-alt" class="hud-v">-- m</span></div>
       ${hasGForceData ? `
       <div id="hud-gg-box">
-        <div class="hud-gg-title">Akcelerometr (G-G)</div>
+        <div class="hud-gg-title">Diagram G-G</div>
         <canvas id="hud-gg-canvas" width="80" height="80"></canvas>
       </div>` : ''}
     </div>
@@ -1273,6 +1879,23 @@
         <span class="ctrl-speed-unit">x</span>
       </div>
       <div class="ctrl-sep"></div>
+      <div class="ctrl-speed-box" title="Wybierz sposób kolorowania trasy na mapie (prędkość, wysokość, jednolity)">
+        <span class="ctrl-speed-lbl">Kolor:</span>
+        <select id="sel-color-mode" class="ctrl-speed-input" style="width: auto; padding: 2px 6px; font-size: 11px; cursor: pointer;">
+          <option value="speed" ${colorMode === 'speed' ? 'selected' : ''}>Prędkość</option>
+          <option value="altitude" ${colorMode === 'altitude' ? 'selected' : ''}>Wysokość</option>
+          <option value="single" ${colorMode === 'single' ? 'selected' : ''}>Jednolity</option>
+        </select>
+      </div>
+      <div class="ctrl-speed-box" id="box-overlap-mode" style="display: ${colorMode === 'speed' ? 'inline-flex' : 'none'};" title="Wybierz sposób kolorowania wspólnych odcinków dróg (nakładające się trasy)">
+        <span class="ctrl-speed-lbl">Wspólne:</span>
+        <select id="sel-overlap-mode" class="ctrl-speed-input" style="width: auto; padding: 2px 6px; font-size: 11px; cursor: pointer;">
+          <option value="max" ${speedOverlap === 'max' ? 'selected' : ''}>V max (szybszy)</option>
+          <option value="avg" ${speedOverlap === 'avg' ? 'selected' : ''}>V śr (średnia)</option>
+          <option value="last" ${speedOverlap === 'last' ? 'selected' : ''}>Ostatni</option>
+        </select>
+      </div>
+      <div class="ctrl-sep"></div>
       <label class="ctrl-label" title="Śledź pojazd kamerą mapy">
         <input type="checkbox" id="chk-follow" checked />
         <span>Kamera</span>
@@ -1284,8 +1907,7 @@
       <div class="chart-header">
         <div class="chart-tabs">
           ${includeElevation ? '<button class="chart-tab-btn active" id="tab-btn-alt" type="button">🏔️ Profil wysokości</button>' : ''}
-          ${hasGForceData ? '<button class="chart-tab-btn ' + (!includeElevation ? 'active' : '') + '" id="tab-btn-gforce" type="button">⚡ Przeciążenia G</button>' : ''}
-          ${hasGForceData ? '<button class="chart-tab-btn" id="tab-btn-gg" type="button">🎯 Diagram G-G</button>' : ''}
+          ${hasGForceData ? '<button class="chart-tab-btn ' + (!includeElevation ? 'active' : '') + '" id="tab-btn-gg" type="button">🎯 Diagram G-G</button>' : ''}
         </div>
 
         <div class="chart-legend-box" id="chart-legend-alt" style="display: ${includeElevation ? 'flex' : 'none'};">
@@ -1293,23 +1915,12 @@
           <span style="color:#64748b;">(Min: ${stats.minAlt.toFixed(0)}m, Max: ${stats.maxAlt.toFixed(0)}m)</span>
         </div>
 
-        <div class="chart-legend-box" id="chart-legend-gforce" style="display: ${(!includeElevation && hasGForceData) ? 'flex' : 'none'};">
-          <span class="g-pill" id="pill-gx" title="Kliknij, aby włączyć/wyłączyć oś Gx (wzdłużne)">
-            <span class="g-dot" style="background:#38bdf8;"></span> Gx: <b id="val-gx">--</b>
-          </span>
-          <span class="g-pill" id="pill-gy" title="Kliknij, aby włączyć/wyłączyć oś Gy (poprzeczne)">
-            <span class="g-dot" style="background:#f59e0b;"></span> Gy: <b id="val-gy">--</b>
-          </span>
-          <span class="g-pill" id="pill-gz" title="Kliknij, aby włączyć/wyłączyć oś Gz (pionowe)">
-            <span class="g-dot" style="background:#c084fc;"></span> Gz: <b id="val-gz">--</b>
-          </span>
-          <span class="g-pill disabled" id="pill-gmag" title="Kliknij, aby włączyć/wyłączyć wypadkowe |G|">
-            <span class="g-dot" style="background:#10b981;"></span> |G|: <b id="val-gmag">--</b>
-          </span>
-        </div>
-
-        <div class="chart-legend-box" id="chart-legend-gg" style="display: none;">
-          <span style="color:#94a3b8;">Przeciążenie 2D (Gx vs Gy) | Max skręt: <b id="val-gg-max-lat" style="color:#f59e0b;">--</b> | Max wzdłużne: <b id="val-gg-max-lon" style="color:#38bdf8;">--</b></span>
+        <div class="chart-legend-box" id="chart-legend-gg" style="display: ${(!includeElevation && hasGForceData) ? 'flex' : 'none'};">
+          <span style="color:#e2e8f0;">Bieżące: <b id="val-gg-curr">--</b></span>
+          <span style="color:#64748b;">|</span>
+          <span style="color:#94a3b8;">Max skręt: <b id="val-gg-max-lat" style="color:#f59e0b;">--</b></span>
+          <span style="color:#64748b;">|</span>
+          <span style="color:#94a3b8;">Max wzdłużne: <b id="val-gg-max-lon" style="color:#38bdf8;">--</b></span>
         </div>
 
         <div class="chart-actions">
@@ -1326,9 +1937,16 @@
 
   <script>
     const points = ${rawJson};
-    const segments = ${segsJson};
+    const segLens = ${segLensJson};
+    const segments = [];
+    let _curOff = 0;
+    for (let _i = 0; _i < segLens.length; _i++) {
+      const _l = segLens[_i];
+      segments.push(points.slice(_curOff, _curOff + _l));
+      _curOff += _l;
+    }
     const stats = ${statsJson};
-    const colorMode = ${JSON.stringify(colorMode)};
+    let activeColorMode = ${JSON.stringify(colorMode)};
     const singleColor = ${JSON.stringify(singleColor)};
     const minAlt = ${stats.minAlt};
     const maxAlt = ${stats.maxAlt};
@@ -1336,15 +1954,16 @@
     const includeElevation = ${includeElevation ? 'true' : 'false'};
     const showBottomPanel = ${showBottomPanel ? 'true' : 'false'};
 
-    const SPEED_STOPS = [
-      { spd: 0,   r: 6,   g: 182, b: 212 },
-      { spd: 25,  r: 20,  g: 184, b: 166 },
-      { spd: 50,  r: 34,  g: 197, b: 94  },
-      { spd: 75,  r: 132, g: 204, b: 22  },
-      { spd: 95,  r: 234, g: 179, b: 8   },
-      { spd: 115, r: 249, g: 115, b: 22  },
-      { spd: 135, r: 239, g: 68,  b: 68  },
-      { spd: 165, r: 225, g: 29,  b: 72  }
+    const SPEED_PALETTE = [
+      { pct: 0.00, r: 6,   g: 182, b: 212 },
+      { pct: 0.08, r: 14,  g: 165, b: 233 },
+      { pct: 0.18, r: 16,  g: 185, b: 129 },
+      { pct: 0.32, r: 34,  g: 197, b: 94  },
+      { pct: 0.48, r: 132, g: 204, b: 22  },
+      { pct: 0.64, r: 234, g: 179, b: 8   },
+      { pct: 0.78, r: 249, g: 115, b: 22  },
+      { pct: 0.90, r: 239, g: 68,  b: 68  },
+      { pct: 1.00, r: 225, g: 29,  b: 72  }
     ];
 
     const ALTITUDE_STOPS = [
@@ -1357,11 +1976,11 @@
     ];
 
     function getTrackColor(pt) {
-      if (colorMode === 'single') return singleColor;
-      if (colorMode === 'altitude') {
+      if (activeColorMode === 'single') return singleColor;
+      if (activeColorMode === 'altitude') {
         const span = Math.max(10, maxAlt - minAlt);
-        const alt = pt.altitude !== null ? pt.altitude : minAlt;
-        const clamped = Math.max(0, Math.min(1.0, (alt - minAlt) / span));
+        const alt = (pt.altitude !== null && pt.altitude !== undefined && !isNaN(Number(pt.altitude))) ? Number(pt.altitude) : minAlt;
+        const clamped = Math.max(0, Math.min(1.0, Math.round(((alt - minAlt) / span) * 16) / 16));
         for (let i = 0; i < ALTITUDE_STOPS.length - 1; i++) {
           const s0 = ALTITUDE_STOPS[i];
           const s1 = ALTITUDE_STOPS[i + 1];
@@ -1376,13 +1995,16 @@
         return 'rgb(168, 85, 247)';
       }
 
-      // Speed mode
-      const spd = Math.max(0, Math.min(165, pt.speed_kmh || 0));
-      for (let i = 0; i < SPEED_STOPS.length - 1; i++) {
-        const s0 = SPEED_STOPS[i];
-        const s1 = SPEED_STOPS[i + 1];
-        if (spd >= s0.spd && spd <= s1.spd) {
-          const f = (spd - s0.spd) / (s1.spd - s0.spd);
+      // Speed mode (kwantyzacja do 20 koszyków dla wydajności Canvas z perceptualną korekcją gamma)
+      const rawSpd = pt.color_speed !== undefined ? pt.color_speed : (pt.speed_kmh || 0);
+      const maxSpd = Math.max(10, Number(stats.maxSpeedKmh) || 100);
+      const ratio = Math.max(0, Math.min(1.0, rawSpd / maxSpd));
+      const clamped = Math.round(Math.pow(ratio, 0.85) * 20) / 20;
+      for (let i = 0; i < SPEED_PALETTE.length - 1; i++) {
+        const s0 = SPEED_PALETTE[i];
+        const s1 = SPEED_PALETTE[i + 1];
+        if (clamped >= s0.pct && clamped <= s1.pct) {
+          const f = (clamped - s0.pct) / (s1.pct - s0.pct);
           const r = Math.round(s0.r + (s1.r - s0.r) * f);
           const g = Math.round(s0.g + (s1.g - s0.g) * f);
           const b = Math.round(s0.b + (s1.b - s0.b) * f);
@@ -1392,30 +2014,230 @@
       return 'rgb(225, 29, 72)';
     }
 
+    function updateLegend(mode) {
+      const card = document.getElementById('legend-card');
+      const title = document.getElementById('legend-title');
+      const bar = document.getElementById('legend-bar');
+      const ticks = document.getElementById('legend-ticks');
+      if (!card || !title || !bar || !ticks) return;
+
+      if (mode === 'single') {
+        card.style.display = 'none';
+        return;
+      }
+
+      card.style.display = 'block';
+      if (mode === 'altitude') {
+        title.innerText = 'WYSOKOŚĆ (M N.P.M.)';
+        bar.style.background = 'linear-gradient(to right, #10b981 0%, #84cc16 20%, #eab308 40%, #f97316 65%, #ef4444 85%, #a855f7 100%)';
+        ticks.innerHTML = '<span>' + minAlt.toFixed(0) + 'm</span><span>' + ((minAlt + maxAlt) / 2).toFixed(0) + 'm</span><span>' + maxAlt.toFixed(0) + 'm</span>';
+      } else {
+        const maxSpd = Math.max(10, Math.round(stats.maxSpeedKmh || 100));
+        title.innerText = 'PRĘDKOŚĆ (KM/H)';
+        bar.style.background = 'linear-gradient(to right, #06b6d4 0%, #0ea5e9 8%, #10b981 18%, #22c55e 32%, #84cc16 48%, #eab308 64%, #f97316 78%, #ef4444 90%, #e11d48 100%)';
+        ticks.innerHTML = '<span>0</span><span>' + Math.round(maxSpd * 0.25) + '</span><span>' + Math.round(maxSpd * 0.5) + '</span><span>' + Math.round(maxSpd * 0.75) + '</span><span>' + maxSpd + '</span>';
+      }
+    }
+
+    function computeLocationSpeeds(pts, mode) {
+      if (!pts || !pts.length) return;
+      if (mode === 'last') {
+        for (let i = 0; i < pts.length; i++) {
+          pts[i].color_speed = pts[i].speed_kmh || 0;
+        }
+        return;
+      }
+      const midLat = pts[0].lat;
+      const cosLat = Math.cos(midLat * Math.PI / 180);
+      const cellLat = 0.00045;
+      const cellLon = cellLat / Math.max(0.1, cosLat);
+      const grid = new Map();
+
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i];
+        const ci = Math.floor(p.lat / cellLat);
+        const cj = Math.floor(p.lon / cellLon);
+        const key = ci + '_' + cj;
+        let cell = grid.get(key);
+        if (!cell) {
+          cell = { ci, cj, speeds: [] };
+          grid.set(key, cell);
+        }
+        cell.speeds.push(p.speed_kmh || 0);
+      }
+
+      for (const cell of grid.values()) {
+        let maxS = 0;
+        let sumMoving = 0;
+        let countMoving = 0;
+        let sumAll = 0;
+        for (let s = 0; s < cell.speeds.length; s++) {
+          const spd = cell.speeds[s];
+          if (spd > maxS) maxS = spd;
+          sumAll += spd;
+          if (spd >= 2.0) {
+            sumMoving += spd;
+            countMoving++;
+          }
+        }
+        cell.maxSpeed = maxS;
+        cell.avgSpeed = countMoving > 0 ? (sumMoving / countMoving) : (sumAll / Math.max(1, cell.speeds.length));
+      }
+
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i];
+        const ci = Math.floor(p.lat / cellLat);
+        const cj = Math.floor(p.lon / cellLon);
+        if (mode === 'max') {
+          let maxV = p.speed_kmh || 0;
+          for (let di = -1; di <= 1; di++) {
+            for (let dj = -1; dj <= 1; dj++) {
+              const neighbor = grid.get((ci + di) + '_' + (cj + dj));
+              if (neighbor && neighbor.maxSpeed > maxV) {
+                maxV = neighbor.maxSpeed;
+              }
+            }
+          }
+          p.color_speed = maxV;
+        } else if (mode === 'avg') {
+          let sumV = 0;
+          let countV = 0;
+          for (let di = -1; di <= 1; di++) {
+            for (let dj = -1; dj <= 1; dj++) {
+              const neighbor = grid.get((ci + di) + '_' + (cj + dj));
+              if (neighbor) {
+                sumV += neighbor.avgSpeed;
+                countV++;
+              }
+            }
+          }
+          p.color_speed = countV > 0 ? (sumV / countV) : (p.speed_kmh || 0);
+        }
+      }
+    }
+
     if (!points || !points.length) {
       document.getElementById('map').innerHTML = '<div style="padding:20px; color:#ef4444;">Brak punktów trasy do wyświetlenia.</div>';
     } else {
-      const map = L.map('map', { attributionControl: false }).setView([points[0].lat, points[0].lon], 13);
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        maxZoom: 19,
-        subdomains: 'abcd'
-      }).addTo(map);
+      const map = L.map('map', {
+        attributionControl: false,
+        preferCanvas: true
+      }).setView([points[0].lat, points[0].lon], 13);
 
-      const allLatLngs = [];
-      for (const seg of segments) {
-        for (let i = 1; i < seg.length; i++) {
-          allLatLngs.push([seg[i].lat, seg[i].lon]);
-          const col = getTrackColor(seg[i]);
-          L.polyline([[seg[i-1].lat, seg[i-1].lon], [seg[i].lat, seg[i].lon]], {
-            color: col,
-            weight: 4,
-            opacity: 0.95
+      try {
+        if (typeof L.maplibreGL === 'function') {
+          // Wektorowy styl Carto Dark (OpenFreeMap Dark) - bez klucza API i bez znaków wodnych
+          L.maplibreGL({
+            style: 'https://tiles.openfreemap.org/styles/dark'
           }).addTo(map);
+        } else {
+          throw new Error('maplibreGL niedostępne');
+        }
+      } catch (e) {
+        // Zapasowy raster Carto Dark
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png', {
+          maxZoom: 19,
+          subdomains: 'abcd'
+        }).addTo(map);
+      }
+
+      const canvasRenderer = L.canvas({ padding: 0.5 });
+      const trackLayerGroup = L.featureGroup().addTo(map);
+
+      function renderTrackLayers() {
+        trackLayerGroup.clearLayers();
+
+        if (activeColorMode === 'single') {
+          for (let s = 0; s < segments.length; s++) {
+            const seg = segments[s];
+            if (seg.length < 2) continue;
+            const coords = [];
+            for (let i = 0; i < seg.length; i++) {
+              coords.push([seg[i].lat, seg[i].lon]);
+            }
+            L.polyline(coords, {
+              color: singleColor,
+              weight: 3.5,
+              opacity: 0.92,
+              renderer: canvasRenderer
+            }).addTo(trackLayerGroup);
+          }
+        } else {
+          // Kolorowanie ciągłe (speed / altitude) - grupowanie w multilinie i sortowanie wg wartości
+          const bucketMap = new Map();
+          for (let s = 0; s < segments.length; s++) {
+            const seg = segments[s];
+            for (let i = 1; i < seg.length; i++) {
+              const pt = seg[i];
+              const col = getTrackColor(pt);
+              const sortKey = (activeColorMode === 'speed')
+                ? ((pt.color_speed !== undefined ? pt.color_speed : pt.speed_kmh) || 0)
+                : ((pt.altitude !== null && !isNaN(Number(pt.altitude))) ? Number(pt.altitude) : minAlt);
+
+              let entry = bucketMap.get(col);
+              if (!entry) {
+                entry = { color: col, sortKey: sortKey, lines: [] };
+                bucketMap.set(col, entry);
+              }
+              entry.lines.push([[seg[i - 1].lat, seg[i - 1].lon], [seg[i].lat, seg[i].lon]]);
+            }
+          }
+
+          // Sortujemy rosnąco wg sortKey: wolniejsze/niższe na spód, szybsze/wyższe na wierzch!
+          const sortedEntries = Array.from(bucketMap.values()).sort((a, b) => a.sortKey - b.sortKey);
+
+          for (let k = 0; k < sortedEntries.length; k++) {
+            const item = sortedEntries[k];
+            L.polyline(item.lines, {
+              color: item.color,
+              weight: 3.5,
+              opacity: 0.92,
+              renderer: canvasRenderer
+            }).addTo(trackLayerGroup);
+          }
         }
       }
 
-      if (allLatLngs.length > 0) {
-        map.fitBounds(L.latLngBounds(allLatLngs), { padding: [40, 40] });
+      renderTrackLayers();
+
+      const selColor = document.getElementById('sel-color-mode');
+      const boxOverlap = document.getElementById('box-overlap-mode');
+
+      if (selColor) {
+        selColor.addEventListener('change', () => {
+          activeColorMode = selColor.value;
+          if (boxOverlap) {
+            boxOverlap.style.display = (activeColorMode === 'speed') ? 'inline-flex' : 'none';
+          }
+          updateLegend(activeColorMode);
+          renderTrackLayers();
+        });
+      }
+
+      const selOverlap = document.getElementById('sel-overlap-mode');
+      if (selOverlap) {
+        selOverlap.addEventListener('change', () => {
+          computeLocationSpeeds(points, selOverlap.value);
+          renderTrackLayers();
+        });
+      }
+
+      const btnToggleLegend = document.getElementById('btn-toggle-legend');
+      const legendCard = document.getElementById('legend-card');
+      if (btnToggleLegend && legendCard) {
+        btnToggleLegend.addEventListener('click', () => {
+          const isCollapsed = legendCard.classList.toggle('collapsed');
+          btnToggleLegend.innerText = isCollapsed ? '▾' : '▴';
+        });
+      }
+
+      updateLegend(activeColorMode);
+
+      if (stats.bounds && stats.bounds.length === 4) {
+        map.fitBounds([
+          [stats.bounds[1], stats.bounds[0]],
+          [stats.bounds[3], stats.bounds[2]]
+        ], { padding: [40, 40] });
       }
 
       const carIcon = L.divIcon({
@@ -1444,68 +2266,58 @@
       const btnToggleChart = document.getElementById('btn-toggle-chart');
       const canvas = document.getElementById('chart-canvas');
 
-      const tabBtnGForce = document.getElementById('tab-btn-gforce');
       const tabBtnAlt = document.getElementById('tab-btn-alt');
       const tabBtnGG = document.getElementById('tab-btn-gg');
 
-      const legendGForce = document.getElementById('chart-legend-gforce');
       const legendAlt = document.getElementById('chart-legend-alt');
       const legendGG = document.getElementById('chart-legend-gg');
 
-      const pillGx = document.getElementById('pill-gx');
-      const pillGy = document.getElementById('pill-gy');
-      const pillGz = document.getElementById('pill-gz');
-      const pillGmag = document.getElementById('pill-gmag');
-
-      const valGx = document.getElementById('val-gx');
-      const valGy = document.getElementById('val-gy');
-      const valGz = document.getElementById('val-gz');
-      const valGmag = document.getElementById('val-gmag');
       const valAlt = document.getElementById('val-alt');
+      const valGgCurr = document.getElementById('val-gg-curr');
       const valGgMaxLat = document.getElementById('val-gg-max-lat');
       const valGgMaxLon = document.getElementById('val-gg-max-lon');
 
-      let activeTab = includeElevation ? 'alt' : (hasGForceData ? 'gforce' : 'none');
-      const seriesVisible = { gx: true, gy: true, gz: true, gMag: false };
+      let activeTab = includeElevation ? 'alt' : (hasGForceData ? 'gg' : 'none');
 
       // Prekalkulacja statystyk przeciążeń
       let minG = -1.0, maxG = 1.0;
       let peakLatG = 0.0, peakLonG = 0.0;
-      for (let i = 0; i < points.length; i++) {
-        const p = points[i];
-        const gx = (p.g_x !== null && p.g_x !== undefined && !isNaN(Number(p.g_x))) ? Number(p.g_x) : null;
-        const gy = (p.g_y !== null && p.g_y !== undefined && !isNaN(Number(p.g_y))) ? Number(p.g_y) : null;
-        const gz = (p.g_z !== null && p.g_z !== undefined && !isNaN(Number(p.g_z))) ? Number(p.g_z) : null;
+      if (hasGForceData) {
+        for (let i = 0; i < points.length; i++) {
+          const p = points[i];
+          const gx = (p.g_x !== null && p.g_x !== undefined && !isNaN(Number(p.g_x))) ? Number(p.g_x) : null;
+          const gy = (p.g_y !== null && p.g_y !== undefined && !isNaN(Number(p.g_y))) ? Number(p.g_y) : null;
+          const gz = (p.g_z !== null && p.g_z !== undefined && !isNaN(Number(p.g_z))) ? Number(p.g_z) : null;
 
-        if (gx !== null) {
-          minG = Math.min(minG, gx);
-          maxG = Math.max(maxG, gx);
-          peakLonG = Math.max(peakLonG, Math.abs(gx));
+          if (gx !== null) {
+            minG = Math.min(minG, gx);
+            maxG = Math.max(maxG, gx);
+            peakLonG = Math.max(peakLonG, Math.abs(gx));
+          }
+          if (gy !== null) {
+            minG = Math.min(minG, gy);
+            maxG = Math.max(maxG, gy);
+            peakLatG = Math.max(peakLatG, Math.abs(gy));
+          }
+          if (gz !== null) {
+            minG = Math.min(minG, gz);
+            maxG = Math.max(maxG, gz);
+          }
         }
-        if (gy !== null) {
-          minG = Math.min(minG, gy);
-          maxG = Math.max(maxG, gy);
-          peakLatG = Math.max(peakLatG, Math.abs(gy));
-        }
-        if (gz !== null) {
-          minG = Math.min(minG, gz);
-          maxG = Math.max(maxG, gz);
-        }
+        const spanG = Math.max(0.4, maxG - minG);
+        minG = Math.floor((minG - spanG * 0.08) * 10) / 10;
+        maxG = Math.ceil((maxG + spanG * 0.08) * 10) / 10;
+
+        if (valGgMaxLat) valGgMaxLat.innerText = peakLatG.toFixed(2) + ' G';
+        if (valGgMaxLon) valGgMaxLon.innerText = peakLonG.toFixed(2) + ' G';
       }
-      const spanG = Math.max(0.4, maxG - minG);
-      minG = Math.floor((minG - spanG * 0.08) * 10) / 10;
-      maxG = Math.ceil((maxG + spanG * 0.08) * 10) / 10;
 
-      if (valGgMaxLat) valGgMaxLat.innerText = peakLatG.toFixed(2) + ' G';
-      if (valGgMaxLon) valGgMaxLon.innerText = peakLonG.toFixed(2) + ' G';
-
-      // Obliczenie timestampów
-      const timestamps = points.map(p => {
-        if (!p.timestamp) return null;
-        const t = new Date(p.timestamp).getTime();
-        return isNaN(t) ? null : t;
-      });
-      const hasTimestamps = timestamps.length > 0 && timestamps[0] !== null;
+      // Szybkie obliczenie timestampów
+      const timestamps = new Float64Array(points.length);
+      for (let i = 0; i < points.length; i++) {
+        timestamps[i] = points[i].timestamp ? Date.parse(points[i].timestamp) : NaN;
+      }
+      const hasTimestamps = timestamps.length > 0 && !isNaN(timestamps[0]);
 
       let isPlaying = false;
       let animFrameId = null;
@@ -1587,139 +2399,6 @@
           ctx.beginPath();
           ctx.arc(dotX, dotY, 2.5, 0, Math.PI * 2);
           ctx.fill();
-        }
-      }
-
-      function drawGForceTimeline(currIdx) {
-        if (!canvas) return;
-        const rect = canvas.getBoundingClientRect();
-        const reqW = Math.round(rect.width) || canvas.parentElement?.clientWidth || 800;
-        const reqH = Math.round(rect.height) || 110;
-        if (canvas.width !== reqW || canvas.height !== reqH) {
-          canvas.width = reqW;
-          canvas.height = reqH;
-        }
-        const ctx = canvas.getContext('2d');
-        const W = canvas.width, H = canvas.height;
-
-        ctx.fillStyle = '#0f172a';
-        ctx.fillRect(0, 0, W, H);
-
-        const padLeft = 45;
-        const padRight = 15;
-        const padTop = 14;
-        const padBottom = 20;
-        const plotW = Math.max(10, W - padLeft - padRight);
-        const plotH = Math.max(10, H - padTop - padBottom);
-
-        function valToY(val) {
-          return padTop + ((maxG - val) / (maxG - minG)) * plotH;
-        }
-
-        // Linie siatki Y
-        const step = (maxG - minG) > 3.0 ? 1.0 : 0.5;
-        const startVal = Math.ceil(minG / step) * step;
-        ctx.font = '10px ui-monospace, monospace';
-        ctx.textAlign = 'right';
-        ctx.textBaseline = 'middle';
-
-        for (let v = startVal; v <= maxG + 0.001; v += step) {
-          const y = valToY(v);
-          const isZero = Math.abs(v) < 0.001;
-
-          ctx.beginPath();
-          ctx.moveTo(padLeft, y);
-          ctx.lineTo(padLeft + plotW, y);
-          ctx.strokeStyle = isZero ? '#64748b' : '#1e293b';
-          ctx.lineWidth = isZero ? 1.5 : 1;
-          ctx.setLineDash(isZero ? [4, 4] : [2, 4]);
-          ctx.stroke();
-          ctx.setLineDash([]);
-
-          ctx.fillStyle = isZero ? '#94a3b8' : '#475569';
-          ctx.fillText((v >= 0 ? '+' : '') + v.toFixed(1) + 'G', padLeft - 6, y);
-        }
-
-        // Serie wykresu
-        const series = [
-          { key: 'gx', color: '#38bdf8', width: 1.8, prop: 'g_x' },
-          { key: 'gy', color: '#f59e0b', width: 1.8, prop: 'g_y' },
-          { key: 'gz', color: '#c084fc', width: 1.8, prop: 'g_z' },
-          { key: 'gMag', color: '#10b981', width: 1.5, prop: 'mag' }
-        ];
-
-        for (const s of series) {
-          if (!seriesVisible[s.key]) continue;
-          ctx.strokeStyle = s.color;
-          ctx.lineWidth = s.width;
-          ctx.beginPath();
-          let inPath = false;
-
-          for (let i = 0; i < points.length; i++) {
-            const p = points[i];
-            let val = null;
-            if (s.key === 'gMag') {
-              if (p.g_x !== null && p.g_y !== null && p.g_z !== null) {
-                val = Math.hypot(Number(p.g_x), Number(p.g_y), Number(p.g_z));
-              }
-            } else {
-              val = (p[s.prop] !== null && p[s.prop] !== undefined) ? Number(p[s.prop]) : null;
-            }
-
-            if (val === null || isNaN(val)) {
-              inPath = false;
-              continue;
-            }
-
-            const x = padLeft + (i / Math.max(1, points.length - 1)) * plotW;
-            const y = valToY(val);
-
-            if (!inPath) {
-              ctx.moveTo(x, y);
-              inPath = true;
-            } else {
-              ctx.lineTo(x, y);
-            }
-          }
-          ctx.stroke();
-        }
-
-        // Kursor bieżącej pozycji
-        if (points.length > 0 && currIdx >= 0 && currIdx < points.length) {
-          const curX = padLeft + (currIdx / Math.max(1, points.length - 1)) * plotW;
-
-          ctx.strokeStyle = 'rgba(239, 68, 68, 0.85)';
-          ctx.lineWidth = 1.5;
-          ctx.setLineDash([3, 3]);
-          ctx.beginPath();
-          ctx.moveTo(curX, padTop);
-          ctx.lineTo(curX, padTop + plotH);
-          ctx.stroke();
-          ctx.setLineDash([]);
-
-          const pCur = points[currIdx];
-          for (const s of series) {
-            if (!seriesVisible[s.key]) continue;
-            let val = null;
-            if (s.key === 'gMag') {
-              if (pCur.g_x !== null && pCur.g_y !== null && pCur.g_z !== null) {
-                val = Math.hypot(Number(pCur.g_x), Number(pCur.g_y), Number(pCur.g_z));
-              }
-            } else {
-              val = (pCur[s.prop] !== null && pCur[s.prop] !== undefined) ? Number(pCur[s.prop]) : null;
-            }
-
-            if (val !== null && !isNaN(val)) {
-              const curY = valToY(val);
-              ctx.fillStyle = s.color;
-              ctx.beginPath();
-              ctx.arc(curX, curY, 3.5, 0, Math.PI * 2);
-              ctx.fill();
-              ctx.strokeStyle = '#ffffff';
-              ctx.lineWidth = 1;
-              ctx.stroke();
-            }
-          }
         }
       }
 
@@ -2016,9 +2695,7 @@
 
       function updateChart(currIdx) {
         if (!canvas || !showBottomPanel) return;
-        if (activeTab === 'gforce') {
-          drawGForceTimeline(currIdx);
-        } else if (activeTab === 'alt') {
+        if (activeTab === 'alt') {
           drawAltChart(currIdx);
         } else if (activeTab === 'gg') {
           drawGGFrictionCircle(currIdx);
@@ -2046,27 +2723,25 @@
         if (hSpd) hSpd.innerText = (pt.speed_kmh || 0).toFixed(1) + ' km/h';
         if (hAlt) hAlt.innerText = (pt.altitude !== null && pt.altitude !== undefined && !isNaN(Number(pt.altitude))) ? Number(pt.altitude).toFixed(1) + ' m' : '--';
 
-        const gx = (pt.g_x !== null && pt.g_x !== undefined && !isNaN(Number(pt.g_x))) ? Number(pt.g_x) : null;
-        const gy = (pt.g_y !== null && pt.g_y !== undefined && !isNaN(Number(pt.g_y))) ? Number(pt.g_y) : null;
-        const gz = (pt.g_z !== null && pt.g_z !== undefined && !isNaN(Number(pt.g_z))) ? Number(pt.g_z) : null;
-        const gMag = (gx !== null && gy !== null && gz !== null) ? Math.hypot(gx, gy, gz) : null;
+        if (hasGForceData) {
+          const gx = (pt.g_x !== null && pt.g_x !== undefined && !isNaN(Number(pt.g_x))) ? Number(pt.g_x) : null;
+          const gy = (pt.g_y !== null && pt.g_y !== undefined && !isNaN(Number(pt.g_y))) ? Number(pt.g_y) : null;
 
-        if (hGx) hGx.innerText = gx !== null ? ((gx >= 0 ? '+' : '') + gx.toFixed(3) + ' G') : '--';
-        if (hGy) hGy.innerText = gy !== null ? ((gy >= 0 ? '+' : '') + gy.toFixed(3) + ' G') : '--';
-        if (hGz) hGz.innerText = gz !== null ? ((gz >= 0 ? '+' : '') + gz.toFixed(3) + ' G') : '--';
-        if (hGmag) hGmag.innerText = gMag !== null ? (gMag.toFixed(3) + ' G') : '--';
+          if (valGgCurr) {
+            if (gx !== null && gy !== null) {
+              valGgCurr.innerText = 'Gx: ' + (gx >= 0 ? '+' : '') + gx.toFixed(2) + 'G, Gy: ' + (gy >= 0 ? '+' : '') + gy.toFixed(2) + 'G';
+            } else {
+              valGgCurr.innerText = '--';
+            }
+          }
+          if (valAlt) valAlt.innerText = (pt.altitude !== null && pt.altitude !== undefined && !isNaN(Number(pt.altitude))) ? Number(pt.altitude).toFixed(1) + ' m' : '-- m';
 
-        if (valGx) valGx.innerText = gx !== null ? ((gx >= 0 ? '+' : '') + gx.toFixed(2) + ' G') : '--';
-        if (valGy) valGy.innerText = gy !== null ? ((gy >= 0 ? '+' : '') + gy.toFixed(2) + ' G') : '--';
-        if (valGz) valGz.innerText = gz !== null ? ((gz >= 0 ? '+' : '') + gz.toFixed(2) + ' G') : '--';
-        if (valGmag) valGmag.innerText = gMag !== null ? (gMag.toFixed(2) + ' G') : '--';
-        if (valAlt) valAlt.innerText = (pt.altitude !== null && pt.altitude !== undefined && !isNaN(Number(pt.altitude))) ? Number(pt.altitude).toFixed(1) + ' m' : '-- m';
+          drawHudGG(idx);
+          updateChart(idx);
+        }
 
         if (slider) slider.value = idx;
         if (lblProg) lblProg.innerText = (idx + 1) + ' / ' + points.length;
-
-        drawHudGG(idx);
-        updateChart(idx);
       }
 
       function stopPlayback() {
@@ -2081,7 +2756,7 @@
       function startPlayback() {
         if (currentIndex >= points.length - 1) {
           currentIndex = 0;
-          if (hasTimestamps && timestamps[0] !== null) {
+          if (hasTimestamps && !isNaN(timestamps[0])) {
             virtualTime = timestamps[0];
           }
           renderCarAt(0);
@@ -2089,7 +2764,7 @@
         isPlaying = true;
         btnPlay.innerText = '⏸ Pauza';
         lastWallClock = performance.now();
-        if (hasTimestamps && timestamps[currentIndex] !== null) {
+        if (hasTimestamps && !isNaN(timestamps[currentIndex])) {
           virtualTime = timestamps[currentIndex];
         }
         fallbackAccumMs = 0;
@@ -2114,11 +2789,11 @@
             const currT = timestamps[targetIndex];
 
             // Pomiń postoje dłuższe niż 5 minut
-            if (nextT !== null && currT !== null && (nextT - currT > 5 * 60 * 1000) && virtualTime < nextT) {
+            if (!isNaN(nextT) && !isNaN(currT) && (nextT - currT > 5 * 60 * 1000) && virtualTime < nextT) {
               virtualTime = nextT;
             }
 
-            if (nextT !== null && virtualTime >= nextT) {
+            if (!isNaN(nextT) && virtualTime >= nextT) {
               targetIndex++;
             } else {
               break;
@@ -2181,42 +2856,27 @@
         speedInput.addEventListener('change', onSpeedChange);
       }
 
-      // Obsługa zakładek wykresów
+      // Obsługa zakładek wykresów (Profil wysokości, Diagram G-G)
       function switchTab(tab) {
         activeTab = tab;
-        if (tabBtnGForce) tabBtnGForce.classList.toggle('active', tab === 'gforce');
         if (tabBtnAlt) tabBtnAlt.classList.toggle('active', tab === 'alt');
         if (tabBtnGG) tabBtnGG.classList.toggle('active', tab === 'gg');
 
-        if (legendGForce) legendGForce.style.display = (tab === 'gforce') ? 'flex' : 'none';
         if (legendAlt) legendAlt.style.display = (tab === 'alt') ? 'flex' : 'none';
         if (legendGG) legendGG.style.display = (tab === 'gg') ? 'flex' : 'none';
 
         updateChart(currentIndex);
       }
-      if (tabBtnGForce) tabBtnGForce.addEventListener('click', () => switchTab('gforce'));
       if (tabBtnAlt) tabBtnAlt.addEventListener('click', () => switchTab('alt'));
       if (tabBtnGG) tabBtnGG.addEventListener('click', () => switchTab('gg'));
-
-      // Obsługa włączania/wyłączania osi w wykresie przeciążeń
-      function setupPill(pillEl, seriesKey) {
-        if (!pillEl) return;
-        pillEl.addEventListener('click', () => {
-          seriesVisible[seriesKey] = !seriesVisible[seriesKey];
-          pillEl.classList.toggle('disabled', !seriesVisible[seriesKey]);
-          updateChart(currentIndex);
-        });
-      }
-      setupPill(pillGx, 'gx');
-      setupPill(pillGy, 'gy');
-      setupPill(pillGz, 'gz');
-      setupPill(pillGmag, 'gMag');
 
       // Zwijanie / Rozwijanie panelu wykresu
       if (btnToggleChart && chartPanel) {
         btnToggleChart.addEventListener('click', () => {
           const isCollapsed = chartPanel.classList.toggle('collapsed');
           if (ctrlBar) ctrlBar.classList.toggle('chart-collapsed', isCollapsed);
+          const legendEl = document.getElementById('legend-card');
+          if (legendEl) legendEl.classList.toggle('chart-collapsed', isCollapsed);
           btnToggleChart.innerText = isCollapsed ? '▴' : '▾';
           if (!isCollapsed) {
             setTimeout(() => updateChart(currentIndex), 120);
@@ -2271,13 +2931,24 @@
   // -------------------------------------------------------------
   // 8. GENERATORY PLIKÓW DANYCH (GPX, CSV, GEOJSON, KML)
   // -------------------------------------------------------------
-  function generateGpx(points, segments, stats, titleText) {
+  const escapeXml = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+  function generateGpx(points, segments, stats, titleText, options = {}) {
     let xml = `<?xml version="1.0" encoding="UTF-8"?>
 <gpx version="1.1" creator="NNAPER" xmlns="http://www.topografix.com/GPX/1/1">
-  <metadata><name>Trasa ${titleText}</name></metadata>
-  <trk>
-    <name>Trasa NNAPER - ${titleText}</name>
+  <metadata><name>Trasa ${escapeXml(titleText)}</name></metadata>
 `;
+    if (options.stops && Array.isArray(options.stops)) {
+      for (const st of options.stops) {
+        if (Number.isFinite(Number(st.lat)) && Number.isFinite(Number(st.lon))) {
+          xml += `  <wpt lat="${st.lat}" lon="${st.lon}">\n`;
+          if (st.name) xml += `    <name>${escapeXml(st.name)}</name>\n`;
+          xml += `  </wpt>\n`;
+        }
+      }
+    }
+
+    xml += `  <trk>\n    <name>Trasa NNAPER - ${escapeXml(titleText)}</name>\n`;
     for (const seg of segments) {
       xml += '    <trkseg>\n';
       for (const p of seg) {
@@ -2309,28 +2980,48 @@
     return new Blob([csv], { type: 'text/csv;charset=utf-8' });
   }
 
-  function generateGeoJson(points, segments, stats, titleText) {
+  function generateGeoJson(points, segments, stats, titleText, options = {}) {
     const multiCoords = segments.map(seg => seg.map(p => [p.lon, p.lat, p.altitude || 0]));
-    const geo = {
-      type: 'FeatureCollection',
-      features: [
-        {
+    const features = [
+      {
+        type: 'Feature',
+        geometry: {
+          type: 'MultiLineString',
+          coordinates: multiCoords
+        },
+        properties: {
+          name: `Trasa ${titleText}`,
+          distance_km: stats.totalDistanceKm,
+          duration_seconds: stats.durationSeconds,
+          points_count: points.length,
+          segments_count: segments.length,
+          avg_speed_kmh: stats.avgSpeedKmh,
+          max_speed_kmh: stats.maxSpeedKmh
+        }
+      }
+    ];
+
+    if (options.stops && Array.isArray(options.stops)) {
+      for (let i = 0; i < options.stops.length; i++) {
+        const st = options.stops[i];
+        const role = i === 0 ? 'start' : (i === options.stops.length - 1 ? 'destination' : `stop_${i}`);
+        features.push({
           type: 'Feature',
           geometry: {
-            type: 'MultiLineString',
-            coordinates: multiCoords
+            type: 'Point',
+            coordinates: [st.lon, st.lat]
           },
           properties: {
-            name: `Trasa ${titleText}`,
-            distance_km: stats.totalDistanceKm,
-            duration_seconds: stats.durationSeconds,
-            points_count: points.length,
-            segments_count: segments.length,
-            avg_speed_kmh: stats.avgSpeedKmh,
-            max_speed_kmh: stats.maxSpeedKmh
+            role: role,
+            name: st.name || ''
           }
-        }
-      ]
+        });
+      }
+    }
+
+    const geo = {
+      type: 'FeatureCollection',
+      features
     };
     return new Blob([JSON.stringify(geo, null, 2)], { type: 'application/geo+json;charset=utf-8' });
   }
@@ -2344,6 +3035,19 @@
     }
 
     let placemarks = '';
+    if (options.stops && Array.isArray(options.stops)) {
+      for (let i = 0; i < options.stops.length; i++) {
+        const st = options.stops[i];
+        const role = i === 0 ? 'Start' : (i === options.stops.length - 1 ? 'Cel' : `Punkt ${i}`);
+        placemarks += `    <Placemark>
+      <name>${escapeXml(role + ': ' + (st.name || ''))}</name>
+      <Point>
+        <coordinates>${st.lon},${st.lat},0</coordinates>
+      </Point>
+    </Placemark>\n`;
+      }
+    }
+
     for (let s = 0; s < segments.length; s++) {
       const coordsStr = segments[s].map(p => `${p.lon},${p.lat},${p.altitude || 0}`).join(' ');
       placemarks += `    <Placemark>
@@ -2360,7 +3064,7 @@
     const kml = `<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
   <Document>
-    <name>Trasa NNAPER - ${titleText}</name>
+    <name>Trasa NNAPER - ${escapeXml(titleText)}</name>
     <Style id="routeStyle">
       <LineStyle>
         <color>${kmlColor}</color>
@@ -2386,19 +3090,31 @@ ${placemarks}
   const btnDoExport = document.getElementById('btn-do-export');
   const btnOpenMenu = document.getElementById('btn-open-export');
 
-  const selDay = document.getElementById('export-sel-day');
+  const selDayYear = document.getElementById('export-sel-day-year');
+  const selDayMonth = document.getElementById('export-sel-day-month');
+  const selDayDay = document.getElementById('export-sel-day-day');
   const selYear = document.getElementById('export-sel-year');
   const selYearM = document.getElementById('export-sel-year-m');
   const selMonth = document.getElementById('export-sel-month');
 
+  const exportOptionsBox = document.getElementById('export-options-box');
+  const colorModeRow = document.getElementById('opt-color-mode-row');
   const selColorMode = document.getElementById('export-opt-color-mode');
   const inSingleColor = document.getElementById('export-opt-single-color');
+  const selSpeedOverlap = document.getElementById('export-opt-speed-overlap');
+  const speedOverlapRow = document.getElementById('opt-speed-overlap-row');
   const chkIncludeChart = document.getElementById('export-opt-include-chart');
   const chartRow = document.getElementById('opt-chart-row');
   const chkIncludeGForce = document.getElementById('export-opt-include-gforce');
   const gforceRow = document.getElementById('opt-gforce-row');
-  const selGifSpeed = document.getElementById('export-opt-gif-speed');
+  const inGifFrames = document.getElementById('export-opt-gif-frames');
+  const inGifDuration = document.getElementById('export-opt-gif-duration');
+  const inGifMaxMb = document.getElementById('export-opt-gif-max-mb');
+  const selGifPreset = document.getElementById('export-opt-gif-preset');
+  const gifFramesBadge = document.getElementById('gif-frames-badge');
+  const gifCalcInfo = document.getElementById('gif-calc-info');
   const gifSpeedRow = document.getElementById('opt-gif-speed-row');
+  let isGifAutoFrames = true;
 
   const statusBox = document.getElementById('export-status-box');
   const statusText = document.getElementById('export-status-text');
@@ -2423,32 +3139,98 @@ ${placemarks}
     return cachedDatesTree || {};
   }
 
+  function getSelectedDay() {
+    const y = selDayYear ? selDayYear.value : '';
+    const m = selDayMonth ? selDayMonth.value : '';
+    const d = selDayDay ? selDayDay.value : '';
+    if (!y || !m || !d) return '';
+    return `${y}-${m}-${d}`;
+  }
+
+  function updateDayDays(preselectDay = null) {
+    if (!selDayYear || !selDayMonth || !selDayDay || !cachedDatesTree) return;
+    const y = selDayYear.value;
+    const m = selDayMonth.value;
+    const days = (y && m && cachedDatesTree[y] && cachedDatesTree[y][m])
+      ? [...cachedDatesTree[y][m]].sort().reverse()
+      : [];
+
+    selDayDay.innerHTML = days.length ? '' : '<option value="">Brak dni</option>';
+    days.forEach(d => {
+      const opt = document.createElement('option');
+      opt.value = d;
+      opt.innerText = d;
+      selDayDay.appendChild(opt);
+    });
+
+    if (preselectDay) {
+      const dPad = String(preselectDay).padStart(2, '0');
+      if (days.includes(dPad)) selDayDay.value = dPad;
+    }
+  }
+
+  function updateDayMonths(preselectMonth = null, preselectDay = null) {
+    if (!selDayYear || !selDayMonth || !cachedDatesTree) return;
+    const y = selDayYear.value;
+    const months = y && cachedDatesTree[y] ? Object.keys(cachedDatesTree[y]).sort().reverse() : [];
+
+    selDayMonth.innerHTML = months.length ? '' : '<option value="">Brak miesięcy</option>';
+    months.forEach(m => {
+      const opt = document.createElement('option');
+      opt.value = m;
+      opt.innerText = `${m} - ${MONTH_NAMES[m] || m}`;
+      selDayMonth.appendChild(opt);
+    });
+
+    if (preselectMonth) {
+      const mPad = String(preselectMonth).padStart(2, '0');
+      if (months.includes(mPad)) selDayMonth.value = mPad;
+    }
+
+    updateDayDays(preselectDay);
+  }
+
+  if (selDayYear) {
+    selDayYear.addEventListener('change', () => updateDayMonths());
+  }
+  if (selDayMonth) {
+    selDayMonth.addEventListener('change', () => updateDayDays());
+  }
+
   async function populateScopeControls(preselect = {}) {
     const tree = await loadDatesTree();
     const years = Object.keys(tree).sort().reverse();
 
-    const allDays = [];
-    years.forEach(y => {
-      Object.keys(tree[y]).sort().reverse().forEach(m => {
-        tree[y][m].sort().reverse().forEach(d => {
-          allDays.push(`${y}-${m}-${d}`);
-        });
-      });
-    });
+    // 1. Kontrolki wyboru dnia (osobno Rok, Miesiąc, Dzień)
+    let preDayYear = null;
+    let preDayMonth = null;
+    let preDayDay = null;
 
-    if (selDay) {
-      selDay.innerHTML = allDays.length ? '' : '<option value="">Brak zarejestrowanych dni</option>';
-      allDays.forEach(d => {
-        const opt = document.createElement('option');
-        opt.value = d;
-        opt.innerText = d;
-        selDay.appendChild(opt);
-      });
-      if (preselect.day && allDays.includes(preselect.day)) {
-        selDay.value = preselect.day;
+    if (preselect.day) {
+      const parts = String(preselect.day).split('-');
+      if (parts.length === 3) {
+        preDayYear = parts[0];
+        preDayMonth = parts[1];
+        preDayDay = parts[2];
       }
     }
 
+    if (selDayYear) {
+      selDayYear.innerHTML = years.length ? '' : '<option value="">Brak lat</option>';
+      years.forEach(y => {
+        const opt = document.createElement('option');
+        opt.value = y;
+        opt.innerText = y;
+        selDayYear.appendChild(opt);
+      });
+      if (preDayYear && years.includes(String(preDayYear))) {
+        selDayYear.value = String(preDayYear);
+      }
+    }
+
+    updateDayMonths(preDayMonth, preDayDay);
+
+    // 2. Kontrolki wyboru roku
     if (selYear) {
       selYear.innerHTML = years.length ? '' : '<option value="">Brak lat</option>';
       years.forEach(y => {
@@ -2462,6 +3244,7 @@ ${placemarks}
       }
     }
 
+    // 3. Kontrolki wyboru miesiąca
     if (selYearM) {
       selYearM.innerHTML = years.length ? '' : '<option value="">Brak lat</option>';
       years.forEach(y => {
@@ -2501,6 +3284,95 @@ ${placemarks}
     selYearM.addEventListener('change', () => updateMonthSelect());
   }
 
+  function updatePlannedRouteScopeInfo() {
+    const infoEl = document.getElementById('export-planned-route-info');
+    if (!infoEl) return;
+    const planned = window.getPlannedRouteData?.();
+    if (planned && planned.points && planned.points.length >= 2) {
+      const stopsStr = (planned.stops && planned.stops.length)
+        ? planned.stops.map((s, idx) => {
+            const role = idx === 0 ? '🟢 Start' : (idx === planned.stops.length - 1 ? '🏁 Cel' : `📍 Punkt ${idx}`);
+            return `<b>${role}:</b> ${s.name || 'Współrzędne'}`;
+          }).join('<br/>')
+        : 'Trasa zaplanowana';
+      infoEl.innerHTML = `
+        <div style="font-weight: 600; color: #38bdf8; margin-bottom: 6px;">🎯 Aktywna trasa z planera:</div>
+        <div style="font-size: 12px; color: #f1f5f9; line-height: 1.6; margin-bottom: 8px; background: rgba(15, 23, 42, 0.6); padding: 8px 10px; border-radius: 6px; border: 1px solid #1e293b;">
+          ${stopsStr}
+        </div>
+        <div style="font-size: 12px; color: #94a3b8;">
+          Dystans: <b style="color: #10b981;">${planned.distanceKm.toFixed(1)} km</b>
+          ${planned.durationMin ? ` • Szacowany czas: <b style="color: #e2e8f0;">${planned.durationMin} min</b>` : ''}
+          • Punkty geometrii: <b>${planned.points.length}</b>
+        </div>
+      `;
+    } else {
+      infoEl.innerHTML = `
+        <div style="color: #f59e0b; font-weight: 600; margin-bottom: 6px;">⚠️ Brak wyznaczonej trasy w planerze</div>
+        <div style="font-size: 12px; color: #94a3b8; line-height: 1.5;">
+          Otwórz panel <b>Planowanie trasy</b> na mapie, dodaj punkty A i B, aby wyznaczyć trasę, a następnie wróć tutaj lub kliknij przycisk <b>„📥 Eksportuj trasę”</b> bezpośrednio w panelu planera.
+        </div>
+      `;
+    }
+  }
+
+  function updateOptionVisibility() {
+    const isSingleDayOrActive = (activeScope === 'day' || activeScope === 'active');
+    const isPlannedRoute = (activeScope === 'planned');
+    const isStaticVisual = (activeFormat === 'png' || activeFormat === 'svg' || activeFormat === 'gif');
+    const isGraphicWithChart = (activeFormat === 'html' || activeFormat === 'png' || activeFormat === 'svg');
+
+    // Wiersz trybu kolorowania:
+    // NIEWYŚWIETLANY dla HTML (wewnątrz wyeksportowanego HTML użytkownik sam wybiera tryb na żywo w pasku).
+    // Widoczny wyłącznie dla statycznych formatów graficznych: PNG, SVG, GIF.
+    if (colorModeRow) {
+      colorModeRow.style.display = isStaticVisual ? 'flex' : 'none';
+    }
+
+    // Wybór koloru pojedynczego (tylko dla formatów statycznych w trybie 'single')
+    if (inSingleColor) {
+      inSingleColor.style.display = (isStaticVisual && selColorMode && selColorMode.value === 'single') ? 'inline-block' : 'none';
+    }
+
+    // Wspólne odcinki dróg:
+    // Ukryte dla planned (nie nakładają się różne dni) oraz dla HTML
+    if (speedOverlapRow) {
+      speedOverlapRow.style.display = (!isPlannedRoute && isStaticVisual && selColorMode && selColorMode.value === 'speed') ? 'flex' : 'none';
+    }
+
+    // Profil wysokości: dozwolony WYŁĄCZNIE dla formatów HTML, PNG i SVG przy 1 dniu / aktywnych (dla planned brak wysokości GPS)
+    if (chartRow) {
+      chartRow.style.display = (!isPlannedRoute && isSingleDayOrActive && isGraphicWithChart) ? 'flex' : 'none';
+    }
+
+    // Wykres przeciążeń G / Diagram G-G: TYLKO dla HTML oraz SVG (dla 1 dnia / aktywnych z telemetrią G)
+    if (gforceRow) {
+      gforceRow.style.display = (!isPlannedRoute && isSingleDayOrActive && (activeFormat === 'html' || activeFormat === 'svg')) ? 'flex' : 'none';
+    }
+
+    // Parametry animacji GIF: TYLKO dla formatu GIF
+    if (gifSpeedRow) {
+      gifSpeedRow.style.display = (activeFormat === 'gif') ? 'flex' : 'none';
+    }
+
+    // Cała sekcja 3 (Opcje stylu i wykresów):
+    // Wyświetlana tylko wtedy, gdy przynajmniej jedna opcja jest faktycznie dostępna.
+    const hasAnyOption = isStaticVisual || (activeFormat === 'html' && isSingleDayOrActive && !isPlannedRoute);
+    if (exportOptionsBox) {
+      exportOptionsBox.style.display = hasAnyOption ? 'block' : 'none';
+      const exportOptionsTitle = exportOptionsBox.querySelector('.export-section-title');
+      if (exportOptionsTitle) {
+        if (activeFormat === 'html') {
+          exportOptionsTitle.innerText = '3. Opcje wykresów i telemetrii:';
+        } else if (activeFormat === 'gif') {
+          exportOptionsTitle.innerText = '3. Opcje stylu i animacji GIF:';
+        } else {
+          exportOptionsTitle.innerText = '3. Opcje stylu i wykresów:';
+        }
+      }
+    }
+  }
+
   function setScopeTab(scope) {
     activeScope = scope;
     document.querySelectorAll('.scope-tab').forEach(t => {
@@ -2512,16 +3384,19 @@ ${placemarks}
       month: document.getElementById('export-scope-month-box'),
       year: document.getElementById('export-scope-year-box'),
       all: document.getElementById('export-scope-all-box'),
-      active: document.getElementById('export-scope-active-box')
+      active: document.getElementById('export-scope-active-box'),
+      planned: document.getElementById('export-scope-planned-box')
     };
 
     Object.keys(boxes).forEach(k => {
       if (boxes[k]) boxes[k].style.display = (k === scope) ? 'block' : 'none';
     });
 
-    if (chartRow) {
-      chartRow.style.display = (activeFormat === 'html' || activeFormat === 'svg' || scope === 'day') ? 'flex' : 'none';
+    if (scope === 'planned') {
+      updatePlannedRouteScopeInfo();
     }
+
+    updateOptionVisibility();
   }
 
   function setFormat(fmt) {
@@ -2530,24 +3405,100 @@ ${placemarks}
       c.classList.toggle('active', c.getAttribute('data-format') === fmt);
     });
 
-    if (gifSpeedRow) {
-      gifSpeedRow.style.display = (fmt === 'gif') ? 'flex' : 'none';
-    }
-    if (gforceRow) {
-      gforceRow.style.display = (fmt === 'html') ? 'flex' : 'none';
-    }
-    if (chartRow) {
-      chartRow.style.display = (fmt === 'html' || fmt === 'svg' || activeScope === 'day') ? 'flex' : 'none';
-    }
+    updateOptionVisibility();
   }
 
   // Obsługa wyboru koloru: prędkość / wysokość / jednolity
   if (selColorMode) {
     selColorMode.addEventListener('change', () => {
-      const mode = selColorMode.value;
-      if (inSingleColor) {
-        inSingleColor.style.display = (mode === 'single') ? 'inline-block' : 'none';
+      updateOptionVisibility();
+    });
+  }
+
+  // Obsługa parametrów animacji GIF (maksymalna płynność, czas i dopasowanie do limitu MB)
+  function updateGifCalcInfo() {
+    if (!gifCalcInfo) return;
+    const dur = Math.max(0.5, Math.min(60, parseFloat(inGifDuration?.value) || 4.0));
+    const maxMb = inGifMaxMb ? parseFloat(inGifMaxMb.value) : 5.0;
+    const maxMbStr = (!isNaN(maxMb) && maxMb > 0) ? `do ${maxMb.toFixed(1)} MB` : 'bez limitu wagi';
+
+    if (isGifAutoFrames) {
+      const targetFps = dur <= 4.0 ? 25 : 22;
+      const autoFrames = Math.max(20, Math.min(250, Math.round(dur * targetFps)));
+      if (inGifFrames) inGifFrames.value = autoFrames;
+      if (gifFramesBadge) {
+        gifFramesBadge.innerText = 'AUTO';
+        gifFramesBadge.style.background = '#0284c7';
       }
+      gifCalcInfo.innerText = `Maks. płynność (~${targetFps} FPS, ${autoFrames} kl.) • ${maxMbStr}`;
+    } else {
+      const frames = Math.max(5, Math.min(300, parseInt(inGifFrames?.value, 10) || 60));
+      const fps = (frames / dur).toFixed(1);
+      if (gifFramesBadge) {
+        gifFramesBadge.innerText = 'RĘCZNE';
+        gifFramesBadge.style.background = '#64748b';
+      }
+      gifCalcInfo.innerText = `Ręczne: ${frames} kl., ${dur.toFixed(1)}s (~${fps} FPS) • ${maxMbStr}`;
+    }
+  }
+
+  if (gifFramesBadge) {
+    gifFramesBadge.addEventListener('click', () => {
+      isGifAutoFrames = !isGifAutoFrames;
+      if (!isGifAutoFrames && selGifPreset) selGifPreset.value = 'custom';
+      updateGifCalcInfo();
+    });
+  }
+
+  if (inGifFrames) {
+    inGifFrames.addEventListener('input', () => {
+      isGifAutoFrames = false;
+      if (selGifPreset) selGifPreset.value = 'custom';
+      updateGifCalcInfo();
+    });
+  }
+
+  if (inGifDuration) {
+    inGifDuration.addEventListener('input', () => {
+      if (selGifPreset && !isGifAutoFrames) selGifPreset.value = 'custom';
+      updateGifCalcInfo();
+    });
+  }
+
+  if (inGifMaxMb) {
+    inGifMaxMb.addEventListener('input', () => {
+      if (selGifPreset) selGifPreset.value = 'custom';
+      updateGifCalcInfo();
+    });
+  }
+
+  if (selGifPreset) {
+    selGifPreset.addEventListener('change', () => {
+      const p = selGifPreset.value;
+      if (p === 'auto-5mb') {
+        if (inGifMaxMb) inGifMaxMb.value = '5.0';
+        if (inGifDuration) inGifDuration.value = '4.0';
+        isGifAutoFrames = true;
+      } else if (p === 'messenger-2mb') {
+        if (inGifMaxMb) inGifMaxMb.value = '2.0';
+        if (inGifDuration) inGifDuration.value = '3.0';
+        isGifAutoFrames = true;
+      } else if (p === 'discord-8mb') {
+        if (inGifMaxMb) inGifMaxMb.value = '8.0';
+        if (inGifDuration) inGifDuration.value = '5.0';
+        isGifAutoFrames = true;
+      } else if (p === 'hq-15mb') {
+        if (inGifMaxMb) inGifMaxMb.value = '15.0';
+        if (inGifDuration) inGifDuration.value = '6.0';
+        isGifAutoFrames = true;
+      } else if (p === 'unlimited') {
+        if (inGifMaxMb) inGifMaxMb.value = '0';
+        if (inGifDuration) inGifDuration.value = '4.0';
+        isGifAutoFrames = true;
+      } else if (p === 'custom') {
+        isGifAutoFrames = false;
+      }
+      updateGifCalcInfo();
     });
   }
 
@@ -2556,24 +3507,13 @@ ${placemarks}
     if (statusBox) statusBox.style.display = 'none';
 
     populateScopeControls(params).then(() => {
-      if (params.scope) {
-        setScopeTab(params.scope);
-      } else if (params.day) {
-        setScopeTab('day');
-      } else if (params.month) {
-        setScopeTab('month');
-      } else if (params.year) {
-        setScopeTab('year');
-      }
+      const scopeToSet = params.scope || (params.day ? 'day' : (params.month ? 'month' : (params.year ? 'year' : activeScope)));
+      setScopeTab(scopeToSet);
     });
 
-    if (params.format) {
-      setFormat(params.format);
-    }
-
-    if (selColorMode && inSingleColor) {
-      inSingleColor.style.display = (selColorMode.value === 'single') ? 'inline-block' : 'none';
-    }
+    setFormat(params.format || activeFormat || 'html');
+    updateOptionVisibility();
+    updateGifCalcInfo();
   }
 
   function closeExportModal() {
@@ -2609,27 +3549,48 @@ ${placemarks}
     if (progressFill) progressFill.style.width = '15%';
     if (statusText) statusText.innerText = 'Pobieranie punktów trasy z bazy...';
 
-    const colorMode = selColorMode ? selColorMode.value : 'speed';
-    const singleColor = inSingleColor ? inSingleColor.value : '#06b6d4';
-    const includeChart = chkIncludeChart ? chkIncludeChart.checked : true;
-    const includeGForce = chkIncludeGForce ? chkIncludeGForce.checked : true;
-    const gifSpeed = selGifSpeed ? selGifSpeed.value : 'normal';
+    const colorMode = (activeFormat === 'html') ? 'speed' : (selColorMode ? selColorMode.value : 'speed');
+    const singleColor = (activeFormat === 'html') ? '#06b6d4' : (inSingleColor ? inSingleColor.value : '#06b6d4');
+    const speedOverlap = (activeFormat === 'html') ? 'max' : (selSpeedOverlap ? selSpeedOverlap.value : 'max');
+    const isSingleDayOrActive = (activeScope === 'day' || activeScope === 'active');
+    const includeChart = isSingleDayOrActive ? (chkIncludeChart ? chkIncludeChart.checked : true) : false;
+    const includeGForce = isSingleDayOrActive ? (chkIncludeGForce ? chkIncludeGForce.checked : true) : false;
+    const gifFrames = inGifFrames ? (parseInt(inGifFrames.value, 10) || 100) : 100;
+    const gifDurationSec = inGifDuration ? (parseFloat(inGifDuration.value) || 4.0) : 4.0;
+    const gifMaxMb = inGifMaxMb ? (parseFloat(inGifMaxMb.value) || 0) : 5.0;
+    const gifFramesAuto = isGifAutoFrames;
 
     const options = {
       colorMode,
       singleColor,
+      speedOverlap,
       includeChart,
       includeGForce,
-      gifSpeed
+      gifFrames,
+      gifFramesAuto,
+      gifDurationSec,
+      gifMaxMb
     };
 
     try {
       let queryUrl = `${apiBaseUrl}/api/export-data?scope=${activeScope}`;
       let title = 'Trasa';
       let scopeFilename = 'trasa';
+      let rawPoints = null;
 
-      if (activeScope === 'day') {
-        const d = selDay ? selDay.value : '';
+      if (activeScope === 'planned') {
+        const planned = window.getPlannedRouteData?.();
+        if (!planned || !planned.points || planned.points.length < 2) {
+          throw new Error('Brak wyznaczonej trasy w planerze. Otwórz panel „Planowanie trasy” i wyznacz trasę między co najmniej dwoma punktami.');
+        }
+        rawPoints = planned.points;
+        options.stops = planned.stops;
+        options.plannedDistanceKm = planned.distanceKm;
+        options.plannedDurationSeconds = (planned.durationMin || 0) * 60;
+        title = `Utworzona trasa (${planned.distanceKm.toFixed(1)} km)`;
+        scopeFilename = 'utworzona_trasa';
+      } else if (activeScope === 'day') {
+        const d = getSelectedDay();
         if (!d) throw new Error('Nie wybrano dnia do eksportu.');
         queryUrl += `&day=${encodeURIComponent(d)}`;
         title = `Dzień: ${d}`;
@@ -2664,19 +3625,21 @@ ${placemarks}
 
       if (progressFill) progressFill.style.width = '35%';
 
-      const res = await fetch(queryUrl);
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.detail || `Błąd serwera (HTTP ${res.status})`);
+      if (!rawPoints) {
+        const res = await fetch(queryUrl);
+        if (!res.ok) {
+          const errJson = await res.json().catch(() => ({}));
+          throw new Error(errJson.detail || `Błąd serwera (HTTP ${res.status})`);
+        }
+        rawPoints = await res.json();
       }
 
-      const rawPoints = await res.json();
       if (!rawPoints || !rawPoints.length) {
         throw new Error('Brak punktów telemetrycznych w wybranym okresie.');
       }
 
       // 0. Oczyszczenie punktów z błędnych współrzędnych (np. null, NaN, (0,0) przed fixem GPS)
-      const points = rawPoints.map(p => {
+      let points = rawPoints.map(p => {
         p.lat = Number(p.lat);
         p.lon = Number(p.lon);
         p.speed_kmh = Number(p.speed_kmh) || 0;
@@ -2692,15 +3655,32 @@ ${placemarks}
         throw new Error('Brak prawidłowych współrzędnych GPS w wybranym okresie.');
       }
 
-      if (statusText) statusText.innerText = `Przetwarzanie ${points.length} epok...`;
+      if (statusText) statusText.innerText = `Przetwarzanie ${points.length} punktów...`;
       if (progressFill) progressFill.style.width = '55%';
 
       // 1. Sanityzacja prędkości (usunięcie szumów GPS)
       cleanAndSanitizeSpeeds(points);
 
-      // 2. Segmentacja na ciągłe przejazdy (eliminacja długich prostych linii)
+      // 2. Optymalizacja zbędnych punktów postoju dla zakresów zbiorczych
+      points = optimizePointsForExport(points, activeScope);
+
+      // 2.5. Przestrzenna agregacja prędkości dla nakładających się przejazdów
+      if (colorMode === 'speed') {
+        computeLocationSpeeds(points, speedOverlap);
+      }
+
+      // 3. Segmentacja na ciągłe przejazdy (eliminacja długich prostych linii)
       const segments = splitIntoContiguousSegments(points);
       const stats = computeRouteStats(points, segments);
+      if (activeScope === 'planned' && options.plannedDistanceKm) {
+        stats.totalDistanceKm = options.plannedDistanceKm;
+        if (options.plannedDurationSeconds) {
+          stats.durationSeconds = options.plannedDurationSeconds;
+          stats.avgSpeedKmh = stats.durationSeconds > 0
+            ? Math.round((stats.totalDistanceKm / (stats.durationSeconds / 3600)) * 10) / 10
+            : 50.0;
+        }
+      }
       const filenameBase = `trasa_${scopeFilename}`;
 
       if (statusText) statusText.innerText = `Generowanie formatu ${activeFormat.toUpperCase()}...`;
@@ -2724,13 +3704,13 @@ ${placemarks}
         });
         outExt = 'gif';
       } else if (activeFormat === 'gpx') {
-        blob = generateGpx(points, segments, stats, title);
+        blob = generateGpx(points, segments, stats, title, options);
         outExt = 'gpx';
       } else if (activeFormat === 'csv') {
         blob = generateCsv(points, segments, stats, title);
         outExt = 'csv';
       } else if (activeFormat === 'geojson') {
-        blob = generateGeoJson(points, segments, stats, title);
+        blob = generateGeoJson(points, segments, stats, title, options);
         outExt = 'geojson';
       } else if (activeFormat === 'kml') {
         blob = generateKml(points, segments, stats, title, options);

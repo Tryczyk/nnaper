@@ -8,7 +8,7 @@
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
   <script src="https://unpkg.com/pmtiles@3.0.7/dist/pmtiles.js"></script>
-  <link rel="stylesheet" href="styles.css?v=20261030_export_v3" />
+  <link rel="stylesheet" href="styles.css?v=20261030_playback_charts" />
 </head>
 
 <body>
@@ -80,14 +80,30 @@
   <!-- Zintegrowany Odtwarzacz Trasy (Playback) -->
   <div id="playback-top-bar" style="display: none;">
     <button id="btn-close-playback" type="button" title="Zamknij odtwarzacz i wróć do zwykłej mapy">← Wróć do Mapy</button>
-    <label for="playback-date-select" style="font-size: 13px;">Dzień:</label>
-    <select id="playback-date-select"><option>Ładowanie dat...</option></select>
-    <label for="playback-sat-view" style="font-size: 13px; margin-left: 10px;">Satelity:</label>
-    <select id="playback-sat-view">
-      <option value="none">Ukryte</option>
-      <option value="local" selected>Blisko (Skyplot)</option>
-      <option value="subpoint">Daleko (Orbita MEO)</option>
-    </select>
+
+    <div style="display: inline-flex; align-items: center; gap: 5px;">
+      <label for="playback-sel-year" style="font-size: 12.5px; color: #94a3b8;">Rok:</label>
+      <select id="playback-sel-year" style="font-size: 13px; font-weight: 600;"></select>
+    </div>
+
+    <div style="display: inline-flex; align-items: center; gap: 5px;">
+      <label for="playback-sel-month" style="font-size: 12.5px; color: #94a3b8;">Miesiąc:</label>
+      <select id="playback-sel-month" style="font-size: 13px;"></select>
+    </div>
+
+    <div style="display: inline-flex; align-items: center; gap: 5px;">
+      <label for="playback-sel-day" style="font-size: 12.5px; color: #94a3b8;">Dzień:</label>
+      <select id="playback-sel-day" style="font-size: 13px; font-weight: 600; color: #38bdf8;"></select>
+    </div>
+
+    <div style="display: inline-flex; align-items: center; gap: 5px; margin-left: 6px;">
+      <label for="playback-sat-view" style="font-size: 12.5px; color: #94a3b8;">Satelity:</label>
+      <select id="playback-sat-view">
+        <option value="none">Ukryte</option>
+        <option value="local" selected>Blisko (Skyplot)</option>
+        <option value="subpoint">Daleko (Orbita MEO)</option>
+      </select>
+    </div>
   </div>
 
   <div id="playback-hud-panel" style="display: none;">
@@ -98,7 +114,7 @@
     <div class="hud-row"><span class="hud-label">Dystans dnia:</span><span id="playback-hud-dist" class="hud-val">0.0 km</span></div>
     <div class="hud-row"><span class="hud-label">Śr. prędkość:</span><span id="playback-hud-avg-speed" class="hud-val">0.0 km/h</span></div>
     <div id="playback-hud-gg-box" style="margin-top: 8px; padding-top: 6px; border-top: 1px solid #1e293b; display: flex; flex-direction: column; align-items: center;">
-      <div style="font-size: 9px; text-transform: uppercase; color: #64748b; font-weight: 700; margin-bottom: 4px; letter-spacing: 0.4px;">Akcelerometr (G-G)</div>
+      <div style="font-size: 9px; text-transform: uppercase; color: #64748b; font-weight: 700; margin-bottom: 4px; letter-spacing: 0.4px;">Diagram G-G</div>
       <canvas id="playback-hud-gg-canvas" width="80" height="80" style="background: #090d16; border-radius: 50%; border: 1px solid #334155; box-shadow: inset 0 0 8px rgba(0,0,0,0.8);"></canvas>
     </div>
   </div>
@@ -122,6 +138,40 @@
           <input type="checkbox" id="chk-playback-follow" checked style="accent-color: #38bdf8;" /> Śledź kamerą
         </label>
       </div>
+    </div>
+  </div>
+
+  <!-- Dolny interaktywny panel wykresów dla trybu Playback (Wysokość, Diagram G-G) -->
+  <div id="playback-chart-panel" style="display: none;">
+    <div class="playback-chart-header">
+      <div class="playback-chart-tabs">
+        <button class="playback-chart-tab-btn active" id="playback-tab-btn-alt" type="button">🏔️ Profil wysokości</button>
+        <button class="playback-chart-tab-btn" id="playback-tab-btn-gg" type="button">🎯 Diagram G-G</button>
+      </div>
+
+      <div class="playback-chart-legend-box" id="playback-chart-legend-alt">
+        <span style="color:#38bdf8;">Wysokość: <b id="playback-val-alt">-- m</b></span>
+        <span style="color:#64748b;" id="playback-alt-minmax-info">(Min: --m, Max: --m)</span>
+      </div>
+
+      <div class="playback-chart-legend-box" id="playback-chart-legend-gg" style="display: none;">
+        <span style="color:#94a3b8;">
+          Bieżące: <b id="playback-val-gg-curr" style="color:#38bdf8;">--</b>
+          <span style="color:#475569; margin: 0 4px;">│</span>
+          Max skręt: <b id="playback-val-gg-max-lat" style="color:#f59e0b;">--</b>
+          <span style="color:#475569; margin: 0 4px;">│</span>
+          Max wzdłużne: <b id="playback-val-gg-max-lon" style="color:#38bdf8;">--</b>
+        </span>
+      </div>
+
+      <div class="playback-chart-actions">
+        <span class="playback-chart-hint">Kliknij/przeciągnij, aby przewinąć trasę</span>
+        <button class="playback-chart-min-btn" id="btn-toggle-playback-chart" type="button" title="Zwiń / Rozwiń wykres">▾</button>
+      </div>
+    </div>
+
+    <div class="playback-chart-canvas-wrap">
+      <canvas id="playback-chart-canvas"></canvas>
     </div>
   </div>
 
@@ -222,8 +272,20 @@
 
           <div class="export-scope-controls">
             <div id="export-scope-day-box" class="scope-control-box">
-              <label for="export-sel-day">Wybierz dzień:</label>
-              <select id="export-sel-day" class="export-select"><option>Ładowanie dni...</option></select>
+              <div style="display: flex; gap: 8px;">
+                <div style="flex: 1;">
+                  <label for="export-sel-day-year">Rok:</label>
+                  <select id="export-sel-day-year" class="export-select"></select>
+                </div>
+                <div style="flex: 1.4;">
+                  <label for="export-sel-day-month">Miesiąc:</label>
+                  <select id="export-sel-day-month" class="export-select"></select>
+                </div>
+                <div style="flex: 1;">
+                  <label for="export-sel-day-day">Dzień:</label>
+                  <select id="export-sel-day-day" class="export-select"></select>
+                </div>
+              </div>
             </div>
             <div id="export-scope-month-box" class="scope-control-box" style="display: none;">
               <div style="display: flex; gap: 10px;">
@@ -275,7 +337,7 @@
             <div class="format-card" data-format="gif">
               <div class="format-card-icon">🎬</div>
               <div class="format-card-name">GIF</div>
-              <div class="format-card-desc">Animowany GIF z rekonstrukcją przejazdu i licznikiem</div>
+              <div class="format-card-desc">Animowany GIF z płynną rekonstrukcją przejazdu i trasą</div>
               <span class="format-badge format-badge-anim">Animacja</span>
             </div>
             <div class="format-card" data-format="gpx">
@@ -320,28 +382,62 @@
                 <input type="color" id="export-opt-single-color" value="#06b6d4" class="color-picker" style="display: none;" title="Wybierz kolor śladu" />
               </div>
             </div>
-            <div class="export-opt-row" id="opt-chart-row">
+            <div class="export-opt-row" id="opt-speed-overlap-row">
+              <span>Wspólne odcinki dróg:</span>
+              <select id="export-opt-speed-overlap" class="export-select-sm" title="Wybierz, jak określać kolor drogi, gdy przejechano nią wielokrotnie">
+                <option value="max" selected>Maksymalna prędkość (Vmax - szybszy ma pierwszeństwo)</option>
+                <option value="avg">Średnia prędkość (Vśr z przejazdów)</option>
+                <option value="last">Ostatni przejazd (chronologicznie)</option>
+              </select>
+            </div>
+            <div class="export-opt-row" id="opt-chart-row" style="display: none;">
               <span>Profil wysokości:</span>
               <label class="sidebar-chk-label" title="Dołącz profil wysokości n.p.m. z oznaczonym punktem MIN i MAX">
                 <input type="checkbox" id="export-opt-include-chart" checked />
                 <span>Dołącz profil wysokości (z Min/Max)</span>
               </label>
             </div>
-            <div class="export-opt-row" id="opt-gforce-row">
-              <span>Wykres przeciążeń:</span>
-              <label class="sidebar-chk-label" title="Dołącz interaktywny wykres przeciążeń Gx, Gy, Gz oraz wskaźnik G-G w pliku HTML">
+            <div class="export-opt-row" id="opt-gforce-row" style="display: none;">
+              <span>Diagram G-G:</span>
+              <label class="sidebar-chk-label" title="Dołącz interaktywny Diagram G-G (koło tarcia / przeciążenia 2D) w pliku HTML">
                 <input type="checkbox" id="export-opt-include-gforce" checked />
-                <span>Dołącz wykres przeciążeń G (Gx, Gy, Gz)</span>
+                <span>Dołącz Diagram G-G (przeciążenia 2D)</span>
               </label>
             </div>
 
-            <div class="export-opt-row" id="opt-gif-speed-row" style="display: none;">
-              <span>Płynność i klatki GIF:</span>
-              <select id="export-opt-gif-speed" class="export-select-sm">
-                <option value="smooth" selected>Płynna (60 klatek, ~4 s)</option>
-                <option value="hd">Maksymalna płynność (90 klatek, ~5 s)</option>
-                <option value="fast">Krótka (40 klatek, ~2 s)</option>
-              </select>
+            <div class="export-opt-row" id="opt-gif-speed-row" style="display: none; flex-direction: column; align-items: stretch; gap: 10px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
+                <span style="font-weight: 500;">Płynność i rozmiar animacji GIF:</span>
+                <span id="gif-calc-info" style="font-size: 11px; color: #38bdf8; font-family: ui-monospace, monospace; font-weight: 600;">Maks. płynność (25-30 FPS) • do 5.0 MB</span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <label for="export-opt-gif-preset" style="font-size: 11.5px; color: #94a3b8; white-space: nowrap;">Profil:</label>
+                <select id="export-opt-gif-preset" class="export-select-sm" style="flex: 1;" title="Wybierz gotowy profil lub dopasuj parametry">
+                  <option value="auto-5mb" selected>⚡ Auto: Maksymalna płynność (limit 5.0 MB)</option>
+                  <option value="messenger-2mb">💬 Komunikatory (limit 2.0 MB)</option>
+                  <option value="discord-8mb">👾 Discord (limit 8.0 MB)</option>
+                  <option value="hq-15mb">💎 Wysoka jakość (limit 15.0 MB)</option>
+                  <option value="unlimited">🚀 Bez limitu wagi (Maks. 30 FPS)</option>
+                  <option value="custom">⚙️ Własne parametry (ręczne klatki/czas)</option>
+                </select>
+              </div>
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; background: rgba(15, 23, 42, 0.45); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.05);">
+                <label style="display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: #cbd5e1;">
+                  <span>Maks. waga:</span>
+                  <input type="number" id="export-opt-gif-max-mb" class="export-select-sm" style="width: 60px; text-align: center; font-weight: 600; color: #38bdf8;" min="0" max="100" step="0.5" value="5.0" title="Maksymalny rozmiar pliku wyjściowego w MB (np. 5.0). Program automatycznie dopasuje płynność, by nie przekroczyć tego limitu. Wpisz 0 dla braku limitu." />
+                  <span style="font-size: 11px; color: #64748b;">MB</span>
+                </label>
+                <label style="display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: #cbd5e1;">
+                  <span>Czas:</span>
+                  <input type="number" id="export-opt-gif-duration" class="export-select-sm" style="width: 55px; text-align: center;" min="0.5" max="60" step="0.5" value="4.0" title="Czas trwania animacji w sekundach (0.5 - 60s)" />
+                  <span style="font-size: 11px; color: #64748b;">s</span>
+                </label>
+                <label id="gif-frames-wrapper" style="display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: #cbd5e1;">
+                  <span>Klatki:</span>
+                  <input type="number" id="export-opt-gif-frames" class="export-select-sm" style="width: 60px; text-align: center;" min="10" max="300" step="5" value="100" title="Liczba klatek (w trybie Auto wyliczana automatycznie dla maks. płynności)" />
+                  <span id="gif-frames-badge" style="font-size: 9.5px; background: #0284c7; color: #fff; padding: 1px 5px; border-radius: 4px; font-weight: 700; cursor: pointer; user-select: none;" title="Kliknij, aby przełączyć tryb Auto / Ręczny">AUTO</span>
+                </label>
+              </div>
             </div>
           </div>
         </div>
@@ -371,9 +467,9 @@
   <script src="layers.js?v=20261029_integrated"></script>
   <script src="layer-manager.js?v=20261029_integrated"></script>
   <script src="app.js?v=20261030_export"></script>
-  <script src="playback-inline.js?v=20261030_ggmeter"></script>
-  <script src="route-inline.js?v=20261029_playbackintegrated"></script>
-  <script src="export-manager.js?v=20261030_gifsmooth_minmax"></script>
+  <script src="playback-inline.js?v=20261030_ymd_replay_fixed"></script>
+  <script src="route-inline.js?v=20261030_planned_export"></script>
+  <script src="export-manager.js?v=20261030_planned_export"></script>
 </body>
 
 </html>

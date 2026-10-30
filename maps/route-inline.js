@@ -16,6 +16,7 @@
   let importFeedbackTimer = null;
   const btnOpenPlannerMenu = document.getElementById('btn-open-planner-menu');
   let inlineRouteState = { points: [], mode: null };
+  let lastCalculatedPlannedRoute = null;
   let inlineRouteLayerReady = false;
   let inlineContextLocation = null;
   let routeStartRequestId = 0;
@@ -140,6 +141,7 @@
     clearInlineRouteLayer();
     clearInlineRouteMarkers();
     inlineRouteState.points = [];
+    lastCalculatedPlannedRoute = null;
     inlinePointColorSequence = 0;
     renderInlineRouteMarkers();
     routePlannerStats.innerText = '';
@@ -718,6 +720,12 @@
     const distance = segmentRoutes.reduce((total, item) => total + Number(item.distance || 0), 0);
     const duration = segmentRoutes.reduce((total, item) => total + Number(item.duration || 0), 0);
     routePlannerStats.innerText = `Dystans: ${(distance / 1000).toFixed(1)} km | Czas: ${Math.round(duration / 60)} min`;
+    lastCalculatedPlannedRoute = {
+      points: routePoints.map(p => ({ ...p.place, name: inlineRoutePlaceLabel(p.place) })),
+      segmentRoutes: segmentRoutes,
+      distance: distance,
+      duration: duration
+    };
     updateGoogleMapsOutputIfVisible();
   }
 
@@ -1028,9 +1036,93 @@
     });
   }
 
+  function getPlannedRouteDensePoints() {
+    if (lastCalculatedPlannedRoute && lastCalculatedPlannedRoute.segmentRoutes && lastCalculatedPlannedRoute.segmentRoutes.length) {
+      const dense = [];
+      const now = Date.now();
+      let ptIdx = 0;
+      const totalDistM = lastCalculatedPlannedRoute.distance || 1;
+      const totalDurS = lastCalculatedPlannedRoute.duration || 60;
+      const avgSpeedKmh = Math.max(10, Math.min(130, (totalDistM / 1000) / (totalDurS / 3600)));
+
+      for (const seg of lastCalculatedPlannedRoute.segmentRoutes) {
+        if (seg.geometry && Array.isArray(seg.geometry.coordinates)) {
+          for (const [lon, lat] of seg.geometry.coordinates) {
+            if (dense.length > 0) {
+              const prev = dense[dense.length - 1];
+              if (Math.abs(prev.lat - lat) < 1e-7 && Math.abs(prev.lon - lon) < 1e-7) {
+                continue;
+              }
+            }
+            dense.push({
+              lat: Number(lat),
+              lon: Number(lon),
+              speed_kmh: Math.round(avgSpeedKmh * 10) / 10,
+              altitude: null,
+              timestamp: new Date(now + ptIdx * 1000).toISOString()
+            });
+            ptIdx++;
+          }
+        }
+      }
+      if (dense.length >= 2) return dense;
+    }
+
+    const validPlaces = (inlineRouteState.points || []).filter(p => p && p.place).map(p => p.place);
+    if (validPlaces.length >= 2) {
+      return validPlaces.map((pl, i) => ({
+        lat: Number(pl.lat),
+        lon: Number(pl.lon),
+        speed_kmh: 50,
+        altitude: null,
+        timestamp: new Date(Date.now() + i * 1000).toISOString()
+      }));
+    }
+    return [];
+  }
+
+  function getPlannedRouteData() {
+    const validPoints = (inlineRouteState.points || []).filter(p => p && p.place);
+    if (validPoints.length < 2) return null;
+
+    const points = getPlannedRouteDensePoints();
+    if (!points.length) return null;
+
+    const stops = validPoints.map(p => ({
+      lat: Number(p.place.lat),
+      lon: Number(p.place.lon),
+      name: inlineRoutePlaceLabel(p.place)
+    }));
+
+    const distKm = lastCalculatedPlannedRoute ? (lastCalculatedPlannedRoute.distance / 1000) : 0;
+    const durMin = lastCalculatedPlannedRoute ? Math.round(lastCalculatedPlannedRoute.duration / 60) : 0;
+
+    return {
+      points,
+      stops,
+      distanceKm: distKm,
+      durationMin: durMin
+    };
+  }
+
+  const btnRouteExportPlanned = document.getElementById('btn-route-export-planned');
+  if (btnRouteExportPlanned) {
+    btnRouteExportPlanned.addEventListener('click', () => {
+      const data = getPlannedRouteData();
+      if (!data || !data.points || data.points.length < 2) {
+        alert('Zaplanuj najpierw trasę z co najmniej dwoma punktami, aby móc ją wyeksportować.');
+        return;
+      }
+      if (typeof window.openExportModal === 'function') {
+        window.openExportModal({ scope: 'planned' });
+      }
+    });
+  }
+
   window.parseGoogleMapsRouteUrl = parseGoogleMapsRouteUrl;
   window.loadRouteFromGoogleMapsUrl = loadRouteFromGoogleMapsUrl;
   window.getGoogleMapsRouteUrl = getGoogleMapsRouteUrl;
   window.openInlineRoutePlanner = openInlineRoutePlanner;
   window.openInlineRoutePlannerFromStart = openInlineRoutePlannerFromStart;
+  window.getPlannedRouteData = getPlannedRouteData;
 })();

@@ -87,7 +87,7 @@ def resolve_and_qualify_epoch(
     max_speed_kmh: float = MAX_SPEED_KMH,
 ):
 
-    rmc_time, rmc_status, rmc_lat, rmc_lon, rmc_date = epoch.gprmc or (None,) * 5
+    rmc_time, rmc_status, rmc_lat, rmc_lon, rmc_date, rmc_speed_knots = epoch.gprmc or (None,) * 6
     gga_time, gga_lat, gga_lon, gga_fix_q, gga_hdop, altitude = epoch.gpgga or (None,) * 6
 
     # 1. Złożenie i walidacja dokładnej daty oraz godziny
@@ -134,7 +134,11 @@ def resolve_and_qualify_epoch(
         return None
 
     speed_kmh = 0.0
-    if previous_point is not None:
+    if rmc_speed_knots is not None and rmc_speed_knots >= 0:
+        speed_kmh = round(rmc_speed_knots * 1.852, 2)
+        if speed_kmh > max_speed_kmh:
+            return None
+    elif previous_point is not None:
         previous_timestamp, previous_lat, previous_lon = previous_point
         elapsed_seconds = (epoch_timestamp - previous_timestamp).total_seconds()
         if elapsed_seconds <= 0:
@@ -321,8 +325,9 @@ def parse_data(data_file_path=DATA_FILE_PATH, batch_size=BATCH_SIZE):
                         if not parsed_time and t_utc:
                             parsed_time = parse_nmea_time(t_utc)
 
+                        speed_knots = to_float_or_none(get_part(parts, 7))
                         epoch.gprmc = (
-                            parsed_time, get_part(parts, 2), lat, lon, parsed_date
+                            parsed_time, get_part(parts, 2), lat, lon, parsed_date, speed_knots
                         )
 
                     elif tag == "$GPGGA":

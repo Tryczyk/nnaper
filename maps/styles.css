@@ -1114,8 +1114,12 @@ body.playback-mode #point-panel {
 }
 
 body.playback-mode .maplibregl-ctrl-bottom-right {
-  bottom: 95px !important;
-  transition: bottom 0.28s ease;
+  bottom: 245px !important;
+  transition: bottom 0.22s ease;
+}
+
+body.playback-mode.chart-collapsed .maplibregl-ctrl-bottom-right {
+  bottom: 120px !important;
 }
 
 #playback-top-bar {
@@ -1236,6 +1240,186 @@ body.playback-mode #playback-hud-panel {
 
 body.playback-mode #playback-bottom-controls {
   display: flex !important;
+  position: absolute;
+  bottom: 160px !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  width: min(860px, 95vw) !important;
+  background: rgba(15, 23, 42, 0.94) !important;
+  backdrop-filter: blur(8px) !important;
+  border: 1px solid #334155 !important;
+  border-radius: 12px !important;
+  padding: 8px 16px 10px 16px !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65) !important;
+  z-index: 28 !important;
+  gap: 8px !important;
+  transition: bottom 0.22s ease !important;
+  box-sizing: border-box !important;
+}
+
+body.playback-mode #playback-bottom-controls.chart-collapsed {
+  bottom: 34px !important;
+}
+
+/* ==================== PANEL WYKRESÓW W TRYBIE PLAYBACK ==================== */
+#playback-chart-panel {
+  display: none !important;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 155px;
+  background: #0f172a;
+  border-top: 1px solid #334155;
+  padding: 6px 16px 8px 16px;
+  flex-direction: column !important;
+  z-index: 25;
+  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.7);
+  transition: height 0.22s ease, padding 0.22s ease;
+  box-sizing: border-box;
+}
+
+body.playback-mode #playback-chart-panel {
+  display: flex !important;
+}
+
+#playback-chart-panel.collapsed {
+  height: 28px !important;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  overflow: hidden;
+}
+
+#playback-chart-panel.collapsed .playback-chart-canvas-wrap {
+  display: none !important;
+}
+
+.playback-chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  color: #94a3b8;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
+  gap: 8px;
+  user-select: none;
+}
+
+.playback-chart-tabs {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.playback-chart-tab-btn {
+  background: #1e293b;
+  color: #94a3b8;
+  border: 1px solid #334155;
+  border-radius: 5px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.playback-chart-tab-btn:hover {
+  background: #334155;
+  color: #f8fafc;
+}
+
+.playback-chart-tab-btn.active {
+  background: #0284c7;
+  color: #ffffff;
+  border-color: #38bdf8;
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.4);
+}
+
+.playback-chart-legend-box {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.playback-g-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1.5px 7px;
+  border-radius: 4px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  cursor: pointer;
+  user-select: none;
+  transition: opacity 0.15s, border-color 0.15s;
+}
+
+.playback-g-pill:hover {
+  border-color: #64748b;
+}
+
+.playback-g-pill.disabled {
+  opacity: 0.35;
+  text-decoration: line-through;
+}
+
+.playback-g-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.playback-chart-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.playback-chart-hint {
+  color: #64748b;
+  font-size: 10px;
+}
+
+@media (max-width: 768px) {
+  .playback-chart-hint { display: none; }
+}
+
+.playback-chart-min-btn {
+  background: #1e293b;
+  color: #94a3b8;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  width: 22px;
+  height: 20px;
+  line-height: 18px;
+  text-align: center;
+  cursor: pointer;
+  font-size: 11px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.playback-chart-min-btn:hover {
+  background: #334155;
+  color: #f8fafc;
+}
+
+.playback-chart-canvas-wrap {
+  flex: 1;
+  width: 100%;
+  height: 115px;
+  position: relative;
+}
+
+#playback-chart-canvas {
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+  display: block;
 }
 
 #playback-timeline-slider {
