@@ -131,11 +131,128 @@ function applyTrackDateFilter(dayCheckboxes, isEverythingActive) {
   setTrackLayerVisibility(new Set(selectedDays));
 }
 
+// Jednorazowe zresetowanie konfiguracji kolorów do wartości domyślnych
+if (localStorage.getItem('nnaper_reset_colors_v2') !== 'true') {
+  localStorage.removeItem('nnaper_layer_customizations');
+  localStorage.removeItem('nnaper_track_color');
+  localStorage.removeItem('nnaper_offroad_color');
+  localStorage.removeItem('nnaper_show_offroad');
+  localStorage.setItem('nnaper_reset_colors_v2', 'true');
+}
+
+window.resetAllCustomizations = function() {
+  localStorage.removeItem('nnaper_layer_customizations');
+  localStorage.removeItem('nnaper_track_color');
+  localStorage.removeItem('nnaper_offroad_color');
+  localStorage.removeItem('nnaper_show_offroad');
+  localStorage.setItem('nnaper_reset_colors_v2', 'true');
+  window.location.reload();
+};
+
+let isSnapRoadsEnabled = localStorage.getItem('nnaper_snap_roads') === 'true';
+let trackBaseColor = localStorage.getItem('nnaper_track_color') || '#06b6d4'; // domyślny cyjan
+
+function updateTrackColors() {
+  trackLayerIds.forEach(layerId => {
+    if (map.getLayer(layerId)) {
+      map.setPaintProperty(layerId, 'circle-color', trackBaseColor);
+      map.setPaintProperty(layerId, 'circle-stroke-color', trackBaseColor);
+    }
+  });
+}
+
+function syncSnapButtonsUI() {
+  const isSnapped = localStorage.getItem('nnaper_snap_roads') === 'true';
+  isSnapRoadsEnabled = isSnapped;
+  document.querySelectorAll('#btn-toggle-snap-roads').forEach(btn => {
+    btn.classList.toggle('active', isSnapped);
+    btn.setAttribute('aria-pressed', isSnapped ? 'true' : 'false');
+  });
+  const chk = document.getElementById('layer-snap-roads-toggle');
+  if (chk) {
+    chk.checked = isSnapped;
+  }
+}
+window.syncSnapButtonsUI = syncSnapButtonsUI;
+
+function setupSnapButtons() {
+  syncSnapButtonsUI();
+  document.querySelectorAll('#btn-toggle-snap-roads').forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const current = localStorage.getItem('nnaper_snap_roads') === 'true';
+      window.setSnapRoadsEnabled(!current);
+    };
+  });
+}
+
+window.setSnapRoadsEnabled = function(bool) {
+  isSnapRoadsEnabled = !!bool;
+  localStorage.setItem('nnaper_snap_roads', isSnapRoadsEnabled ? 'true' : 'false');
+  syncSnapButtonsUI();
+  updateTrackTilesSource();
+};
+
 function buildTrackTilesUrl(days) {
-  return `${TRACK_TILES_URL}?days=${encodeURIComponent(days)}`;
+  let url = `${TRACK_TILES_URL}?days=${encodeURIComponent(days)}`;
+  if (isSnapRoadsEnabled) {
+    url += '&snapped=true';
+  }
+  return url;
+}
+
+function updateTrackTilesSource() {
+  const baseSrc = map.getSource('gps-track');
+  if (baseSrc && typeof baseSrc.setTiles === 'function') {
+    baseSrc.setTiles([buildTrackTilesUrl('none')]);
+  }
+
+  trackMonthLayers.forEach(({ layerId, days }, key) => {
+    const suffix = key.replaceAll('-', '_');
+    const sourceId = `gps-track-${suffix}`;
+    const src = map.getSource(sourceId);
+    const newTiles = [buildTrackTilesUrl(days.join(','))];
+    if (src && typeof src.setTiles === 'function') {
+      src.setTiles(newTiles);
+    } else if (map.getSource(sourceId)) {
+      const visibility = map.getLayoutProperty(layerId, 'visibility') || 'none';
+      map.removeLayer(layerId);
+      map.removeSource(sourceId);
+      map.addSource(sourceId, {
+        type: 'vector',
+        tiles: newTiles,
+        minzoom: 0,
+        maxzoom: 18
+      });
+      const layerDef = {
+        id: layerId,
+        source: sourceId,
+        'source-layer': 'gps-track',
+        type: 'circle',
+        layout: { visibility },
+        paint: {
+          'circle-color': trackBaseColor,
+          'circle-radius': 4.5,
+          'circle-stroke-width': 0,
+          'circle-stroke-color': trackBaseColor,
+          'circle-pitch-alignment': 'map',
+          'circle-pitch-scale': 'viewport'
+        }
+      };
+      map.addLayer(layerDef);
+    }
+  });
 }
 
 function updateTrackPaintProperty(property, value) {
+  if (property === 'circle-color' || property === 'circle-stroke-color') {
+    if (typeof value === 'string' && value.startsWith('#')) {
+      trackBaseColor = value;
+      localStorage.setItem('nnaper_track_color', trackBaseColor);
+    }
+    updateTrackColors();
+    return;
+  }
   trackLayerIds.forEach(layerId => {
     if (map.getLayer(layerId)) map.setPaintProperty(layerId, property, value);
   });
@@ -197,10 +314,10 @@ function addTrackMonthLayers(months) {
       type: 'circle',
       layout: { visibility: 'none' },
       paint: {
-        'circle-color': '#06b6d4',
+        'circle-color': trackBaseColor,
         'circle-radius': 4.5,
         'circle-stroke-width': 0,
-        'circle-stroke-color': '#06b6d4',
+        'circle-stroke-color': trackBaseColor,
         'circle-pitch-alignment': 'map',
         'circle-pitch-scale': 'viewport'
       }
@@ -386,6 +503,7 @@ function autoBuildTree() {
     window.LayerManager.buildLayerTree(map, 'tree-container', { onRenderGps: buildInlineTimeFilter });
     window.LayerManager.setup3DControls(map, { resetPitchOnMap3D: true });
     window.LayerManager.setupSync(map, 'tree-container');
+    setupSnapButtons();
   }
 }
 
@@ -438,6 +556,7 @@ if (btnToggleMenu) {
   btnToggleMenu.addEventListener('click', toggleMenu);
 }
 collapseMenu();
+setupSnapButtons();
 window.collapseMenu = collapseMenu;
 window.expandMenu = expandMenu;
 window.toggleMenu = toggleMenu;
@@ -753,6 +872,11 @@ async function loadPointFullDetails(epochId) {
       ? `${Number(e.speed_kmh).toFixed(1)} km/h`
       : '0.0 km/h';
 
+    let snapStatusHtml = '<span style="color:#94a3b8;">Surowy GPS</span>';
+    if (e.snapped_latitude !== null && e.snapped_latitude !== undefined) {
+      snapStatusHtml = `<span style="color:#10b981;font-weight:600;">Dociągnięty do drogi</span> (${Number(e.snapped_latitude).toFixed(6)}, ${Number(e.snapped_longitude).toFixed(6)})`;
+    }
+
     let html = `
       <div class="sat-mode-switch">
         <span>Tryb wizualizacji satelitów:</span>
@@ -767,7 +891,8 @@ async function loadPointFullDetails(epochId) {
         <table class="kv-table">
           <tr><td>ID Epoki</td><td>${e.epoch_id}</td></tr>
           <tr><td>Czas pomiaru</td><td>${e.timestamp || 'Brak'}</td></tr>
-          <tr><td>Współrzędne</td><td>${Number(e.latitude).toFixed(6)}, ${Number(e.longitude).toFixed(6)}</td></tr>
+          <tr><td>Współrzędne GPS</td><td>${Number(e.latitude).toFixed(6)}, ${Number(e.longitude).toFixed(6)}</td></tr>
+          <tr><td>Snap do drogi</td><td>${snapStatusHtml}</td></tr>
           <tr><td>Wysokość n.p.m.</td><td>${altStr}</td></tr>
           <tr><td>Prędkość</td><td>${spdStr}</td></tr>
           <tr><td>Przeciążenie X</td><td>${formatG(e.g_x)}</td></tr>
@@ -830,10 +955,10 @@ map.on('load', () => {
     type: 'circle',
     layout: { visibility: 'none' },
     paint: {
-      'circle-color': '#06b6d4',
+      'circle-color': trackBaseColor,
       'circle-radius': 4.5,
       'circle-stroke-width': 0,
-      'circle-stroke-color': '#06b6d4',
+      'circle-stroke-color': trackBaseColor,
       'circle-pitch-alignment': 'map',
       'circle-pitch-scale': 'viewport'
     }

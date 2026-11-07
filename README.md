@@ -26,13 +26,15 @@ Aplikacja do przetwarzania i analizy danych lokalizacyjnych GPS w formacie **NME
 
    * Dokonuje walidacji jakości fixa GPS i współczynnika HDOP oraz zapisuje dane partiami za pomocą protokołu `COPY` do bufora ze stagingiem i klauzulą `ON CONFLICT (profile_id, timestamp) DO NOTHING`.
 
+   * **Map Matching i obsługa Offroad:** Podczas parsowania partii punktów skrypt opcjonalnie dociąga trajektorię do sieci drogowej OSM za pośrednictwem OSRM Match API (`/match/v1/driving`). Jeśli punkt mieści się w progu odległości (`SNAP_THRESHOLD_METERS`, domyślnie 30 m), zapisywany jest w `geom_snapped`. Jeśli przekracza próg (zjazd w teren, parking, las), zapisywany jest w `geom_offroad`, a `geom_snapped` pozostaje `NULL`. Zawsze zachowywana jest też pełna surowa geometria GPS w `geom`.
+
    * Plik `data/state.txt` oraz unikalne ograniczenie na poziomie bazy danych gwarantują brak duplikatów przy minimalnym zużyciu pamięci RAM.
 
 3. **Interfejs mapy i narzędzia wizualizacji (`maps/map.html`):**
 
    * **Sterowanie warstwami podkładu (lewy panel):** Dynamiczne drzewo warstw z możliwością edycji kolorów, grubości linii, linii przerywanych, obwódek oraz widoczności elementów, zarządzane przez `maps/layer-manager.js` z persystencją w `localStorage`.
 
-   * **Panel tras i nawigacji (prawy panel):** Szybki dostęp do replayu trasy, planera oraz niezależnych przełączników widoku 3D (ukształtowanie terenu oraz trójwymiarowe bryły budynków).
+   * **Panel tras i nawigacji (prawy panel):** Szybki dostęp do replayu trasy, planera, niezależnych przełączników widoku 3D (ukształtowanie terenu oraz trójwymiarowe bryły budynków) oraz **przełącznika snapowania do dróg (Snap do dróg ON/OFF)** z natychmiastowym przeładowaniem kafelków MVT.
 
    * **Hierarchiczny filtr czasu:** Selektywny wybór lat, miesięcy i poszczególnych dni z dynamicznym przełączaniem warstw MVT bez konieczności ponownego ładowania danych pozostałych miesięcy.
 

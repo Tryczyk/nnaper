@@ -31,3 +31,10 @@ MAX_HDOP = float(os.getenv("MAX_HDOP", "5.0"))
 PREFERRED_HDOP = float(os.getenv("PREFERRED_HDOP", "3.0"))
 MAX_SPEED_KMH = float(os.getenv("MAX_SPEED_KMH", "250.0"))
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "10000"))
+
+# OSRM / Map Matching
+OSRM_URL = os.getenv("OSRM_URL", "http://localhost:5000").rstrip("/")
+SNAP_TO_ROADS = os.getenv("SNAP_TO_ROADS", "true").lower() in ("true", "1", "yes")
+SNAP_THRESHOLD_METERS = float(os.getenv("SNAP_THRESHOLD_METERS", "50.0"))
+MATCH_CHUNK_SIZE = int(os.getenv("MATCH_CHUNK_SIZE", "100"))
+

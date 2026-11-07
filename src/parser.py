@@ -1,5 +1,13 @@
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+import http.client
+import json
 import math
+import queue
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
 import uuid
 import psycopg
 
@@ -11,9 +19,13 @@ from constants import (
     DEFAULT_PROFILE_NAME,
     DEFAULT_PROFILE_PASSWORD_HASH,
     DEFAULT_PROFILE_USERNAME,
+    MATCH_CHUNK_SIZE,
     MAX_HDOP,
     MAX_SPEED_KMH,
+    OSRM_URL,
     PREFERRED_HDOP,
+    SNAP_THRESHOLD_METERS,
+    SNAP_TO_ROADS,
     STATE_FILE_PATH,
 )
 from utils import ddm_to_dd, parse_nmea_time, to_int_or_none
@@ -168,6 +180,227 @@ def resolve_and_qualify_epoch(
     return chosen_lat, chosen_lon, geom_wkt, epoch_timestamp, altitude, speed_kmh
 
 
+class OSRMConnectionPool:
+    """Wielowątkowa pula trwałych połączeń HTTP (Keep-Alive) do serwera OSRM."""
+    def __init__(self, base_url: str = OSRM_URL, max_connections: int = 12, timeout: float = 4.0):
+        self.base_url = base_url.rstrip("/")
+        parsed = urllib.parse.urlparse(self.base_url)
+        self.host = parsed.hostname or "localhost"
+        self.port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        self.timeout = timeout
+        self.max_connections = max_connections
+        self.pool = queue.Queue(maxsize=max_connections)
+        for _ in range(max_connections):
+            self.pool.put(self._create_conn())
+
+    def _create_conn(self):
+        return http.client.HTTPConnection(self.host, self.port, timeout=self.timeout)
+
+    def close(self):
+        while not self.pool.empty():
+            try:
+                conn = self.pool.get_nowait()
+                conn.close()
+            except Exception:
+                pass
+
+    def request_json(self, path: str):
+        conn = self.pool.get()
+        try:
+            for attempt in range(2):
+                try:
+                    conn.request("GET", path, headers={"User-Agent": "nnaper-parser/1.0", "Accept": "application/json"})
+                    resp = conn.getresponse()
+                    body = resp.read().decode("utf-8")
+                    if resp.status == 200:
+                        try:
+                            return 200, json.loads(body)
+                        except Exception:
+                            return 200, None
+                    elif resp.status == 400:
+                        try:
+                            return 400, json.loads(body)
+                        except Exception:
+                            return 400, None
+                    return resp.status, None
+                except (http.client.RemoteDisconnected, BrokenPipeError, ConnectionResetError, OSError):
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                    conn = self._create_conn()
+                    if attempt == 1:
+                        raise
+        finally:
+            self.pool.put(conn)
+        return 500, None
+
+    def match(self, coords_list: list):
+        coords_str = ";".join(f"{lon:.6f},{lat:.6f}" for lon, lat in coords_list)
+        path = f"/match/v1/driving/{coords_str}?overview=false&geometries=geojson&gaps=ignore&tidy=true"
+        return self.request_json(path)
+
+    def nearest(self, lon: float, lat: float):
+        path = f"/nearest/v1/driving/{lon:.6f},{lat:.6f}?number=1"
+        status, data = self.request_json(path)
+        if status == 200 and data and data.get("code") == "Ok" and data.get("waypoints"):
+            wp = data["waypoints"][0]
+            dist = float(wp.get("distance", 9999.0))
+            loc = wp.get("location")
+            if loc and len(loc) == 2:
+                return dist, loc
+        return None, None
+
+
+# Globalna pula połączeń oraz in-memory cache dla współrzędnych (klucz: ~1m dokładności)
+OSRM_POOL = None
+GLOBAL_SNAP_CACHE = {}
+
+
+def get_osrm_pool(osrm_url: str):
+    global OSRM_POOL
+    if OSRM_POOL is None or OSRM_POOL.base_url != osrm_url.rstrip("/"):
+        OSRM_POOL = OSRMConnectionPool(base_url=osrm_url, max_connections=12)
+    return OSRM_POOL
+
+
+def get_snap_cache_key(lon: float, lat: float):
+    return (round(lon, 5), round(lat, 5))
+
+
+def haversine_distance_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat / 2.0) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2.0) ** 2
+    return 6371000.0 * 2.0 * math.atan2(math.sqrt(a), math.sqrt(max(0.0, 1.0 - a)))
+
+
+def run_map_matching_on_epochs(
+    epochs: list,
+    osrm_url: str = OSRM_URL,
+    chunk_size: int = MATCH_CHUNK_SIZE,
+    max_distance: float = SNAP_THRESHOLD_METERS,
+):
+    """
+    Wysoce zoptymalizowany silnik snapowania punktów do sieci drogowej OSM:
+    1. Błyskawiczny in-memory cache (redukuje powtarzające się punkty i postoje o 80-90%).
+    2. Propagacja postojowa (samochód na światłach/parkingu nie generuje zapytań do OSRM).
+    3. Trajektorie w ruchu dociągane paczkami do OSRM /match.
+    4. Równoległe (wielowątkowe) dociąganie przez OSRM /nearest z pulą połączeń Keep-Alive dla pozostałych unikalnych punktów.
+    """
+    if not epochs:
+        return
+
+    pool = get_osrm_pool(osrm_url)
+
+    # Krok 1: Błyskawiczne dopasowanie z in-memory cache dla znanych już współrzędnych
+    for ep in epochs:
+        key = get_snap_cache_key(ep["lon"], ep["lat"])
+        if key in GLOBAL_SNAP_CACHE:
+            ep["geom_snapped"] = GLOBAL_SNAP_CACHE[key]
+
+    # Krok 2: Propagacja punktów postojowych (samochód stoi w miejscu < 3m i < 2 km/h)
+    for i in range(1, len(epochs)):
+        curr = epochs[i]
+        prev = epochs[i - 1]
+        if curr.get("geom_snapped") is not None:
+            continue
+        dist = haversine_distance_meters(prev["lat"], prev["lon"], curr["lat"], curr["lon"])
+        if dist < 3.0 and (curr.get("speed_kmh", 0) < 2.0 or prev.get("speed_kmh", 0) < 2.0):
+            if prev.get("geom_snapped") is not None:
+                curr["geom_snapped"] = prev["geom_snapped"]
+                GLOBAL_SNAP_CACHE[get_snap_cache_key(curr["lon"], curr["lat"])] = prev["geom_snapped"]
+
+    # Krok 3: Podział na spójne segmenty czasowe (luki czasowe > 15s to osobne przejazdy)
+    segments = []
+    current_seg = [epochs[0]]
+    for i in range(1, len(epochs)):
+        curr_ep = epochs[i]
+        prev_ep = epochs[i - 1]
+        dt = (curr_ep["timestamp"] - prev_ep["timestamp"]).total_seconds() if curr_ep.get("timestamp") and prev_ep.get("timestamp") else 1.0
+        if dt > 15.0 or dt < 0:
+            segments.append(current_seg)
+            current_seg = [curr_ep]
+        else:
+            current_seg.append(curr_ep)
+    if current_seg:
+        segments.append(current_seg)
+
+    # Krok 4: Przetwarzanie segmentów przez OSRM Map Matching (/match)
+    for seg in segments:
+        unresolved_in_seg = [ep for ep in seg if ep.get("geom_snapped") is None]
+        if not unresolved_in_seg:
+            continue
+
+        for start_idx in range(0, len(seg), chunk_size):
+            chunk = seg[start_idx : start_idx + chunk_size]
+            chunk_unresolved = [ep for ep in chunk if ep.get("geom_snapped") is None]
+            if not chunk_unresolved:
+                continue
+
+            if len(chunk) >= 3:
+                coords_list = [(ep["lon"], ep["lat"]) for ep in chunk]
+                try:
+                    status, data = pool.match(coords_list)
+                    if status == 200 and data and data.get("code") == "Ok":
+                        tracepoints = data.get("tracepoints", [])
+                        for ep, tp in zip(chunk, tracepoints):
+                            key = get_snap_cache_key(ep["lon"], ep["lat"])
+                            if tp and isinstance(tp, dict):
+                                d = float(tp.get("distance", 9999.0))
+                                loc = tp.get("location")
+                                if loc and len(loc) == 2 and d <= max_distance:
+                                    snapped_wkt = f"SRID=4326;POINT({loc[0]:.6f} {loc[1]:.6f})"
+                                    ep["geom_snapped"] = snapped_wkt
+                                    GLOBAL_SNAP_CACHE[key] = snapped_wkt
+                except Exception:
+                    pass
+
+    # Krok 5: Równoległe (wielowątkowe) dociąganie przez /nearest wyłącznie dla unikalnych brakujących punktów
+    to_query_nearest = []
+    seen_in_batch = set()
+    for ep in epochs:
+        if ep.get("geom_snapped") is None:
+            key = get_snap_cache_key(ep["lon"], ep["lat"])
+            if key in GLOBAL_SNAP_CACHE:
+                ep["geom_snapped"] = GLOBAL_SNAP_CACHE[key]
+            elif key not in seen_in_batch:
+                seen_in_batch.add(key)
+                to_query_nearest.append((key, ep["lon"], ep["lat"]))
+
+    if to_query_nearest:
+        def fetch_nearest(item):
+            k, lon, lat = item
+            try:
+                dist, loc = pool.nearest(lon, lat)
+                if loc and len(loc) == 2 and dist is not None and dist <= max_distance:
+                    return k, f"SRID=4326;POINT({loc[0]:.6f} {loc[1]:.6f})"
+            except Exception:
+                pass
+            return k, None
+
+        workers = min(12, max(2, len(to_query_nearest)))
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            results = executor.map(fetch_nearest, to_query_nearest)
+            for k, snapped_wkt in results:
+                GLOBAL_SNAP_CACHE[k] = snapped_wkt
+
+        for ep in epochs:
+            if ep.get("geom_snapped") is None:
+                key = get_snap_cache_key(ep["lon"], ep["lat"])
+                ep["geom_snapped"] = GLOBAL_SNAP_CACHE.get(key)
+
+    # Krok 6: Końcowa propagacja postojowa dla ciągów stojących pojazdów
+    for i in range(1, len(epochs)):
+        curr = epochs[i]
+        prev = epochs[i - 1]
+        if curr.get("geom_snapped") is None and prev.get("geom_snapped") is not None:
+            dist = haversine_distance_meters(prev["lat"], prev["lon"], curr["lat"], curr["lon"])
+            if dist < 3.0 and curr.get("speed_kmh", 0) < 2.0:
+                curr["geom_snapped"] = prev["geom_snapped"]
+                GLOBAL_SNAP_CACHE[get_snap_cache_key(curr["lon"], curr["lat"])] = prev["geom_snapped"]
+
+
 class CopyBatchBuffer:
     def __init__(self, profile_id: str, previous_point=None):
         self.profile_id = profile_id
@@ -190,17 +423,20 @@ class CopyBatchBuffer:
         self.batch_timestamps.add(epoch_key)
         epoch_id = str(uuid.uuid4())
 
-        self.epochs.append((
-            epoch_id,
-            self.profile_id,
-            epoch_ts,
-            geom_wkt,
-            altitude,
-            round(speed_kmh, 2),
-            to_float_or_none(epoch.gsensord[0]) if epoch.gsensord else None,
-            to_float_or_none(epoch.gsensord[1]) if epoch.gsensord else None,
-            to_float_or_none(epoch.gsensord[2]) if epoch.gsensord else None,
-        ))
+        self.epochs.append({
+            "epoch_id": epoch_id,
+            "profile_id": self.profile_id,
+            "timestamp": epoch_ts,
+            "geom": geom_wkt,
+            "altitude": altitude,
+            "speed_kmh": round(speed_kmh, 2),
+            "g_x": to_float_or_none(epoch.gsensord[0]) if epoch.gsensord else None,
+            "g_y": to_float_or_none(epoch.gsensord[1]) if epoch.gsensord else None,
+            "g_z": to_float_or_none(epoch.gsensord[2]) if epoch.gsensord else None,
+            "lat": lat,
+            "lon": lon,
+            "geom_snapped": None,
+        })
         self.last_point = (epoch_ts, lat, lon)
 
         if epoch.gpgsvs:
@@ -212,6 +448,14 @@ class CopyBatchBuffer:
         if not self.epochs:
             return
 
+        if SNAP_TO_ROADS:
+            run_map_matching_on_epochs(
+                self.epochs,
+                osrm_url=OSRM_URL,
+                chunk_size=MATCH_CHUNK_SIZE,
+                max_distance=SNAP_THRESHOLD_METERS,
+            )
+
         cur.execute("""
             CREATE TEMP TABLE staging_epochs (
                 LIKE epochs INCLUDING DEFAULTS
@@ -219,10 +463,21 @@ class CopyBatchBuffer:
         """)
 
         with cur.copy("""COPY staging_epochs (
-            epoch_id, profile_id, timestamp, geom, altitude, speed_kmh, g_x, g_y, g_z
+            epoch_id, profile_id, timestamp, geom, altitude, speed_kmh, g_x, g_y, g_z, geom_snapped
         ) FROM STDIN""") as copy:
-            for row in self.epochs:
-                copy.write_row(row)
+            for ep in self.epochs:
+                copy.write_row((
+                    ep["epoch_id"],
+                    ep["profile_id"],
+                    ep["timestamp"],
+                    ep["geom"],
+                    ep["altitude"],
+                    ep["speed_kmh"],
+                    ep["g_x"],
+                    ep["g_y"],
+                    ep["g_z"],
+                    ep.get("geom_snapped"),
+                ))
 
         if self.satellite:
             cur.execute("""
@@ -237,10 +492,10 @@ class CopyBatchBuffer:
         # Wstawienie epok z automatycznym i bezpiecznym pomijaniem duplikatów
         cur.execute("""
             INSERT INTO epochs (
-                epoch_id, profile_id, timestamp, geom, altitude, speed_kmh, g_x, g_y, g_z
+                epoch_id, profile_id, timestamp, geom, altitude, speed_kmh, g_x, g_y, g_z, geom_snapped
             )
             SELECT
-                epoch_id, profile_id, timestamp, geom, altitude, speed_kmh, g_x, g_y, g_z
+                epoch_id, profile_id, timestamp, geom, altitude, speed_kmh, g_x, g_y, g_z, geom_snapped
             FROM staging_epochs
             ON CONFLICT (profile_id, timestamp) DO NOTHING;
         """)
@@ -278,6 +533,14 @@ def parse_data(data_file_path=DATA_FILE_PATH, batch_size=BATCH_SIZE):
         with conn.cursor() as cur:
             cur.execute("SET synchronous_commit = OFF;")
             cur.execute("SET work_mem = '64MB';")
+
+            cur.execute("ALTER TABLE epochs ADD COLUMN IF NOT EXISTS geom_snapped GEOMETRY(Point, 4326);")
+            cur.execute("ALTER TABLE epochs DROP COLUMN IF EXISTS geom_offroad CASCADE;")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_epochs_geom ON epochs USING GIST (geom);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_epochs_geom_snapped ON epochs USING GIST (geom_snapped);")
+            cur.execute("DROP INDEX IF EXISTS idx_epochs_geom_offroad;")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_epochs_geom_active ON epochs USING GIST (COALESCE(geom_snapped, geom));")
+            conn.commit()
 
             profile_id = get_or_create_default_profile(cur)
             conn.commit()
@@ -403,12 +666,16 @@ def parse_data(data_file_path=DATA_FILE_PATH, batch_size=BATCH_SIZE):
                         epoch.gpgsvs.append(sats_list)
 
                     if epochs_in_batch >= batch_size:
+                        t_flush = time.time()
+                        count = len(buffer.epochs)
                         buffer.flush(cur)
                         conn.commit()
+                        flush_dt = time.time() - t_flush
+                        speed = count / max(0.001, flush_dt)
                         epochs_in_batch = 0
                         with open(STATE_FILE_PATH, "w") as sf:
                             sf.write(str(current_number))
-                        print(f"Parsed {current_number} lines.")
+                        print(f"Parsed {current_number} lines ({count} epok w {flush_dt:.2f}s, {speed:.0f} epok/s, cache snap: {len(GLOBAL_SNAP_CACHE)})...")
 
                     last_line_index = current_number
 

@@ -31,19 +31,22 @@ CREATE INDEX IF NOT EXISTS idx_profiles_user_id ON profiles (user_id);
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS epochs (
-    epoch_id   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    profile_id UUID NOT NULL REFERENCES profiles(profile_id) ON DELETE CASCADE,
-    timestamp  TIMESTAMPTZ NOT NULL,
-    geom       GEOMETRY(Point, 4326) NOT NULL,
-    altitude   NUMERIC(7, 2),
-    speed_kmh  NUMERIC(7, 2) NOT NULL DEFAULT 0,
-    g_x        NUMERIC(6, 3),
-    g_y        NUMERIC(6, 3),
-    g_z        NUMERIC(6, 3),
+    epoch_id      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    profile_id    UUID NOT NULL REFERENCES profiles(profile_id) ON DELETE CASCADE,
+    timestamp     TIMESTAMPTZ NOT NULL,
+    geom          GEOMETRY(Point, 4326) NOT NULL,
+    geom_snapped  GEOMETRY(Point, 4326),
+    altitude      NUMERIC(7, 2),
+    speed_kmh     NUMERIC(7, 2) NOT NULL DEFAULT 0,
+    g_x           NUMERIC(6, 3),
+    g_y           NUMERIC(6, 3),
+    g_z           NUMERIC(6, 3),
     CONSTRAINT uq_profile_timestamp UNIQUE (profile_id, timestamp)
 );
 
 CREATE INDEX IF NOT EXISTS idx_epochs_geom ON epochs USING GIST (geom);
+CREATE INDEX IF NOT EXISTS idx_epochs_geom_snapped ON epochs USING GIST (geom_snapped);
+CREATE INDEX IF NOT EXISTS idx_epochs_geom_active ON epochs USING GIST (COALESCE(geom_snapped, geom));
 CREATE INDEX IF NOT EXISTS idx_epochs_timestamp ON epochs (timestamp ASC);
 
 CREATE TABLE IF NOT EXISTS satellite (

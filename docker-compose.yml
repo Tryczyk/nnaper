@@ -29,6 +29,7 @@ services:
     environment:
       - DB_URL=postgresql://${POSTGRES_USER:-nnaper}:${POSTGRES_PASSWORD:-nnaper}@db:5432/${POSTGRES_DB:-nnaper_db}
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
+      - OSRM_URL=http://osrm:5000
       - PYTHONPATH=/app
     command: >
       sh -c "pip install --no-cache-dir fastapi uvicorn 'psycopg[binary]' psycopg-pool python-dotenv &&
