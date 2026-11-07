@@ -7,4 +7,6 @@ maps/runtime-config.local.js
 *.pmtiles
 *.gz
 *.zip
-osm_data/
+osm_data/
+.agents
+

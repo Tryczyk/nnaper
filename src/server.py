@@ -41,7 +41,13 @@ def ensure_db_indices():
     try:
         with psycopg.connect(DB_URL) as conn:
             with conn.cursor() as cur:
+                cur.execute("ALTER TABLE epochs ADD COLUMN IF NOT EXISTS geom_snapped GEOMETRY(Point, 4326);")
+                cur.execute("ALTER TABLE epochs DROP COLUMN IF EXISTS geom_offroad CASCADE;")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_epochs_timestamp ON epochs (timestamp ASC);")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_epochs_geom ON epochs USING GIST (geom);")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_epochs_geom_snapped ON epochs USING GIST (geom_snapped);")
+                cur.execute("DROP INDEX IF EXISTS idx_epochs_geom_offroad;")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_epochs_geom_active ON epochs USING GIST (COALESCE(geom_snapped, geom));")
     except Exception as e:
         pass
 
@@ -77,7 +83,7 @@ def get_dates_tree():
 
 
 @app.get("/api/track/{z}/{x}/{y}.pbf")
-def get_track_tile(z: int, x: int, y: int, days: str = Query(None)):
+def get_track_tile(z: int, x: int, y: int, days: str = Query(None), snapped: bool = Query(False)):
     """Zwraca dynamiczny kafelek Mapbox Vector Tile dla śladu GPS."""
     if z < 0 or x < 0 or y < 0 or x >= 2 ** z or y >= 2 ** z:
         raise HTTPException(status_code=400, detail="Nieprawidłowe współrzędne kafelka")
@@ -88,8 +94,10 @@ def get_track_tile(z: int, x: int, y: int, days: str = Query(None)):
         if not day_list:
             day_list = None
 
+    active_geom = "COALESCE(e.geom_snapped, e.geom)" if snapped else "e.geom"
+
     where_clauses = [
-        "e.geom && ST_Transform(ST_TileEnvelope(%s, %s, %s), 4326)",
+        f"{active_geom} && ST_Transform(ST_TileEnvelope(%s, %s, %s), 4326)",
     ]
     params = [z, x, y]
     if days == "none":
@@ -111,10 +119,10 @@ def get_track_tile(z: int, x: int, y: int, days: str = Query(None)):
                 e.epoch_id::text AS epoch_id,
                 e.timestamp::date::text AS day,
                 to_char(e.timestamp, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS timestamp,
-                round(ST_Y(e.geom)::numeric, 6) AS latitude,
-                round(ST_X(e.geom)::numeric, 6) AS longitude,
+                round(ST_Y({active_geom})::numeric, 6) AS latitude,
+                round(ST_X({active_geom})::numeric, 6) AS longitude,
                 ST_AsMVTGeom(
-                    ST_Transform(e.geom, 3857),
+                    ST_Transform({active_geom}, 3857),
                     bounds.geom,
                     4096,
                     64,
@@ -153,6 +161,8 @@ def get_epoch_details(epoch_id: str):
         'timestamp', e.timestamp,
         'latitude', round(ST_Y(e.geom)::numeric, 6),
         'longitude', round(ST_X(e.geom)::numeric, 6),
+        'snapped_latitude', CASE WHEN e.geom_snapped IS NOT NULL THEN round(ST_Y(e.geom_snapped)::numeric, 6) ELSE NULL END,
+        'snapped_longitude', CASE WHEN e.geom_snapped IS NOT NULL THEN round(ST_X(e.geom_snapped)::numeric, 6) ELSE NULL END,
         'altitude', e.altitude,
         'speed_kmh', LEAST(COALESCE(e.speed_kmh, 0), 220.0),
         'g_x', e.g_x,
@@ -182,7 +192,7 @@ def get_epoch_details(epoch_id: str):
 
 
 @app.get("/api/playback-day")
-def get_playback_day(day: str = Query(...)):
+def get_playback_day(day: str = Query(...), snapped: bool = Query(False)):
     """Pobiera uporządkowaną listę epok telemetrycznych dla wybranego dnia z satelitami (zoptymalizowana wersja JSON)."""
     day_str = day.strip()
     try:
@@ -190,13 +200,15 @@ def get_playback_day(day: str = Query(...)):
     except ValueError:
         raise HTTPException(status_code=400, detail="Nieprawidłowy format daty. Oczekiwano YYYY-MM-DD.")
 
-    query = """
+    active_geom = "COALESCE(e.geom_snapped, e.geom)" if snapped else "e.geom"
+
+    query = f"""
     WITH day_epochs AS (
         SELECT 
             e.epoch_id,
             to_char(e.timestamp, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS timestamp,
-            round(ST_Y(e.geom)::numeric, 6) AS lat,
-            round(ST_X(e.geom)::numeric, 6) AS lon,
+            round(ST_Y({active_geom})::numeric, 6) AS lat,
+            round(ST_X({active_geom})::numeric, 6) AS lon,
             e.altitude,
             LEAST(COALESCE(e.speed_kmh, 0), 220.0) AS speed_kmh,
             e.g_x,
@@ -299,12 +311,14 @@ def get_export_data(
     month: Optional[int] = Query(None),
     days: Optional[str] = Query(None),
     downsample: Optional[int] = Query(None),
+    snapped: bool = Query(False),
 ):
     """Pobiera dane telemetryczne trasy dla zadanego zakresu (dzień, miesiąc, rok, wybrane dni, wszystko)."""
     where_clauses, params, scope_name = build_scope_filter(scope, day, year, month, days)
     where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
     step = int(downsample) if downsample and downsample > 1 else 1
+    active_geom = "COALESCE(e.geom_snapped, e.geom)" if snapped else "e.geom"
 
     if step > 1:
         query = f"""
@@ -312,8 +326,8 @@ def get_export_data(
             SELECT 
                 e.epoch_id,
                 to_char(e.timestamp, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS timestamp,
-                round(ST_Y(e.geom)::numeric, 6) AS lat,
-                round(ST_X(e.geom)::numeric, 6) AS lon,
+                round(ST_Y({active_geom})::numeric, 6) AS lat,
+                round(ST_X({active_geom})::numeric, 6) AS lon,
                 e.altitude,
                 LEAST(COALESCE(e.speed_kmh, 0), 220.0) AS speed_kmh,
                 e.g_x,
@@ -345,8 +359,8 @@ def get_export_data(
             json_build_object(
                 'epoch_id', e.epoch_id,
                 'timestamp', to_char(e.timestamp, 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
-                'lat', round(ST_Y(e.geom)::numeric, 6),
-                'lon', round(ST_X(e.geom)::numeric, 6),
+                'lat', round(ST_Y({active_geom})::numeric, 6),
+                'lon', round(ST_X({active_geom})::numeric, 6),
                 'altitude', e.altitude,
                 'speed_kmh', LEAST(COALESCE(e.speed_kmh, 0), 220.0),
                 'g_x', e.g_x,
@@ -381,16 +395,18 @@ def download_export_file(
     year: Optional[int] = Query(None),
     month: Optional[int] = Query(None),
     days: Optional[str] = Query(None),
+    snapped: bool = Query(False),
 ):
     """Generuje i zwraca bezpośrednio plik eksportu (GPX, CSV, GeoJSON, KML)."""
     where_clauses, params, scope_name = build_scope_filter(scope, day, year, month, days)
     where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+    active_geom = "COALESCE(e.geom_snapped, e.geom)" if snapped else "e.geom"
 
     query = f"""
         SELECT 
             to_char(e.timestamp, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS timestamp,
-            round(ST_Y(e.geom)::numeric, 6) AS lat,
-            round(ST_X(e.geom)::numeric, 6) AS lon,
+            round(ST_Y({active_geom})::numeric, 6) AS lat,
+            round(ST_X({active_geom})::numeric, 6) AS lon,
             e.altitude,
             LEAST(COALESCE(e.speed_kmh, 0), 220.0) AS speed_kmh,
             e.g_x,

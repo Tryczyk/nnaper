@@ -450,6 +450,30 @@
     if (!container) return;
     container.innerHTML = '';
 
+    // Przycisk "Przywróć domyślne kolory i warstwy"
+    const resetBar = document.createElement('div');
+    resetBar.style.cssText = 'padding: 2px 2px 8px 2px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); margin-bottom: 8px;';
+    const btnReset = document.createElement('button');
+    btnReset.type = 'button';
+    btnReset.innerText = '↺ Przywróć domyślne kolory i warstwy';
+    btnReset.title = 'Resetuje wszystkie własne kolory, grubości i widoczności warstw do wartości początkowych';
+    btnReset.style.cssText = 'width: 100%; padding: 6px 10px; font-size: 11px; font-weight: 500; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.3); color: #fca5a5; border-radius: 6px; cursor: pointer; transition: all 0.2s ease;';
+    btnReset.onmouseover = () => { btnReset.style.background = 'rgba(239, 68, 68, 0.25)'; };
+    btnReset.onmouseout = () => { btnReset.style.background = 'rgba(239, 68, 68, 0.12)'; };
+    btnReset.onclick = () => {
+      if (confirm('Czy na pewno chcesz przywrócić domyślne kolory i ustawienia warstw?')) {
+        if (typeof window.resetAllCustomizations === 'function') {
+          window.resetAllCustomizations();
+        } else {
+          localStorage.removeItem(STORAGE_KEY);
+          localStorage.removeItem('nnaper_track_color');
+          window.location.reload();
+        }
+      }
+    };
+    resetBar.appendChild(btnReset);
+    container.appendChild(resetBar);
+
     const cfg = getStoredConfig();
     const layers = map.getStyle().layers || [];
     const groups = {};
@@ -472,7 +496,15 @@
       groups[groupName].push({ id: layer.id, title: leafTitle, raw: JSON.parse(JSON.stringify(layer)) });
     });
 
-    Object.keys(groups).forEach(groupName => {
+    const sortedGroupNames = Object.keys(groups).sort((a, b) => {
+      const aIsGps = a.trim() === 'GPS';
+      const bIsGps = b.trim() === 'GPS';
+      if (aIsGps && !bIsGps) return -1;
+      if (!aIsGps && bIsGps) return 1;
+      return 0;
+    });
+
+    sortedGroupNames.forEach(groupName => {
       const childList = groups[groupName];
       const node = document.createElement('div');
       node.className = 'tree-node';
@@ -501,15 +533,40 @@
       label.appendChild(pCheckbox);
       label.appendChild(pTitle);
 
+      const isGpsGroup = groupName.trim() === 'GPS';
       const arrow = document.createElement('span');
-      arrow.className = 'arrow collapsed';
+      arrow.className = isGpsGroup ? 'arrow' : 'arrow collapsed';
       arrow.innerHTML = '&#9660;';
 
       header.appendChild(label);
       header.appendChild(arrow);
 
       const childrenBox = document.createElement('div');
-      childrenBox.className = 'node-children collapsed';
+      childrenBox.className = isGpsGroup ? 'node-children' : 'node-children collapsed';
+
+      if (isGpsGroup) {
+        const snapBtnHolder = document.createElement('div');
+        snapBtnHolder.style.cssText = 'padding: 4px 0 6px 0; border-bottom: 1px dashed #334155; margin-bottom: 6px;';
+        const btnSnap = document.createElement('button');
+        btnSnap.id = 'btn-toggle-snap-roads';
+        btnSnap.className = 'menu-toggle-btn';
+        btnSnap.type = 'button';
+        btnSnap.setAttribute('aria-pressed', (localStorage.getItem('nnaper_snap_roads') === 'true') ? 'true' : 'false');
+        if (localStorage.getItem('nnaper_snap_roads') === 'true') {
+          btnSnap.classList.add('active');
+        }
+        btnSnap.title = 'Włącz lub wyłącz dociąganie punktów GPS do najbliższej drogi';
+        btnSnap.innerHTML = '<span class="menu-toggle-label">Snap do dróg</span><span class="toggle-switch"></span>';
+        btnSnap.onclick = (e) => {
+          e.stopPropagation();
+          const current = localStorage.getItem('nnaper_snap_roads') === 'true';
+          if (typeof window.setSnapRoadsEnabled === 'function') {
+            window.setSnapRoadsEnabled(!current);
+          }
+        };
+        snapBtnHolder.appendChild(btnSnap);
+        childrenBox.appendChild(snapBtnHolder);
+      }
 
       header.addEventListener('click', (e) => {
         if (pCheckbox && e.target === pCheckbox) return;
@@ -691,18 +748,40 @@
           rowStroke.appendChild(strokeLabel); rowStroke.appendChild(strokeColorPicker); rowStroke.appendChild(strokeWidthInput);
           ctrlDiv.appendChild(rowStroke);
 
-          if (child.id === 'GPS / Ślad trasy' && typeof options.onRenderGps === 'function') {
-            const timeSection = document.createElement('div');
-            timeSection.className = 'time-filter-section';
-            const timeTitle = document.createElement('span');
-            timeTitle.className = 'time-filter-title';
-            timeTitle.innerText = 'FILTR CZASU:';
-            const timeTreeHolder = document.createElement('div');
-            timeTreeHolder.innerHTML = '<em style="color:#64748b;font-size:11px;">Ładowanie dat...</em>';
-            timeSection.appendChild(timeTitle);
-            timeSection.appendChild(timeTreeHolder);
-            ctrlDiv.appendChild(timeSection);
-            options.onRenderGps(timeTreeHolder);
+          if (child.id === 'GPS / Ślad trasy') {
+            const rowSnap = document.createElement('label');
+            rowSnap.className = 'control-row';
+            rowSnap.style.cssText = 'display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: #cbd5e1; cursor: pointer; user-select: none; margin: 4px 0; padding: 4px 0; border-top: 1px dashed #334155;';
+            const snapCheckbox = document.createElement('input');
+            snapCheckbox.type = 'checkbox';
+            snapCheckbox.id = 'layer-snap-roads-toggle';
+            snapCheckbox.style.cursor = 'pointer';
+            snapCheckbox.checked = (localStorage.getItem('nnaper_snap_roads') === 'true');
+            const snapLabel = document.createElement('span');
+            snapLabel.innerText = 'Snap do dróg';
+            rowSnap.appendChild(snapLabel);
+            rowSnap.appendChild(snapCheckbox);
+            ctrlDiv.appendChild(rowSnap);
+
+            snapCheckbox.addEventListener('change', () => {
+              if (typeof window.setSnapRoadsEnabled === 'function') {
+                window.setSnapRoadsEnabled(snapCheckbox.checked);
+              }
+            });
+
+            if (typeof options.onRenderGps === 'function') {
+              const timeSection = document.createElement('div');
+              timeSection.className = 'time-filter-section';
+              const timeTitle = document.createElement('span');
+              timeTitle.className = 'time-filter-title';
+              timeTitle.innerText = 'FILTR CZASU:';
+              const timeTreeHolder = document.createElement('div');
+              timeTreeHolder.innerHTML = '<em style="color:#64748b;font-size:11px;">Ładowanie dat...</em>';
+              timeSection.appendChild(timeTitle);
+              timeSection.appendChild(timeTreeHolder);
+              ctrlDiv.appendChild(timeSection);
+              options.onRenderGps(timeTreeHolder);
+            }
           }
         }
 

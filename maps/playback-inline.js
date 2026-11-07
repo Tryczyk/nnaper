@@ -868,7 +868,9 @@
         : `${Number(pt.altitude).toFixed(1)} m`;
     }
     updateGraphicalGForces(pt.g_x, pt.g_y, pt.g_z);
-    if (hudProgressInfo) hudProgressInfo.innerText = `${index + 1} / ${trackData.length} epok`;
+    if (hudProgressInfo) {
+      hudProgressInfo.innerText = `${index + 1} / ${trackData.length} epok`;
+    }
     if (slider) slider.value = index;
 
     if (centerCamera || (chkFollow && chkFollow.checked)) {
@@ -1105,7 +1107,9 @@
     if (btnPlay) btnPlay.disabled = true;
 
     try {
-      const res = await fetch(`${apiBaseUrl}/api/playback-day?day=${encodeURIComponent(dayStr)}`, { signal });
+      const isSnapped = localStorage.getItem('nnaper_snap_roads') === 'true';
+      const snapParam = isSnapped ? '&snapped=true' : '';
+      const res = await fetch(`${apiBaseUrl}/api/playback-day?day=${encodeURIComponent(dayStr)}${snapParam}`, { signal });
       if (!res.ok) {
         const errJson = await res.json().catch(() => ({}));
         throw new Error(errJson.detail || `HTTP ${res.status}`);
