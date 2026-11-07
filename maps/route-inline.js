@@ -402,27 +402,30 @@
     reverseGeocodeInlinePoint(place);
   });
 
-  document.getElementById('map-context-info').addEventListener('click', () => {
-    mapContextMenu.classList.remove('active');
-    if (!mapContextLocation) return;
-    const loc = mapContextLocation;
-    mapContextLocation = null;
-    const place = {
-      lon: loc.lon,
-      lat: loc.lat,
-      name: `${loc.lat.toFixed(5)}, ${loc.lon.toFixed(5)}`,
-      display_name: `${loc.lat.toFixed(5)}, ${loc.lon.toFixed(5)}`,
-      address: {}
-    };
-    if (typeof displayPlaceDetails === 'function') {
-      displayPlaceDetails(place);
-    }
-    fetchReverseGeocode(place, 3000).then(updated => {
-      if (updated && typeof displayPlaceDetails === 'function') {
-        displayPlaceDetails(updated);
+  const btnMapContextInfo = document.getElementById('map-context-info');
+  if (btnMapContextInfo) {
+    btnMapContextInfo.addEventListener('click', () => {
+      mapContextMenu.classList.remove('active');
+      if (!mapContextLocation) return;
+      const loc = mapContextLocation;
+      mapContextLocation = null;
+      const place = {
+        lon: loc.lon,
+        lat: loc.lat,
+        name: `${loc.lat.toFixed(5)}, ${loc.lon.toFixed(5)}`,
+        display_name: `${loc.lat.toFixed(5)}, ${loc.lon.toFixed(5)}`,
+        address: {}
+      };
+      if (typeof displayPlaceDetails === 'function') {
+        displayPlaceDetails(place);
       }
+      fetchReverseGeocode(place, 3000).then(updated => {
+        if (updated && typeof displayPlaceDetails === 'function') {
+          displayPlaceDetails(updated);
+        }
+      });
     });
-  });
+  }
 
   document.addEventListener('click', event => {
     if (!inlineContextMenu.contains(event.target)) inlineContextMenu.classList.remove('active');

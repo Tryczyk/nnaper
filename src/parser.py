@@ -21,6 +21,7 @@ from constants import (
     DEFAULT_PROFILE_USERNAME,
     MATCH_CHUNK_SIZE,
     MAX_HDOP,
+    MAX_SNAPPED_SPEED_KMH,
     MAX_SPEED_KMH,
     OSRM_URL,
     PREFERRED_HDOP,
@@ -251,6 +252,15 @@ class OSRMConnectionPool:
                 return dist, loc
         return None, None
 
+    def route(self, lon1: float, lat1: float, lon2: float, lat2: float):
+        """Wyznacza drogę między dwoma punktami przez OSRM i zwraca jej dystans w metrach."""
+        path = f"/route/v1/driving/{lon1:.6f},{lat1:.6f};{lon2:.6f},{lat2:.6f}?overview=false"
+        status, data = self.request_json(path)
+        if status == 200 and data and data.get("code") == "Ok" and data.get("routes"):
+            route = data["routes"][0]
+            return float(route.get("distance", 0.0))
+        return None
+
 
 # Globalna pula połączeń oraz in-memory cache dla współrzędnych (klucz: ~1m dokładności)
 OSRM_POOL = None
@@ -401,13 +411,96 @@ def run_map_matching_on_epochs(
                 GLOBAL_SNAP_CACHE[get_snap_cache_key(curr["lon"], curr["lat"])] = prev["geom_snapped"]
 
 
+def parse_point_coords(geom_wkt: str):
+    """Wyciąga krotkę (lat, lon) ze stringa WKT, np. 'SRID=4326;POINT(lon lat)'."""
+    if not geom_wkt:
+        return None
+    try:
+        coords_str = geom_wkt.split("POINT(")[1].split(")")[0].strip()
+        parts = coords_str.split()
+        return float(parts[1]), float(parts[0])
+    except Exception:
+        return None
+
+
+def validate_snapped_epochs_speed(
+    epochs: list,
+    osrm_url: str = OSRM_URL,
+    max_speed_kmh: float = MAX_SNAPPED_SPEED_KMH,
+    previous_snapped_point=None,
+):
+    """
+    Sprawdzacz wyznaczający drogę od poprzedniego snapniętego punktu do następnego
+    snapowanego punktu. Oblicza dystans i czas między punktami.
+    Jeśli wyliczona prędkość przekracza max_speed_kmh (500 km/h), punkt jest uznawany
+    za nieważny (oznaczany flagą _is_invalid = True).
+    """
+    if not epochs:
+        return previous_snapped_point
+
+    pool = get_osrm_pool(osrm_url)
+    last_valid = previous_snapped_point
+
+    for ep in epochs:
+        geom_snapped = ep.get("geom_snapped")
+        if not geom_snapped:
+            continue
+
+        coords = parse_point_coords(geom_snapped)
+        if not coords:
+            continue
+
+        curr_lat, curr_lon = coords
+        curr_ts = ep.get("timestamp")
+        if not curr_ts:
+            continue
+
+        if last_valid is not None:
+            prev_ts, prev_lat, prev_lon = last_valid
+            elapsed_seconds = (curr_ts - prev_ts).total_seconds()
+
+            is_invalid = False
+            if elapsed_seconds <= 0:
+                dist_hav = haversine_distance_meters(prev_lat, prev_lon, curr_lat, curr_lon)
+                if dist_hav > 1.0:
+                    is_invalid = True
+            else:
+                dist_hav = haversine_distance_meters(prev_lat, prev_lon, curr_lat, curr_lon)
+                speed_hav = (dist_hav / elapsed_seconds) * 3.6
+
+                if speed_hav > max_speed_kmh:
+                    is_invalid = True
+                elif dist_hav < 1.0:
+                    is_invalid = False
+                else:
+                    dist_road = None
+                    try:
+                        dist_road = pool.route(prev_lon, prev_lat, curr_lon, curr_lat)
+                    except Exception:
+                        pass
+
+                    dist_to_check = dist_road if dist_road is not None else dist_hav
+                    speed_road = (dist_to_check / elapsed_seconds) * 3.6
+                    if speed_road > max_speed_kmh:
+                        is_invalid = True
+
+            if is_invalid:
+                ep["_is_invalid"] = True
+                continue
+
+        last_valid = (curr_ts, curr_lat, curr_lon)
+
+    return last_valid
+
+
 class CopyBatchBuffer:
-    def __init__(self, profile_id: str, previous_point=None):
+    def __init__(self, profile_id: str, previous_point=None, previous_snapped_point=None):
         self.profile_id = profile_id
         self.batch_timestamps = set()
         self.epochs = []
         self.satellite = []
         self.last_point = previous_point
+        self.last_snapped_point = previous_snapped_point
 
     def add_epoch(self, epoch: RawEpoch):
         result = resolve_and_qualify_epoch(epoch, previous_point=self.last_point)
@@ -455,6 +548,24 @@ class CopyBatchBuffer:
                 chunk_size=MATCH_CHUNK_SIZE,
                 max_distance=SNAP_THRESHOLD_METERS,
             )
+            # Sprawdzenie drogi i prędkości między kolejnymi snapniętymi punktami (maks. 500 km/h)
+            self.last_snapped_point = validate_snapped_epochs_speed(
+                self.epochs,
+                osrm_url=OSRM_URL,
+                max_speed_kmh=MAX_SNAPPED_SPEED_KMH,
+                previous_snapped_point=self.last_snapped_point,
+            )
+            # Odrzucenie punktów oznaczonych jako nieważne
+            if any(ep.get("_is_invalid") for ep in self.epochs):
+                self.epochs = [ep for ep in self.epochs if not ep.get("_is_invalid")]
+                if self.satellite:
+                    valid_ids = {ep["epoch_id"] for ep in self.epochs}
+                    self.satellite = [sat for sat in self.satellite if sat[1] in valid_ids]
+
+        if not self.epochs:
+            self.satellite.clear()
+            self.batch_timestamps.clear()
+            return
 
         cur.execute("""
             CREATE TEMP TABLE staging_epochs (
@@ -570,11 +681,32 @@ def parse_data(data_file_path=DATA_FILE_PATH, batch_size=BATCH_SIZE):
                     float(last_row[2]),
                 )
 
+            # Pobranie ostatniego snapniętego punktu do sprawdzacza prędkości dróg
+            cur.execute(
+                """
+                SELECT timestamp, ST_Y(geom_snapped), ST_X(geom_snapped)
+                FROM epochs
+                WHERE profile_id = %s AND geom_snapped IS NOT NULL
+                ORDER BY timestamp DESC
+                LIMIT 1
+                """,
+                (profile_id,),
+            )
+            last_snapped_row = cur.fetchone()
+            previous_snapped_point = None
+            if last_snapped_row and last_snapped_row[1] is not None and last_snapped_row[2] is not None:
+                previous_snapped_point = (
+                    last_snapped_row[0],
+                    float(last_snapped_row[1]),
+                    float(last_snapped_row[2]),
+                )
+
             epoch = RawEpoch()
             epochs_in_batch = 0
             buffer = CopyBatchBuffer(
                 profile_id=profile_id,
                 previous_point=previous_point,
+                previous_snapped_point=previous_snapped_point,
             )
 
             with open(str(data_file_path), "r", encoding="utf-8", errors="ignore") as data_file:

@@ -323,22 +323,7 @@ function addTrackMonthLayers(months) {
       }
     });
 
-    map.on('click', layerId, (e) => {
-      if (!e.features || !e.features.length) return;
-      const feat = e.features[0];
-      const epochId = feat.properties?.epoch_id;
-      if (epochId) {
-        loadPointFullDetails(epochId);
-      }
-    });
-
-    map.on('mouseenter', layerId, () => {
-      map.getCanvas().style.cursor = 'pointer';
-    });
-    map.on('mouseleave', layerId, () => {
-      map.getCanvas().style.cursor = '';
-    });
-
+    // Panel szczegółów epoki został usunięty - brak akcji kliknięcia w ślad
     trackMonthLayers.set(key, { layerId, days });
     trackLayerIds.add(layerId);
   });
@@ -962,22 +947,6 @@ map.on('load', () => {
       'circle-pitch-alignment': 'map',
       'circle-pitch-scale': 'viewport'
     }
-  });
-
-  map.on('click', 'GPS / Ślad trasy', (e) => {
-    if (!e.features || !e.features.length) return;
-    const feat = e.features[0];
-    const epochId = feat.properties?.epoch_id;
-    if (epochId) {
-      loadPointFullDetails(epochId);
-    }
-  });
-
-  map.on('mouseenter', 'GPS / Ślad trasy', () => {
-    map.getCanvas().style.cursor = 'pointer';
-  });
-  map.on('mouseleave', 'GPS / Ślad trasy', () => {
-    map.getCanvas().style.cursor = '';
   });
 
   autoBuildTree();
