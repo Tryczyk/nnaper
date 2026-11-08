@@ -204,7 +204,7 @@ function buildTrackTilesUrl(days) {
 function updateTrackTilesSource() {
   const baseSrc = map.getSource('gps-track');
   if (baseSrc && typeof baseSrc.setTiles === 'function') {
-    baseSrc.setTiles([buildTrackTilesUrl('none')]);
+    baseSrc.setTiles([buildTrackTilesUrl('__none__')]);
   }
 
   trackMonthLayers.forEach(({ layerId, days }, key) => {
@@ -343,9 +343,10 @@ async function buildInlineTimeFilter(container) {
     const months = [];
     Object.keys(data).forEach(year => {
       Object.keys(data[year]).forEach(month => {
+        const isNone = year === 'None' || month === 'None';
         months.push({
-          key: `${year}-${month}`,
-          days: data[year][month].map(day => `${year}-${month}-${day}`)
+          key: isNone ? 'None-None' : `${year}-${month}`,
+          days: data[year][month].map(day => (isNone || day === 'None') ? 'None' : `${year}-${month}-${day}`)
         });
       });
     });
@@ -355,10 +356,17 @@ async function buildInlineTimeFilter(container) {
     allGpsDayCheckboxes = [];
     allGpsYearCheckboxes = [];
 
-    Object.keys(data).sort().reverse().forEach(year => {
+    const sortedYears = Object.keys(data).sort((a, b) => {
+      if (a === 'None') return 1;
+      if (b === 'None') return -1;
+      return b.localeCompare(a);
+    });
+
+    sortedYears.forEach(year => {
       const yearNode = document.createElement('div');
       yearNode.className = 'tree-node';
-      const yearHeader = createFilterTreeNode(`Rok: ${year}`, false, true);
+      const yearTitle = (year === 'None') ? 'Rok: None' : `Rok: ${year}`;
+      const yearHeader = createFilterTreeNode(yearTitle, false, true);
       const yearChildren = document.createElement('div');
       yearChildren.className = 'node-children collapsed';
       yearChildren.style.marginLeft = '8px';
@@ -367,11 +375,18 @@ async function buildInlineTimeFilter(container) {
       allGpsYearCheckboxes.push(yearHeader.checkbox);
       const yearDayCheckboxes = [];
 
-      Object.keys(data[year]).sort().reverse().forEach(month => {
+      const sortedMonths = Object.keys(data[year]).sort((a, b) => {
+        if (a === 'None') return 1;
+        if (b === 'None') return -1;
+        return b.localeCompare(a);
+      });
+
+      sortedMonths.forEach(month => {
         const monthNode = document.createElement('div');
         monthNode.className = 'tree-node';
         const monthName = MONTH_NAMES[month] || month;
-        const monthHeader = createFilterTreeNode(`Miesiąc: ${monthName} (${month})`, false, true);
+        const monthTitle = (month === 'None') ? 'Miesiąc: None' : `Miesiąc: ${monthName} (${month})`;
+        const monthHeader = createFilterTreeNode(monthTitle, false, true);
         const monthChildren = document.createElement('div');
         monthChildren.className = 'node-children collapsed';
         monthChildren.style.marginLeft = '8px';
@@ -379,8 +394,15 @@ async function buildInlineTimeFilter(container) {
 
         const monthDayCheckboxes = [];
 
-        data[year][month].sort().reverse().forEach(day => {
-          const dateStr = `${year}-${month}-${day}`;
+        const sortedDays = data[year][month].slice().sort((a, b) => {
+          if (a === 'None') return 1;
+          if (b === 'None') return -1;
+          return b.localeCompare(a);
+        });
+
+        sortedDays.forEach(day => {
+          const isNone = year === 'None' || month === 'None' || day === 'None';
+          const dateStr = isNone ? 'None' : `${year}-${month}-${day}`;
           const leaf = document.createElement('div');
           leaf.className = 'leaf-item';
           leaf.style.padding = '2px 4px';
@@ -405,26 +427,7 @@ async function buildInlineTimeFilter(container) {
           });
 
           const dayLabel = document.createElement('span');
-          dayLabel.innerText = `Dzień: ${day}`;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+          dayLabel.innerText = (day === 'None') ? 'Dzień: None' : `Dzień: ${day}`;
 
           leaf.appendChild(dayCheckbox);
           leaf.appendChild(dayLabel);
@@ -928,7 +931,7 @@ map.on('load', () => {
   // Ślad GPS
   map.addSource('gps-track', {
     type: 'vector',
-    tiles: [buildTrackTilesUrl('none')],
+    tiles: [buildTrackTilesUrl('__none__')],
     minzoom: 0,
     maxzoom: 18
   });

@@ -68,17 +68,24 @@ def get_dates_tree():
             EXTRACT(MONTH FROM timestamp)::int AS m,
             EXTRACT(DAY FROM timestamp)::int AS d
         FROM epochs
-        ORDER BY y DESC, m DESC, d DESC;
+        ORDER BY y DESC NULLS LAST, m DESC NULLS LAST, d DESC NULLS LAST;
     """
     tree = {}
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(query)
             for y, m, d in cur.fetchall():
-                y_str = str(y)
-                m_str = str(m).zfill(2)
-                d_str = str(d).zfill(2)
-                tree.setdefault(y_str, {}).setdefault(m_str, []).append(d_str)
+                if y is None or m is None or d is None:
+                    y_str = "None"
+                    m_str = "None"
+                    d_str = "None"
+                else:
+                    y_str = str(y)
+                    m_str = str(m).zfill(2)
+                    d_str = str(d).zfill(2)
+                tree.setdefault(y_str, {}).setdefault(m_str, [])
+                if d_str not in tree[y_str][m_str]:
+                    tree[y_str][m_str].append(d_str)
     return tree
 
 
@@ -89,7 +96,7 @@ def get_track_tile(z: int, x: int, y: int, days: str = Query(None), snapped: boo
         raise HTTPException(status_code=400, detail="Nieprawidłowe współrzędne kafelka")
 
     day_list = None
-    if days and days != "none":
+    if days and days not in ("__none__", "none", "empty", "false"):
         day_list = [day.strip() for day in days.split(",") if day.strip()]
         if not day_list:
             day_list = None
@@ -100,15 +107,30 @@ def get_track_tile(z: int, x: int, y: int, days: str = Query(None), snapped: boo
         f"{active_geom} && ST_Transform(ST_TileEnvelope(%s, %s, %s), 4326)",
     ]
     params = [z, x, y]
-    if days == "none":
+    if days in ("__none__", "none", "empty", "false"):
         where_clauses.append("FALSE")
     elif day_list:
-        where_clauses.append("e.timestamp::date = ANY(%s::date[])")
-        where_clauses.extend([
-            "e.timestamp >= %s::date",
-            "e.timestamp < (%s::date + INTERVAL '1 day')",
-        ])
-        params.extend([day_list, min(day_list), max(day_list)])
+        valid_dates = []
+        has_null_date = False
+        for d in day_list:
+            if d in ("None", "null"):
+                has_null_date = True
+            else:
+                valid_dates.append(d)
+
+        date_conditions = []
+        if valid_dates:
+            date_conditions.append(
+                "(e.timestamp::date = ANY(%s::date[]) AND e.timestamp >= %s::date AND e.timestamp < (%s::date + INTERVAL '1 day'))"
+            )
+            params.extend([valid_dates, min(valid_dates), max(valid_dates)])
+        if has_null_date:
+            date_conditions.append("(e.timestamp IS NULL)")
+
+        if date_conditions:
+            where_clauses.append(f"({' OR '.join(date_conditions)})")
+        else:
+            where_clauses.append("FALSE")
 
     query = f"""
         WITH bounds AS (
@@ -117,7 +139,7 @@ def get_track_tile(z: int, x: int, y: int, days: str = Query(None), snapped: boo
         tile_features AS (
             SELECT
                 e.epoch_id::text AS epoch_id,
-                e.timestamp::date::text AS day,
+                COALESCE(e.timestamp::date::text, 'None') AS day,
                 to_char(e.timestamp, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS timestamp,
                 round(ST_Y({active_geom})::numeric, 6) AS latitude,
                 round(ST_X({active_geom})::numeric, 6) AS longitude,
@@ -195,10 +217,18 @@ def get_epoch_details(epoch_id: str):
 def get_playback_day(day: str = Query(...), snapped: bool = Query(False)):
     """Pobiera uporządkowaną listę epok telemetrycznych dla wybranego dnia z satelitami (zoptymalizowana wersja JSON)."""
     day_str = day.strip()
-    try:
-        datetime.strptime(day_str, "%Y-%m-%d")
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Nieprawidłowy format daty. Oczekiwano YYYY-MM-DD.")
+    if day_str in ("None", "null"):
+        where_time = "e.timestamp IS NULL"
+        query_params = ()
+        order_clause = "e.epoch_id ASC"
+    else:
+        try:
+            datetime.strptime(day_str, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Nieprawidłowy format daty. Oczekiwano YYYY-MM-DD lub None.")
+        where_time = "e.timestamp >= %s::date AND e.timestamp < (%s::date + INTERVAL '1 day')"
+        query_params = (day_str, day_str)
+        order_clause = "e.timestamp ASC"
 
     active_geom = "COALESCE(e.geom_snapped, e.geom)" if snapped else "e.geom"
 
@@ -215,9 +245,8 @@ def get_playback_day(day: str = Query(...), snapped: bool = Query(False)):
             e.g_y,
             e.g_z
         FROM epochs e
-        WHERE e.timestamp >= %s::date
-          AND e.timestamp < (%s::date + INTERVAL '1 day')
-        ORDER BY e.timestamp ASC
+        WHERE {where_time}
+        ORDER BY {order_clause}
     ),
     day_satellites AS (
         SELECT 
@@ -243,7 +272,7 @@ def get_playback_day(day: str = Query(...), snapped: bool = Query(False)):
             'g_y', de.g_y,
             'g_z', de.g_z,
             'satellites', COALESCE(ds.sats, '[]'::json)
-        ) ORDER BY de.timestamp ASC
+        ) ORDER BY {order_clause}
     )::text, '[]')
     FROM day_epochs de
     LEFT JOIN day_satellites ds ON de.epoch_id = ds.epoch_id;
@@ -251,7 +280,7 @@ def get_playback_day(day: str = Query(...), snapped: bool = Query(False)):
     try:
         with get_db() as conn:
             with conn.cursor() as cur:
-                cur.execute(query, (day_str, day_str))
+                cur.execute(query, query_params)
                 row = cur.fetchone()
                 raw_json = row[0] if (row and row[0]) else "[]"
                 return Response(
@@ -270,9 +299,13 @@ def build_scope_filter(scope: str, day: Optional[str] = None, year: Optional[int
 
     if scope == "day" and day:
         day_str = day.strip()
-        where_clauses.append("e.timestamp >= %s::date AND e.timestamp < (%s::date + INTERVAL '1 day')")
-        params.extend([day_str, day_str])
-        scope_name = f"dzien_{day_str}"
+        if day_str in ("None", "null"):
+            where_clauses.append("e.timestamp IS NULL")
+            scope_name = "dzien_None"
+        else:
+            where_clauses.append("e.timestamp >= %s::date AND e.timestamp < (%s::date + INTERVAL '1 day')")
+            params.extend([day_str, day_str])
+            scope_name = f"dzien_{day_str}"
     elif scope == "month" and year and month:
         start_date = f"{int(year):04d}-{int(month):02d}-01"
         where_clauses.append("e.timestamp >= %s::date AND e.timestamp < (%s::date + INTERVAL '1 month')")
@@ -286,17 +319,29 @@ def build_scope_filter(scope: str, day: Optional[str] = None, year: Optional[int
     elif (scope in ("days", "custom", "active")) and days:
         day_list = [d.strip() for d in days.split(",") if d.strip()]
         if day_list:
-            where_clauses.append("e.timestamp::date = ANY(%s::date[])")
-            params.append(day_list)
+            valid_dates = [d for d in day_list if d not in ("None", "null")]
+            has_null = any(d in ("None", "null") for d in day_list)
+            conds = []
+            if valid_dates:
+                conds.append("e.timestamp::date = ANY(%s::date[])")
+                params.append(valid_dates)
+            if has_null:
+                conds.append("e.timestamp IS NULL")
+            if conds:
+                where_clauses.append(f"({' OR '.join(conds)})")
             scope_name = f"wybrane_{len(day_list)}_dni"
     elif scope == "all":
         scope_name = "wszystko"
     else:
         if day:
             day_str = day.strip()
-            where_clauses.append("e.timestamp >= %s::date AND e.timestamp < (%s::date + INTERVAL '1 day')")
-            params.extend([day_str, day_str])
-            scope_name = f"dzien_{day_str}"
+            if day_str in ("None", "null"):
+                where_clauses.append("e.timestamp IS NULL")
+                scope_name = "dzien_None"
+            else:
+                where_clauses.append("e.timestamp >= %s::date AND e.timestamp < (%s::date + INTERVAL '1 day')")
+                params.extend([day_str, day_str])
+                scope_name = f"dzien_{day_str}"
         else:
             scope_name = "wszystko"
 
@@ -333,7 +378,7 @@ def get_export_data(
                 e.g_x,
                 e.g_y,
                 e.g_z,
-                ROW_NUMBER() OVER (ORDER BY e.timestamp ASC) AS rn
+                ROW_NUMBER() OVER (ORDER BY e.timestamp ASC NULLS LAST, e.epoch_id ASC) AS rn
             FROM epochs e
             {where_sql}
         )
@@ -366,7 +411,7 @@ def get_export_data(
                 'g_x', e.g_x,
                 'g_y', e.g_y,
                 'g_z', e.g_z
-            ) ORDER BY e.timestamp ASC
+            ) ORDER BY e.timestamp ASC NULLS LAST, e.epoch_id ASC
         )::text, '[]')
         FROM epochs e
         {where_sql};
@@ -414,7 +459,7 @@ def download_export_file(
             e.g_z
         FROM epochs e
         {where_sql}
-        ORDER BY e.timestamp ASC;
+        ORDER BY e.timestamp ASC NULLS LAST, e.epoch_id ASC;
     """
     try:
         with psycopg.connect(DB_URL) as conn:
@@ -430,12 +475,13 @@ def download_export_file(
     if fmt == "csv":
         output = ["timestamp,latitude,longitude,altitude_m,speed_kmh,g_x,g_y,g_z"]
         for r in rows:
+            ts = r["timestamp"] if r["timestamp"] is not None else ""
             alt = r["altitude"] if r["altitude"] is not None else ""
             spd = r["speed_kmh"] if r["speed_kmh"] is not None else 0
             gx = r["g_x"] if r["g_x"] is not None else ""
             gy = r["g_y"] if r["g_y"] is not None else ""
             gz = r["g_z"] if r["g_z"] is not None else ""
-            output.append(f'{r["timestamp"]},{r["lat"]},{r["lon"]},{alt},{spd},{gx},{gy},{gz}')
+            output.append(f'{ts},{r["lat"]},{r["lon"]},{alt},{spd},{gx},{gy},{gz}')
         content = "\ufeff" + "\n".join(output)
         return Response(
             content=content,
