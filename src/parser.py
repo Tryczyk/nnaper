@@ -202,7 +202,8 @@ class OSRMConnectionPool:
 
     def match(self, coords_list: list):
         coords_str = ";".join(f"{lon:.6f},{lat:.6f}" for lon, lat in coords_list)
-        path = f"/match/v1/driving/{coords_str}?overview=false&geometries=geojson&gaps=ignore&tidy=true"
+        radiuses_str = ";".join("30" for _ in coords_list)
+        path = f"/match/v1/driving/{coords_str}?overview=false&geometries=geojson&gaps=ignore&tidy=true&radiuses={radiuses_str}"
         return self.request_json(path)
 
     def nearest(self, lon: float, lat: float):

@@ -89,6 +89,42 @@ def get_dates_tree():
     return tree
 
 
+@app.get("/api/time-tree")
+def get_time_tree(day: str = Query(...)):
+    """Pobiera dynamicznie strukturę godzin, minut i sekund dla wybranego dnia (lub None)."""
+    day_str = day.strip()
+    if day_str in ("None", "null"):
+        where_time = "timestamp IS NULL"
+        params = ()
+    else:
+        try:
+            datetime.strptime(day_str, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Nieprawidłowy format daty. Oczekiwano YYYY-MM-DD lub None.")
+        where_time = "timestamp >= %s::date AND timestamp < (%s::date + INTERVAL '1 day')"
+        params = (day_str, day_str)
+
+    query = f"""
+        SELECT DISTINCT 
+            to_char(timestamp, 'HH24') AS h,
+            to_char(timestamp, 'MI') AS mi,
+            to_char(timestamp, 'SS') AS s
+        FROM epochs
+        WHERE {where_time}
+        ORDER BY h DESC NULLS LAST, mi DESC NULLS LAST, s DESC NULLS LAST;
+    """
+    tree = {}
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, params)
+            for h, mi, s in cur.fetchall():
+                h_str = h if h is not None else "None"
+                mi_str = mi if mi is not None else "None"
+                s_str = s if s is not None else "None"
+                tree.setdefault(h_str, {}).setdefault(mi_str, []).append(s_str)
+    return tree
+
+
 @app.get("/api/track/{z}/{x}/{y}.pbf")
 def get_track_tile(z: int, x: int, y: int, days: str = Query(None), snapped: bool = Query(False)):
     """Zwraca dynamiczny kafelek Mapbox Vector Tile dla śladu GPS."""
@@ -141,6 +177,9 @@ def get_track_tile(z: int, x: int, y: int, days: str = Query(None), snapped: boo
                 e.epoch_id::text AS epoch_id,
                 COALESCE(e.timestamp::date::text, 'None') AS day,
                 to_char(e.timestamp, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS timestamp,
+                COALESCE(to_char(e.timestamp, 'YYYY-MM-DD"T"HH24'), 'None') AS h,
+                COALESCE(to_char(e.timestamp, 'YYYY-MM-DD"T"HH24:MI'), 'None') AS m,
+                COALESCE(to_char(e.timestamp, 'YYYY-MM-DD"T"HH24:MI:SS'), 'None') AS s,
                 round(ST_Y({active_geom})::numeric, 6) AS latitude,
                 round(ST_X({active_geom})::numeric, 6) AS longitude,
                 ST_AsMVTGeom(

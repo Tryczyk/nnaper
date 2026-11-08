@@ -40,18 +40,20 @@ let gpsMasterCheckbox = null;
 let gpsMasterDesiredState = null;
 let allGpsDayCheckboxes = [];
 let allGpsYearCheckboxes = [];
+const dayNodesRegistry = new Map();
 
 function syncGpsMasterCheckbox() {
   if (!gpsMasterCheckbox) return;
-  if (allGpsDayCheckboxes.length === 0) {
+  const days = Array.from(dayNodesRegistry.values());
+  if (days.length === 0) {
     gpsMasterCheckbox.checked = false;
     gpsMasterCheckbox.indeterminate = false;
     return;
   }
-  const checkedCount = allGpsDayCheckboxes.filter(c => c.checked).length;
-  const total = allGpsDayCheckboxes.length;
-  gpsMasterCheckbox.checked = checkedCount === total;
-  gpsMasterCheckbox.indeterminate = checkedCount > 0 && checkedCount < total;
+  const fullyCheckedCount = days.filter(d => d.dayHeader.checkbox.checked && !d.dayHeader.checkbox.indeterminate).length;
+  const hasAnyActive = days.some(d => d.dayHeader.checkbox.checked || d.dayHeader.checkbox.indeterminate);
+  gpsMasterCheckbox.checked = (fullyCheckedCount === days.length);
+  gpsMasterCheckbox.indeterminate = !gpsMasterCheckbox.checked && hasAnyActive;
 }
 
 function createFilterTreeNode(title, checked = true, collapsed = true) {
@@ -100,35 +102,99 @@ function syncFilterCheckbox(parentCheckbox, childCheckboxes) {
   parentCheckbox.indeterminate = checked > 0 && checked < childCheckboxes.length;
 }
 
-function setTrackLayerVisibility(visibleDays) {
-  trackMonthLayers.forEach(({ layerId, days }) => {
-    if (map.getLayer(layerId)) {
-      const activeDays = days.filter(day => visibleDays.has(day));
-      if (activeDays.length > 0) {
-        map.setLayoutProperty(layerId, 'visibility', 'visible');
-        map.setFilter(layerId, [
-          'match',
-          ['get', 'day'],
-          activeDays,
-          true,
-          false
-        ]);
+function getActiveFiltersForMonth(monthKey) {
+  const activeDays = [];
+  const activeHours = [];
+  const activeMinutes = [];
+  const activeSeconds = [];
+
+  const daysForMonth = Array.from(dayNodesRegistry.values()).filter(d => d.monthKey === monthKey);
+
+  daysForMonth.forEach(dayItem => {
+    const dayCb = dayItem.dayHeader.checkbox;
+    if (!dayCb.checked && !dayCb.indeterminate) {
+      return;
+    }
+    if (dayCb.checked && !dayCb.indeterminate) {
+      activeDays.push(dayItem.dateStr);
+      return;
+    }
+    // Dzień jest indeterminate (częściowo zaznaczony)
+    if (dayItem.isLoaded) {
+      dayItem.hours.forEach(hourObj => {
+        const hCb = hourObj.hourHeader.checkbox;
+        const hVal = (dayItem.dateStr === 'None' || hourObj.hour === 'None') ? 'None' : `${dayItem.dateStr}T${hourObj.hour}`;
+        if (!hCb.checked && !hCb.indeterminate) return;
+        if (hCb.checked && !hCb.indeterminate) {
+          activeHours.push(hVal);
+          return;
+        }
+        hourObj.minutes.forEach(minObj => {
+          const mCb = minObj.minuteHeader.checkbox;
+          const mVal = (hVal === 'None' || minObj.minute === 'None') ? 'None' : `${dayItem.dateStr}T${hourObj.hour}:${minObj.minute}`;
+          if (!mCb.checked && !mCb.indeterminate) return;
+          if (mCb.checked && !mCb.indeterminate) {
+            activeMinutes.push(mVal);
+            return;
+          }
+          minObj.seconds.forEach(secObj => {
+            if (secObj.secCheckbox.checked) {
+              activeSeconds.push(secObj.value);
+            }
+          });
+        });
+      });
+    } else {
+      if (dayCb.checked) activeDays.push(dayItem.dateStr);
+    }
+  });
+
+  return { activeDays, activeHours, activeMinutes, activeSeconds };
+}
+
+function updateTrackFilters() {
+  trackMonthLayers.forEach(({ layerId }, key) => {
+    if (!map.getLayer(layerId)) return;
+    const { activeDays, activeHours, activeMinutes, activeSeconds } = getActiveFiltersForMonth(key);
+    const conditions = [];
+    if (activeDays.length > 0) {
+      conditions.push(['match', ['get', 'day'], activeDays, true, false]);
+    }
+    if (activeHours.length > 0) {
+      conditions.push(['match', ['get', 'h'], activeHours, true, false]);
+    }
+    if (activeMinutes.length > 0) {
+      conditions.push(['match', ['get', 'm'], activeMinutes, true, false]);
+    }
+    if (activeSeconds.length > 0) {
+      conditions.push(['match', ['get', 's'], activeSeconds, true, false]);
+    }
+
+    if (conditions.length > 0) {
+      map.setLayoutProperty(layerId, 'visibility', 'visible');
+      if (conditions.length === 1) {
+        map.setFilter(layerId, conditions[0]);
       } else {
-        map.setLayoutProperty(layerId, 'visibility', 'none');
-        map.setFilter(layerId, ['==', ['get', 'day'], '__NO_DAY_ACTIVE__']);
+        map.setFilter(layerId, ['any', ...conditions]);
       }
+    } else {
+      map.setLayoutProperty(layerId, 'visibility', 'none');
+      map.setFilter(layerId, ['==', ['get', 'day'], '__NO_DAY_ACTIVE__']);
     }
   });
 }
 
 function applyTrackDateFilter(dayCheckboxes, isEverythingActive) {
   if (!isEverythingActive) {
-    setTrackLayerVisibility(new Set());
+    trackMonthLayers.forEach(({ layerId }) => {
+      if (map.getLayer(layerId)) {
+        map.setLayoutProperty(layerId, 'visibility', 'none');
+        map.setFilter(layerId, ['==', ['get', 'day'], '__NO_DAY_ACTIVE__']);
+      }
+    });
     return;
   }
-
-  const selectedDays = dayCheckboxes.filter(c => c.checked).map(c => c.value);
-  setTrackLayerVisibility(new Set(selectedDays));
+  updateTrackFilters();
 }
 
 // Jednorazowe zresetowanie konfiguracji kolorów do wartości domyślnych
@@ -267,9 +333,21 @@ window.bindGpsMasterCheckbox = (cb) => {
     gpsMasterCheckbox.indeterminate = false;
     gpsMasterDesiredState = isChecked;
 
-    // 1. Zaznacz/odznacz wszystkie dni
-    allGpsDayCheckboxes.forEach(c => {
-      c.checked = isChecked;
+    // 1. Zaznacz/odznacz wszystkie dni i ich załadowane dzieci
+    dayNodesRegistry.forEach(dayItem => {
+      dayItem.dayHeader.checkbox.checked = isChecked;
+      dayItem.dayHeader.checkbox.indeterminate = false;
+      if (dayItem.isLoaded) {
+        dayItem.hours.forEach(h => {
+          h.hourHeader.checkbox.checked = isChecked;
+          h.hourHeader.checkbox.indeterminate = false;
+          h.minutes.forEach(m => {
+            m.minuteHeader.checkbox.checked = isChecked;
+            m.minuteHeader.checkbox.indeterminate = false;
+            m.seconds.forEach(s => { s.secCheckbox.checked = isChecked; });
+          });
+        });
+      }
     });
 
     // 2. Zaznacz/odznacz nagłówki lat i miesięcy w drzewku dat
@@ -287,7 +365,7 @@ window.bindGpsMasterCheckbox = (cb) => {
     }
 
     // 3. Zastosuj filtr widoczności śladu GPS na mapie
-    applyTrackDateFilter(allGpsDayCheckboxes, isChecked);
+    updateTrackFilters();
   });
 
   syncGpsMasterCheckbox();
@@ -329,6 +407,185 @@ function addTrackMonthLayers(months) {
   });
 }
 
+function syncMinuteCheckbox(minObj) {
+  const checked = minObj.seconds.filter(s => s.secCheckbox.checked).length;
+  const total = minObj.seconds.length;
+  minObj.minuteHeader.checkbox.checked = (checked === total);
+  minObj.minuteHeader.checkbox.indeterminate = (checked > 0 && checked < total);
+}
+
+function syncHourCheckbox(hourObj) {
+  const allSecs = [];
+  hourObj.minutes.forEach(m => allSecs.push(...m.seconds));
+  const checked = allSecs.filter(s => s.secCheckbox.checked).length;
+  const total = allSecs.length;
+  hourObj.hourHeader.checkbox.checked = (checked === total);
+  hourObj.hourHeader.checkbox.indeterminate = (checked > 0 && checked < total);
+}
+
+function syncDayCheckbox(dayItem) {
+  if (!dayItem.isLoaded) return;
+  const allSecs = [];
+  dayItem.hours.forEach(h => h.minutes.forEach(m => allSecs.push(...m.seconds)));
+  if (allSecs.length === 0) return;
+  const checked = allSecs.filter(s => s.secCheckbox.checked).length;
+  const total = allSecs.length;
+  dayItem.dayHeader.checkbox.checked = (checked === total);
+  dayItem.dayHeader.checkbox.indeterminate = (checked > 0 && checked < total);
+}
+
+async function expandDayNode(dayItem, monthHeader, yearHeader, monthDayCheckboxes, yearDayCheckboxes) {
+  if (dayItem.isLoaded) return;
+  dayItem.isLoaded = true;
+  dayItem.dayChildren.innerHTML = '<div style="color:#64748b;font-size:11px;padding:2px 8px;">Ładowanie...</div>';
+
+  try {
+    const res = await fetch(`${apiBaseUrl}/api/time-tree?day=${encodeURIComponent(dayItem.dateStr)}`);
+    if (!res.ok) throw new Error('Błąd API');
+    const data = await res.json();
+    dayItem.dayChildren.innerHTML = '';
+
+    const hours = Object.keys(data).sort((a, b) => {
+      if (a === 'None') return 1;
+      if (b === 'None') return -1;
+      return b.localeCompare(a);
+    });
+
+    if (hours.length === 0) {
+      dayItem.dayChildren.innerHTML = '<div style="color:#64748b;font-size:11px;padding:2px 8px;">Brak danych czasowych.</div>';
+      return;
+    }
+
+    const dayChecked = dayItem.dayHeader.checkbox.checked;
+
+    hours.forEach(hour => {
+      const isHourNone = (hour === 'None' || dayItem.dateStr === 'None');
+      const hourTitle = isHourNone ? 'Godzina: None' : `Godzina: ${hour}:00`;
+      const hourHeader = createFilterTreeNode(hourTitle, dayChecked, true);
+      const hourChildren = document.createElement('div');
+      hourChildren.className = 'node-children collapsed';
+      hourChildren.style.marginLeft = '8px';
+      bindFilterCollapse(hourHeader, hourChildren);
+
+      const hourObj = {
+        hour,
+        hourHeader,
+        hourChildren,
+        minutes: []
+      };
+      dayItem.hours.push(hourObj);
+
+      const minutes = Object.keys(data[hour]).sort((a, b) => {
+        if (a === 'None') return 1;
+        if (b === 'None') return -1;
+        return b.localeCompare(a);
+      });
+
+      minutes.forEach(minute => {
+        const isMinNone = (isHourNone || minute === 'None');
+        const minuteTitle = isMinNone ? 'Minuta: None' : `Minuta: ${hour}:${minute}`;
+        const minuteHeader = createFilterTreeNode(minuteTitle, dayChecked, true);
+        const minuteChildren = document.createElement('div');
+        minuteChildren.className = 'node-children collapsed';
+        minuteChildren.style.marginLeft = '8px';
+        bindFilterCollapse(minuteHeader, minuteChildren);
+
+        const minuteObj = {
+          minute,
+          minuteHeader,
+          minuteChildren,
+          seconds: []
+        };
+        hourObj.minutes.push(minuteObj);
+
+        const seconds = data[hour][minute].slice().sort((a, b) => {
+          if (a === 'None') return 1;
+          if (b === 'None') return -1;
+          return b.localeCompare(a);
+        });
+
+        seconds.forEach(second => {
+          const isSecNone = (isMinNone || second === 'None');
+          const secValue = isSecNone ? 'None' : `${dayItem.dateStr}T${hour}:${minute}:${second}`;
+          const leaf = document.createElement('div');
+          leaf.className = 'leaf-item';
+          leaf.style.padding = '2px 4px';
+
+          const secCheckbox = document.createElement('input');
+          secCheckbox.type = 'checkbox';
+          secCheckbox.checked = dayChecked;
+          secCheckbox.value = secValue;
+          secCheckbox.style.accentColor = '#38bdf8';
+          secCheckbox.style.marginRight = '6px';
+          secCheckbox.style.cursor = 'pointer';
+
+          const secLabel = document.createElement('span');
+          secLabel.innerText = isSecNone ? 'Sekunda: None' : `Sekunda: ${second}`;
+
+          leaf.appendChild(secCheckbox);
+          leaf.appendChild(secLabel);
+          minuteChildren.appendChild(leaf);
+
+          const secObj = { second, secCheckbox, value: secValue };
+          minuteObj.seconds.push(secObj);
+
+          secCheckbox.addEventListener('change', () => {
+            syncMinuteCheckbox(minuteObj);
+            syncHourCheckbox(hourObj);
+            syncDayCheckbox(dayItem);
+            syncFilterCheckbox(monthHeader.checkbox, monthDayCheckboxes);
+            syncFilterCheckbox(yearHeader.checkbox, yearDayCheckboxes);
+            syncGpsMasterCheckbox();
+            updateTrackFilters();
+          });
+        });
+
+        minuteHeader.checkbox.addEventListener('change', () => {
+          const isChk = minuteHeader.checkbox.checked;
+          minuteHeader.checkbox.indeterminate = false;
+          minuteObj.seconds.forEach(s => { s.secCheckbox.checked = isChk; });
+          syncHourCheckbox(hourObj);
+          syncDayCheckbox(dayItem);
+          syncFilterCheckbox(monthHeader.checkbox, monthDayCheckboxes);
+          syncFilterCheckbox(yearHeader.checkbox, yearDayCheckboxes);
+          syncGpsMasterCheckbox();
+          updateTrackFilters();
+        });
+
+        const minNode = document.createElement('div');
+        minNode.className = 'tree-node';
+        minNode.appendChild(minuteHeader.element);
+        minNode.appendChild(minuteChildren);
+        hourChildren.appendChild(minNode);
+      });
+
+      hourHeader.checkbox.addEventListener('change', () => {
+        const isChk = hourHeader.checkbox.checked;
+        hourHeader.checkbox.indeterminate = false;
+        hourObj.minutes.forEach(m => {
+          m.minuteHeader.checkbox.checked = isChk;
+          m.minuteHeader.checkbox.indeterminate = false;
+          m.seconds.forEach(s => { s.secCheckbox.checked = isChk; });
+        });
+        syncDayCheckbox(dayItem);
+        syncFilterCheckbox(monthHeader.checkbox, monthDayCheckboxes);
+        syncFilterCheckbox(yearHeader.checkbox, yearDayCheckboxes);
+        syncGpsMasterCheckbox();
+        updateTrackFilters();
+      });
+
+      const hNode = document.createElement('div');
+      hNode.className = 'tree-node';
+      hNode.appendChild(hourHeader.element);
+      hNode.appendChild(hourChildren);
+      dayItem.dayChildren.appendChild(hNode);
+    });
+
+  } catch (err) {
+    dayItem.dayChildren.innerHTML = '<div style="color:#ef4444;font-size:11px;padding:2px 8px;">Błąd pobierania czasu.</div>';
+  }
+}
+
 async function buildInlineTimeFilter(container) {
   try {
     const res = await fetch(`${apiBaseUrl}/api/dates-tree`);
@@ -353,6 +610,7 @@ async function buildInlineTimeFilter(container) {
     addTrackMonthLayers(months);
 
     container.innerHTML = '';
+    dayNodesRegistry.clear();
     allGpsDayCheckboxes = [];
     allGpsYearCheckboxes = [];
 
@@ -403,44 +661,88 @@ async function buildInlineTimeFilter(container) {
         sortedDays.forEach(day => {
           const isNone = year === 'None' || month === 'None' || day === 'None';
           const dateStr = isNone ? 'None' : `${year}-${month}-${day}`;
-          const leaf = document.createElement('div');
-          leaf.className = 'leaf-item';
-          leaf.style.padding = '2px 4px';
+          const dayTitle = (day === 'None') ? 'Dzień: None' : `Dzień: ${day}`;
+          const dayHeader = createFilterTreeNode(dayTitle, false, true);
+          const dayChildren = document.createElement('div');
+          dayChildren.className = 'node-children collapsed';
+          dayChildren.style.marginLeft = '8px';
+          bindFilterCollapse(dayHeader, dayChildren);
 
-          const dayCheckbox = document.createElement('input');
-          dayCheckbox.type = 'checkbox';
-          dayCheckbox.checked = false;
-          dayCheckbox.value = dateStr;
-          dayCheckbox.style.accentColor = '#38bdf8';
-          dayCheckbox.style.marginRight = '6px';
-          dayCheckbox.style.cursor = 'pointer';
+          const dayNode = document.createElement('div');
+          dayNode.className = 'tree-node';
+          dayNode.appendChild(dayHeader.element);
+          dayNode.appendChild(dayChildren);
+          monthChildren.appendChild(dayNode);
 
-          monthDayCheckboxes.push(dayCheckbox);
-          yearDayCheckboxes.push(dayCheckbox);
-          allGpsDayCheckboxes.push(dayCheckbox);
+          const dayItem = {
+            dateStr,
+            monthKey: isNone ? 'None-None' : `${year}-${month}`,
+            dayHeader,
+            dayChildren,
+            isLoaded: false,
+            hours: []
+          };
+          dayNodesRegistry.set(dateStr, dayItem);
+          monthDayCheckboxes.push(dayHeader.checkbox);
+          yearDayCheckboxes.push(dayHeader.checkbox);
+          allGpsDayCheckboxes.push(dayHeader.checkbox);
 
-          dayCheckbox.addEventListener('change', () => {
+          // Leniwe pobieranie godzin/minut/sekund przy pierwszym kliknięciu strzałki rozwijania
+          dayHeader.arrow.addEventListener('click', () => {
+            expandDayNode(dayItem, monthHeader, yearHeader, monthDayCheckboxes, yearDayCheckboxes);
+          });
+          dayHeader.element.addEventListener('click', (e) => {
+            if (e.target !== dayHeader.checkbox) {
+              expandDayNode(dayItem, monthHeader, yearHeader, monthDayCheckboxes, yearDayCheckboxes);
+            }
+          });
+
+          dayHeader.checkbox.addEventListener('change', () => {
+            const isChecked = dayHeader.checkbox.checked;
+            dayHeader.checkbox.indeterminate = false;
+            if (dayItem.isLoaded) {
+              dayItem.hours.forEach(h => {
+                h.hourHeader.checkbox.checked = isChecked;
+                h.hourHeader.checkbox.indeterminate = false;
+                h.minutes.forEach(m => {
+                  m.minuteHeader.checkbox.checked = isChecked;
+                  m.minuteHeader.checkbox.indeterminate = false;
+                  m.seconds.forEach(s => { s.secCheckbox.checked = isChecked; });
+                });
+              });
+            }
             syncFilterCheckbox(monthHeader.checkbox, monthDayCheckboxes);
             syncFilterCheckbox(yearHeader.checkbox, yearDayCheckboxes);
             syncGpsMasterCheckbox();
-            applyTrackDateFilter(allGpsDayCheckboxes, allGpsDayCheckboxes.some(c => c.checked));
+            updateTrackFilters();
           });
-
-          const dayLabel = document.createElement('span');
-          dayLabel.innerText = (day === 'None') ? 'Dzień: None' : `Dzień: ${day}`;
-
-          leaf.appendChild(dayCheckbox);
-          leaf.appendChild(dayLabel);
-          monthChildren.appendChild(leaf);
         });
 
         monthHeader.checkbox.addEventListener('change', () => {
           const isChecked = monthHeader.checkbox.checked;
           monthHeader.checkbox.indeterminate = false;
-          monthDayCheckboxes.forEach(cb => { cb.checked = isChecked; });
+          monthDayCheckboxes.forEach(cb => {
+            cb.checked = isChecked;
+            cb.indeterminate = false;
+          });
+          // Aktualizuj załadowane dni
+          monthDayCheckboxes.forEach(cb => {
+            const dayItem = Array.from(dayNodesRegistry.values()).find(d => d.dayHeader.checkbox === cb);
+            if (dayItem && dayItem.isLoaded) {
+              dayItem.hours.forEach(h => {
+                h.hourHeader.checkbox.checked = isChecked;
+                h.hourHeader.checkbox.indeterminate = false;
+                h.minutes.forEach(m => {
+                  m.minuteHeader.checkbox.checked = isChecked;
+                  m.minuteHeader.checkbox.indeterminate = false;
+                  m.seconds.forEach(s => { s.secCheckbox.checked = isChecked; });
+                });
+              });
+            }
+          });
           syncFilterCheckbox(yearHeader.checkbox, yearDayCheckboxes);
           syncGpsMasterCheckbox();
-          applyTrackDateFilter(allGpsDayCheckboxes, allGpsDayCheckboxes.some(c => c.checked));
+          updateTrackFilters();
         });
 
         monthNode.appendChild(monthHeader.element);
@@ -451,13 +753,31 @@ async function buildInlineTimeFilter(container) {
       yearHeader.checkbox.addEventListener('change', () => {
         const isChecked = yearHeader.checkbox.checked;
         yearHeader.checkbox.indeterminate = false;
-        yearDayCheckboxes.forEach(cb => { cb.checked = isChecked; });
+        yearDayCheckboxes.forEach(cb => {
+          cb.checked = isChecked;
+          cb.indeterminate = false;
+        });
         yearChildren.querySelectorAll('.node-header input[type="checkbox"]').forEach(cb => {
           cb.checked = isChecked;
           cb.indeterminate = false;
         });
+        // Aktualizuj załadowane dni
+        yearDayCheckboxes.forEach(cb => {
+          const dayItem = Array.from(dayNodesRegistry.values()).find(d => d.dayHeader.checkbox === cb);
+          if (dayItem && dayItem.isLoaded) {
+            dayItem.hours.forEach(h => {
+              h.hourHeader.checkbox.checked = isChecked;
+              h.hourHeader.checkbox.indeterminate = false;
+              h.minutes.forEach(m => {
+                m.minuteHeader.checkbox.checked = isChecked;
+                m.minuteHeader.checkbox.indeterminate = false;
+                m.seconds.forEach(s => { s.secCheckbox.checked = isChecked; });
+              });
+            });
+          }
+        });
         syncGpsMasterCheckbox();
-        applyTrackDateFilter(allGpsDayCheckboxes, allGpsDayCheckboxes.some(c => c.checked));
+        updateTrackFilters();
       });
 
       yearNode.appendChild(yearHeader.element);
@@ -466,17 +786,20 @@ async function buildInlineTimeFilter(container) {
     });
 
     if (gpsMasterDesiredState !== null) {
-      allGpsDayCheckboxes.forEach(c => { c.checked = gpsMasterDesiredState; });
+      dayNodesRegistry.forEach(d => {
+        d.dayHeader.checkbox.checked = gpsMasterDesiredState;
+        d.dayHeader.checkbox.indeterminate = false;
+      });
       allGpsYearCheckboxes.forEach(c => { c.checked = gpsMasterDesiredState; c.indeterminate = false; });
       container.querySelectorAll('.node-header input[type="checkbox"]').forEach(c => {
         c.checked = gpsMasterDesiredState;
         c.indeterminate = false;
       });
       syncGpsMasterCheckbox();
-      applyTrackDateFilter(allGpsDayCheckboxes, gpsMasterDesiredState);
+      updateTrackFilters();
     } else {
       syncGpsMasterCheckbox();
-      applyTrackDateFilter(allGpsDayCheckboxes, false);
+      updateTrackFilters();
     }
 
   } catch (err) {
