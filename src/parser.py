@@ -104,15 +104,12 @@ def resolve_and_qualify_epoch(
     rmc_time, rmc_status, rmc_lat, rmc_lon, rmc_date, _ = epoch.gprmc or (None,) * 6
     gga_time, gga_lat, gga_lon, _, _, _ = epoch.gpgga or (None,) * 6
 
-    # 1. Złożenie dokładnej daty oraz godziny
+    # 1. Złożenie dokładnej daty oraz godziny (jeśli dostępne; brak czasu nie odrzuca punktu)
     chosen_time = rmc_time or gga_time
     chosen_date = rmc_date or last_known_date
     epoch_timestamp = None
     if chosen_date and chosen_time:
         epoch_timestamp = datetime.combine(chosen_date, chosen_time).replace(tzinfo=timezone.utc)
-
-    if epoch_timestamp is None:
-        return None
 
     # 2. Wybór współrzędnych - bez żadnych filtrów jakościowych (bierzemy dostępne współrzędne)
     chosen_lat = gga_lat if gga_lat is not None else rmc_lat
@@ -121,20 +118,21 @@ def resolve_and_qualify_epoch(
     if chosen_lat is None or chosen_lon is None:
         return None
 
-    # 3. Wyznaczenie prędkości za każdym razem wyłącznie na bazie lat, lon, czas
+    # 3. Wyznaczenie prędkości za każdym razem na bazie lat, lon, czas (o ile czas jest znany)
     speed_kmh = 0.0
-    if previous_point is not None:
+    if previous_point is not None and epoch_timestamp is not None:
         previous_timestamp, previous_lat, previous_lon = previous_point
-        elapsed_seconds = (epoch_timestamp - previous_timestamp).total_seconds()
-        if elapsed_seconds <= 0:
-            dist_meters = haversine_distance_meters(previous_lat, previous_lon, chosen_lat, chosen_lon)
-            if dist_meters > 1.0:
-                speed_kmh = 999999.0
+        if previous_timestamp is not None:
+            elapsed_seconds = (epoch_timestamp - previous_timestamp).total_seconds()
+            if elapsed_seconds <= 0:
+                dist_meters = haversine_distance_meters(previous_lat, previous_lon, chosen_lat, chosen_lon)
+                if dist_meters > 1.0:
+                    speed_kmh = 999999.0
+                else:
+                    speed_kmh = 0.0
             else:
-                speed_kmh = 0.0
-        else:
-            dist_meters = haversine_distance_meters(previous_lat, previous_lon, chosen_lat, chosen_lon)
-            speed_kmh = (dist_meters / elapsed_seconds) * 3.6
+                dist_meters = haversine_distance_meters(previous_lat, previous_lon, chosen_lat, chosen_lon)
+                speed_kmh = (dist_meters / elapsed_seconds) * 3.6
 
     # 4. Usunięcie punktów przekraczających 1800 km/h
     if speed_kmh > max_speed_kmh:
@@ -144,8 +142,7 @@ def resolve_and_qualify_epoch(
     chosen_lon = round(chosen_lon, 6)
     geom_wkt = f"SRID=4326;POINT({chosen_lon} {chosen_lat})"
 
-    # Wysokość nie jest parsowana (zawsze None / NULL)
-    return chosen_lat, chosen_lon, geom_wkt, epoch_timestamp, None, round(speed_kmh, 2), chosen_date
+    return chosen_lat, chosen_lon, geom_wkt, epoch_timestamp, round(speed_kmh, 2), chosen_date
 
 
 class OSRMConnectionPool:
@@ -375,13 +372,15 @@ class CopyBatchBuffer:
         self.epochs = []
         self.satellite = []
         self.last_point = previous_point
-        self.last_known_date = previous_point[0].date() if previous_point else None
+        self.last_timed_point = previous_point if (previous_point and previous_point[0] is not None) else None
+        self.last_known_date = previous_point[0].date() if (previous_point and previous_point[0] is not None) else None
 
     def add_epoch(self, epoch: RawEpoch, last_known_date=None):
         date_to_use = last_known_date or self.last_known_date
+        ref_point = self.last_timed_point or self.last_point
         result = resolve_and_qualify_epoch(
             epoch,
-            previous_point=self.last_point,
+            previous_point=ref_point,
             last_known_date=date_to_use,
             max_speed_kmh=MAX_SPEED_KMH,
         )
@@ -389,15 +388,16 @@ class CopyBatchBuffer:
         if result is None:
             return
 
-        lat, lon, geom_wkt, epoch_ts, _, speed_kmh, chosen_date = result
+        lat, lon, geom_wkt, epoch_ts, speed_kmh, chosen_date = result
         if chosen_date:
             self.last_known_date = chosen_date
 
-        epoch_key = (self.profile_id, epoch_ts)
-        if epoch_key in self.batch_timestamps:
-            return
+        if epoch_ts is not None:
+            epoch_key = (self.profile_id, epoch_ts)
+            if epoch_key in self.batch_timestamps:
+                return
+            self.batch_timestamps.add(epoch_key)
 
-        self.batch_timestamps.add(epoch_key)
         epoch_id = str(uuid.uuid4())
 
         self.epochs.append({
@@ -405,7 +405,6 @@ class CopyBatchBuffer:
             "profile_id": self.profile_id,
             "timestamp": epoch_ts,
             "geom": geom_wkt,
-            "altitude": None,
             "speed_kmh": round(speed_kmh, 2),
             "g_x": to_float_or_none(epoch.gsensord[0]) if epoch.gsensord else None,
             "g_y": to_float_or_none(epoch.gsensord[1]) if epoch.gsensord else None,
@@ -415,6 +414,8 @@ class CopyBatchBuffer:
             "geom_snapped": None,
         })
         self.last_point = (epoch_ts, lat, lon)
+        if epoch_ts is not None:
+            self.last_timed_point = (epoch_ts, lat, lon)
 
         if epoch.gpgsvs:
             for sats_list in epoch.gpgsvs:
@@ -443,7 +444,7 @@ class CopyBatchBuffer:
         """)
 
         with cur.copy("""COPY staging_epochs (
-            epoch_id, profile_id, timestamp, geom, altitude, speed_kmh, g_x, g_y, g_z, geom_snapped
+            epoch_id, profile_id, timestamp, geom, speed_kmh, g_x, g_y, g_z, geom_snapped
         ) FROM STDIN""") as copy:
             for ep in self.epochs:
                 copy.write_row((
@@ -451,7 +452,6 @@ class CopyBatchBuffer:
                     ep["profile_id"],
                     ep["timestamp"],
                     ep["geom"],
-                    None,
                     ep["speed_kmh"],
                     ep["g_x"],
                     ep["g_y"],
@@ -472,10 +472,10 @@ class CopyBatchBuffer:
         # Wstawienie epok z automatycznym i bezpiecznym pomijaniem duplikatów
         cur.execute("""
             INSERT INTO epochs (
-                epoch_id, profile_id, timestamp, geom, altitude, speed_kmh, g_x, g_y, g_z, geom_snapped
+                epoch_id, profile_id, timestamp, geom, speed_kmh, g_x, g_y, g_z, geom_snapped
             )
             SELECT
-                epoch_id, profile_id, timestamp, geom, altitude, speed_kmh, g_x, g_y, g_z, geom_snapped
+                epoch_id, profile_id, timestamp, geom, speed_kmh, g_x, g_y, g_z, geom_snapped
             FROM staging_epochs
             ON CONFLICT (profile_id, timestamp) DO NOTHING;
         """)
@@ -507,6 +507,11 @@ def parse_data(data_file_path=DATA_FILE_PATH, batch_size=BATCH_SIZE):
             c = f.read().strip()
             last_line_index = int(c) if c.isdigit() else 0
 
+    total_bytes = data_file_path.stat().st_size if data_file_path.exists() else 0
+    processed_bytes = 0
+    initial_processed_bytes = 0
+    t_start = time.time()
+
     print(f"Parsing from line: {last_line_index}")
 
     with psycopg.connect(DB_URL) as conn:
@@ -514,6 +519,8 @@ def parse_data(data_file_path=DATA_FILE_PATH, batch_size=BATCH_SIZE):
             cur.execute("SET synchronous_commit = OFF;")
             cur.execute("SET work_mem = '64MB';")
 
+            cur.execute("ALTER TABLE epochs DROP COLUMN IF EXISTS altitude CASCADE;")
+            cur.execute("ALTER TABLE epochs ALTER COLUMN timestamp DROP NOT NULL;")
             cur.execute("ALTER TABLE epochs ADD COLUMN IF NOT EXISTS geom_snapped GEOMETRY(Point, 4326);")
             cur.execute("ALTER TABLE epochs DROP COLUMN IF EXISTS geom_offroad CASCADE;")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_epochs_geom ON epochs USING GIST (geom);")
@@ -536,7 +543,7 @@ def parse_data(data_file_path=DATA_FILE_PATH, batch_size=BATCH_SIZE):
                 SELECT timestamp, ST_Y(geom), ST_X(geom)
                 FROM epochs
                 WHERE profile_id = %s
-                ORDER BY timestamp DESC
+                ORDER BY timestamp DESC NULLS LAST
                 LIMIT 1
                 """,
                 (profile_id,),
@@ -550,7 +557,7 @@ def parse_data(data_file_path=DATA_FILE_PATH, batch_size=BATCH_SIZE):
                     float(last_row[2]),
                 )
 
-            last_known_date = previous_point[0].date() if previous_point else None
+            last_known_date = previous_point[0].date() if (previous_point and previous_point[0] is not None) else None
 
             epoch = RawEpoch()
             epochs_in_batch = 0
@@ -561,8 +568,15 @@ def parse_data(data_file_path=DATA_FILE_PATH, batch_size=BATCH_SIZE):
 
             with open(str(data_file_path), "r", encoding="utf-8", errors="ignore") as data_file:
                 for current_number, line in enumerate(data_file, start=1):
+                    line_len = len(line.encode("utf-8", errors="ignore"))
+                    processed_bytes += line_len
+
                     if current_number <= last_line_index:
                         continue
+
+                    if initial_processed_bytes == 0 and last_line_index > 0:
+                        initial_processed_bytes = processed_bytes
+                        t_start = time.time()
 
                     raw_line = line.strip()
                     if not raw_line:
@@ -659,7 +673,23 @@ def parse_data(data_file_path=DATA_FILE_PATH, batch_size=BATCH_SIZE):
                         epochs_in_batch = 0
                         with open(STATE_FILE_PATH, "w") as sf:
                             sf.write(str(current_number))
-                        print(f"Parsed {current_number} lines ({count} epok w {flush_dt:.2f}s, {speed:.0f} epok/s, cache snap: {len(GLOBAL_SNAP_CACHE)})...")
+
+                        progress_pct = (processed_bytes / total_bytes * 100.0) if total_bytes > 0 else 0.0
+                        elapsed_total = max(0.001, time.time() - t_start)
+                        active_bytes = max(1, processed_bytes - initial_processed_bytes)
+                        bytes_per_sec = active_bytes / elapsed_total
+                        remaining_bytes = max(0, total_bytes - processed_bytes)
+                        eta_seconds = remaining_bytes / max(1.0, bytes_per_sec)
+                        eta_h = int(eta_seconds // 3600)
+                        eta_m = int((eta_seconds % 3600) // 60)
+                        eta_s = int(eta_seconds % 60)
+                        eta_str = f"{eta_h:02d}:{eta_m:02d}:{eta_s:02d}"
+
+                        print(
+                            f"Parsed {current_number} lines ({count} epok w {flush_dt:.2f}s, "
+                            f"{speed:.0f} epok/s, postęp: {progress_pct:.1f}%, ETA: {eta_str}, "
+                            f"cache snap: {len(GLOBAL_SNAP_CACHE)})..."
+                        )
 
                     last_line_index = current_number
 

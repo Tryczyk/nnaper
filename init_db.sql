@@ -33,10 +33,9 @@ CREATE INDEX IF NOT EXISTS idx_profiles_user_id ON profiles (user_id);
 CREATE TABLE IF NOT EXISTS epochs (
     epoch_id      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     profile_id    UUID NOT NULL REFERENCES profiles(profile_id) ON DELETE CASCADE,
-    timestamp     TIMESTAMPTZ NOT NULL,
+    timestamp     TIMESTAMPTZ,
     geom          GEOMETRY(Point, 4326) NOT NULL,
     geom_snapped  GEOMETRY(Point, 4326),
-    altitude      NUMERIC(7, 2),
     speed_kmh     NUMERIC(7, 2) NOT NULL DEFAULT 0,
     g_x           NUMERIC(6, 3),
     g_y           NUMERIC(6, 3),
