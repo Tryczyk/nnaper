@@ -14,6 +14,8 @@ import time
 import uuid
 
 from constants import (
+    BASE_DIR,
+    DB_URL,
     MATCH_CHUNK_SIZE,
     MAX_SPEED_KMH,
     OSRM_URL,
@@ -704,6 +706,99 @@ def parse_nmea_disk_stream(
     }
 
 
+def find_go_parser_binary() -> Path | None:
+    import sys
+    is_windows = sys.platform.startswith("win") or os.name == "nt"
+    if is_windows:
+        candidates = [
+            BASE_DIR / "go-parser" / "nnaper-parser.exe",
+            BASE_DIR / "nnaper-parser.exe",
+        ]
+    else:
+        candidates = [
+            BASE_DIR / "go-parser" / "nnaper-parser",
+            BASE_DIR / "nnaper-parser",
+        ]
+    for c in candidates:
+        if c.is_file():
+            if not is_windows:
+                try:
+                    os.chmod(str(c), 0o755)
+                except Exception:
+                    pass
+            return c
+    return None
+
+
+def parse_with_go_binary(
+    bin_path: Path,
+    file_path: Path,
+    filename: str,
+    profile_id: str,
+    snap_to_roads: bool = True,
+    abort_check=None,
+):
+    import json
+    import subprocess
+
+    cmd = [
+        str(bin_path),
+        "-file", str(file_path),
+        "-profile-id", str(profile_id),
+        "-db-url", str(DB_URL),
+        "-osrm-url", str(OSRM_URL),
+        f"-snap={'true' if snap_to_roads else 'false'}",
+        "-json-progress=true",
+    ]
+
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
+
+    try:
+        if proc.stdout:
+            for line in proc.stdout:
+                if abort_check and abort_check():
+                    proc.terminate()
+                    yield {
+                        "type": "aborted",
+                        "stage": "aborted",
+                        "filename": filename,
+                        "message": "Parsowanie przerwane na życzenie użytkownika.",
+                    }
+                    return
+
+                line_str = line.strip()
+                if not line_str:
+                    continue
+                try:
+                    event = json.loads(line_str)
+                    yield event
+                except Exception:
+                    pass
+
+        proc.wait()
+        if proc.returncode != 0:
+            err_msg = proc.stderr.read() if proc.stderr else "Błąd procesu Go"
+            yield {
+                "type": "error",
+                "stage": "error",
+                "filename": filename,
+                "message": f"Go Parser: {err_msg}",
+            }
+    except Exception as exc:
+        yield {
+            "type": "error",
+            "stage": "error",
+            "filename": filename,
+            "message": f"Błąd wykonania Go: {str(exc)}",
+        }
+
+
 def parse_file_disk_stream(
     file_path: Path,
     filename: str,
@@ -716,8 +811,27 @@ def parse_file_disk_stream(
 ):
     """
     Główny punkt wejścia dla przetwarzania pliku z dysku.
-    Wybiera odpowiedni parser i strumieniuje zdarzenia NDJSON.
+    Automatycznie wybiera ultra-szybki silnik w Go (jeśli skompilowany)
+    lub zoptymalizowany strumieniowy parser w Pythonie.
     """
+    go_bin = find_go_parser_binary()
+    if go_bin is not None:
+        yield from parse_with_go_binary(
+            go_bin,
+            file_path,
+            filename,
+            profile_id,
+            snap_to_roads=snap_to_roads,
+            abort_check=abort_check,
+        )
+        return
+
+    try:
+        cur.execute("SET synchronous_commit = OFF;")
+        cur.execute("SET work_mem = '64MB';")
+    except Exception:
+        pass
+
     cur.execute(
         """
         SELECT timestamp, ST_Y(geom), ST_X(geom)

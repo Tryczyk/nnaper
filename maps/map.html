@@ -11,8 +11,7 @@
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
   <script src="https://unpkg.com/pmtiles@3.0.7/dist/pmtiles.js"></script>
-  <link rel="stylesheet" href="styles.css?v=20261108_v33_style_studio" />
-  <link rel="stylesheet" href="styles.css?v=20261108_v34_fix_dates_and_studio_layout" />
+  <link rel="stylesheet" href="styles.css?v=20261108_v37_fix_syntax_ok" />
 </head>
 
 <body>
@@ -37,38 +36,15 @@
     </div>
 
     <div class="menu-body">
-      <div class="style-studio-banner-row">
-        <button type="button" id="btn-open-style-studio" class="btn-open-style-studio"
-          title="Otwórz inteligentne studio stylizacji mapy">
-          <span class="studio-btn-icon">🎨</span>
-          <span class="studio-btn-text">Studio Stylów i Kolorów</span>
-          <span class="studio-btn-badge">Nowość</span>
-        </button>
-      </div>
       <div id="tree-container"></div>
-    </div>
-  </div>
 
-  <!-- Inteligentne Studio Stylizacji Wyglądu Mapy -->
-  <div id="style-studio-panel" class="style-studio-panel" style="display: none;">
-    <div class="style-studio-header">
-      <div class="style-studio-title-row">
-        <span class="style-studio-icon">🎨</span>
-        <div>
-          <h3 class="style-studio-title">Stylizator Wyglądu Mapy</h3>
-          <span class="style-studio-subtitle">Kolory, obwódki, krycie i linie w jednym miejscu</span>
-          <!-- Inteligentne Studio Stylizacji Wyglądu Mapy (osadzone w panelu warstw) -->
-          <div id="style-studio-panel" class="style-studio-panel" style="display: none;">
-            <div class="style-studio-header">
-              <div class="style-studio-title-row">
-                <button type="button" id="btn-close-style-studio" class="studio-btn-back" title="Wróć do listy warstw">←
-                  Wróć do listy warstw</button>
-              </div>
-              <span class="style-studio-title">Stylizacja Mapy</span>
-            </div>
+      <!-- Inteligentne Studio Stylizacji Wyglądu Mapy (osadzone w panelu warstw) -->
+      <div id="style-studio-panel" class="style-studio-panel" style="display: none;">
+        <div class="style-studio-header">
+          <div class="style-studio-title-row">
+            <button type="button" id="btn-close-style-studio" class="studio-btn-back" title="Wróć do listy warstw">← Wróć do listy warstw</button>
+            <span class="style-studio-title">Stylizacja Mapy</span>
           </div>
-          <button type="button" id="btn-close-style-studio" class="style-studio-close-btn"
-            title="Zamknij stylizator">✕</button>
         </div>
 
         <div class="style-studio-body">
@@ -76,382 +52,187 @@
           <div class="studio-inspector-mode-box">
             <button type="button" id="btn-studio-pipette" class="btn-studio-pipette active"
               title="Włącz lub wyłącz tryb klikania w obiekty na mapie">
-              <span class="pipette-icon">🎯</span>
-              <span class="pipette-label">Tryb: Wskaż obiekt na mapie</span>
+              <span class="pipette-label">Wskaż obiekt na mapie</span>
               <span class="pipette-indicator" id="pipette-active-indicator">Aktywny</span>
             </button>
-            <div class="pipette-help-text" id="studio-pipette-hint">Kliknij na mapie w dowolny las, drogę, wodę lub
-              budynek, aby natychmiast go edytować.</div>
+            <div class="pipette-help-text" id="studio-pipette-hint">Kliknij na mapie w dowolny las, drogę, wodę lub budynek, aby edytować jego styl.</div>
           </div>
-          <div class="style-studio-body">
-            <!-- Tryb Pipety / Wskaż na mapie -->
-            <div class="studio-inspector-mode-box">
-              <button type="button" id="btn-studio-pipette" class="btn-studio-pipette active"
-                title="Włącz lub wyłącz tryb klikania w obiekty na mapie">
-                <span class="pipette-label">Wskaż obiekt na mapie</span>
-                <span class="pipette-indicator" id="pipette-active-indicator">Aktywny</span>
-              </button>
-              <div class="pipette-help-text" id="studio-pipette-hint">Kliknij na mapie w dowolny las, drogę, wodę lub
-                budynek, aby edytować jego styl.</div>
-            </div>
 
-            <!-- Wybór warstwy z listy -->
-            <div class="studio-section">
-              <label class="studio-label" for="studio-layer-select">Wybierz warstwę z listy:</label>
-              <div class="studio-select-wrapper">
-                <select id="studio-layer-select" class="studio-select" title="Wybierz warstwę do stylizacji"></select>
+          <!-- Wybór warstwy z listy -->
+          <div class="studio-section">
+            <label class="studio-label" for="studio-layer-select">Wybierz warstwę z listy:</label>
+            <div class="studio-select-wrapper">
+              <select id="studio-layer-select" class="studio-select" title="Wybierz warstwę do stylizacji"></select>
+            </div>
+          </div>
+
+          <!-- Karta informacyjna wybranej warstwy -->
+          <div class="studio-layer-meta-card">
+            <div class="layer-meta-top">
+              <span id="studio-layer-type-badge" class="studio-type-badge">Wypełnienie (Obszar)</span>
+              <label class="studio-vis-toggle-label" title="Włącz lub wyłącz widoczność tej warstwy na mapie">
+                <input type="checkbox" id="studio-layer-vis-chk" checked />
+                <span>Widoczna</span>
+              </label>
+            </div>
+            <div id="studio-layer-display-name" class="studio-layer-name">Przyroda / Lasy</div>
+          </div>
+
+          <!-- Kontrolki właściwości warstwy -->
+          <div id="studio-dynamic-controls" class="studio-controls-container">
+            <!-- 1. Główny kolor -->
+            <div class="studio-field-group" id="group-main-color">
+              <div class="studio-field-header">
+                <span class="studio-field-title">Główny kolor:</span>
+                <div class="studio-color-input-wrap">
+                  <input type="color" id="studio-main-color-picker" class="studio-color-picker" title="Wybierz kolor" />
+                  <input type="text" id="studio-main-color-hex" class="studio-hex-input" maxlength="7" spellcheck="false" title="Wpisz kod koloru HEX" />
+                </div>
               </div>
+              <!-- Paleta szybkich gotowych kolorów kartograficznych -->
+              <div class="studio-preset-chips" id="studio-preset-chips"></div>
             </div>
 
-            <!-- Karta informacyjna wybranej warstwy -->
-            <div class="studio-layer-meta-card">
-              <div class="layer-meta-top">
-                <span id="studio-layer-type-badge" class="studio-type-badge">Wypełnienie (Obszar)</span>
-                <label class="studio-vis-toggle-label" title="Włącz lub wyłącz widoczność tej warstwy na mapie">
-                  <input type="checkbox" id="studio-layer-vis-chk" checked />
-                  <span>Widoczna</span>
+            <!-- 2. Przezroczystość / Krycie (dla fill / extrusion) -->
+            <div class="studio-field-group" id="group-opacity">
+              <div class="studio-field-header">
+                <span class="studio-field-title">Krycie (Przezroczystość):</span>
+                <span id="studio-opacity-val" class="studio-val-badge">60%</span>
+              </div>
+              <input type="range" id="studio-opacity-slider" class="studio-slider" min="0" max="100" step="5" value="60" />
+            </div>
+
+            <!-- 3. Grubość linii (dla line) -->
+            <div class="studio-field-group" id="group-line-width">
+              <div class="studio-field-header">
+                <span class="studio-field-title">Grubość linii:</span>
+                <span id="studio-line-width-val" class="studio-val-badge">2.0 px</span>
+              </div>
+              <input type="range" id="studio-line-width-slider" class="studio-slider" min="0.5" max="15" step="0.5" value="2" />
+            </div>
+
+            <!-- 4. Linia przerywana (dla line) -->
+            <div class="studio-field-group" id="group-line-dash">
+              <div class="studio-field-header">
+                <label class="studio-checkbox-label">
+                  <input type="checkbox" id="studio-line-dash-chk" />
+                  <span class="studio-field-title">Linia przerywana</span>
                 </label>
               </div>
-              <div id="studio-layer-display-name" class="studio-layer-name">Przyroda / Lasy</div>
+              <div id="studio-line-dash-params" class="studio-sub-params" style="display: none;">
+                <div class="studio-param-row">
+                  <span class="studio-sub-title">Długość kreski:</span>
+                  <span id="studio-dash-len-val" class="studio-val-badge">3 px</span>
+                  <input type="range" id="studio-dash-len-slider" class="studio-slider" min="1" max="15" step="1" value="3" />
+                </div>
+                <div class="studio-param-row">
+                  <span class="studio-sub-title">Długość odstępu:</span>
+                  <span id="studio-dash-gap-val" class="studio-val-badge">2 px</span>
+                  <input type="range" id="studio-dash-gap-slider" class="studio-slider" min="1" max="15" step="1" value="2" />
+                </div>
+              </div>
             </div>
 
-            <!-- Kontrolki właściwości warstwy -->
-            <div id="studio-dynamic-controls" class="studio-controls-container">
-              <!-- 1. Główny kolor -->
-              <div class="studio-field-group" id="group-main-color">
-                <div class="studio-field-header">
-                  <span class="studio-field-title">Główny kolor:</span>
-                  <div class="studio-color-input-wrap">
-                    <input type="color" id="studio-main-color-picker" class="studio-color-picker"
-                      title="Wybierz kolor" />
-                    <input type="text" id="studio-main-color-hex" class="studio-hex-input" maxlength="7"
-                      spellcheck="false" title="Wpisz kod koloru HEX" />
-                    <!-- Wybór warstwy z listy -->
-                    <div class="studio-section">
-                      <label class="studio-label" for="studio-layer-select">Wybierz warstwę z listy:</label>
-                      <div class="studio-select-wrapper">
-                        <select id="studio-layer-select" class="studio-select"
-                          title="Wybierz warstwę do stylizacji"></select>
-                      </div>
-                    </div>
-                    <!-- Paleta szybkich gotowych kolorów kartograficznych -->
-                    <div class="studio-preset-chips" id="studio-preset-chips"></div>
+            <!-- 5. Obwódka / Kontur (dla fill i line) -->
+            <div class="studio-field-group" id="group-outline">
+              <div class="studio-field-header">
+                <label class="studio-checkbox-label">
+                  <input type="checkbox" id="studio-outline-chk" />
+                  <span class="studio-field-title">Obwódka / Obrys</span>
+                </label>
+                <div class="studio-color-input-wrap" id="wrap-outline-color" style="display: none;">
+                  <input type="color" id="studio-outline-color-picker" class="studio-color-picker" title="Kolor obwódki" />
+                  <input type="text" id="studio-outline-color-hex" class="studio-hex-input" maxlength="7" spellcheck="false" title="Kod HEX obwódki" />
+                </div>
+              </div>
+              <div id="studio-outline-params" class="studio-sub-params" style="display: none;">
+                <div class="studio-preset-chips" id="studio-outline-preset-chips"></div>
+
+                <div class="studio-param-row">
+                  <span class="studio-sub-title">Grubość obwódki:</span>
+                  <span id="studio-outline-width-val" class="studio-val-badge">1.5 px</span>
+                  <input type="range" id="studio-outline-width-slider" class="studio-slider" min="0.5" max="8" step="0.5" value="1.5" />
+                </div>
+
+                <div class="studio-param-row">
+                  <label class="studio-checkbox-label">
+                    <input type="checkbox" id="studio-outline-dash-chk" />
+                    <span class="studio-sub-title">Przerywana obwódka</span>
+                  </label>
+                </div>
+                <div id="studio-outline-dash-params" class="studio-sub-params" style="display: none;">
+                  <div class="studio-param-row">
+                    <span class="studio-sub-title">Kreska:</span>
+                    <span id="studio-outline-dash-len-val" class="studio-val-badge">3 px</span>
+                    <input type="range" id="studio-outline-dash-len-slider" class="studio-slider" min="1" max="15" step="1" value="3" />
                   </div>
+                  <div class="studio-param-row">
+                    <span class="studio-sub-title">Odstęp:</span>
+                    <span id="studio-outline-dash-gap-val" class="studio-val-badge">2 px</span>
+                    <input type="range" id="studio-outline-dash-gap-slider" class="studio-slider" min="1" max="15" step="1" value="2" />
+                  </div>
+                </div>
+              </div>
+            </div>
 
-                  <!-- 2. Przezroczystość / Krycie (dla fill / extrusion) -->
-                  <div class="studio-field-group" id="group-opacity">
-                    <div class="studio-field-header">
-                      <span class="studio-field-title">Krycie (Przezroczystość):</span>
-                      <span id="studio-opacity-val" class="studio-val-badge">60%</span>
-                      <!-- Karta informacyjna wybranej warstwy -->
-                      <div class="studio-layer-meta-card">
-                        <div class="layer-meta-top">
-                          <span id="studio-layer-type-badge" class="studio-type-badge">Wypełnienie (Obszar)</span>
-                          <label class="studio-vis-toggle-label"
-                            title="Włącz lub wyłącz widoczność tej warstwy na mapie">
-                            <input type="checkbox" id="studio-layer-vis-chk" checked />
-                            <span>Widoczna</span>
-                          </label>
-                        </div>
-                        <div id="studio-layer-display-name" class="studio-layer-name">Przyroda / Lasy</div>
-                      </div>
-                      <input type="range" id="studio-opacity-slider" class="studio-slider" min="0" max="100" step="5"
-                        value="60" />
-                    </div>
+            <!-- 6. Punkty (dla circle) -->
+            <div class="studio-field-group" id="group-circle">
+              <div class="studio-param-row">
+                <span class="studio-sub-title">Promień punktu:</span>
+                <span id="studio-circle-radius-val" class="studio-val-badge">4.5 px</span>
+                <input type="range" id="studio-circle-radius-slider" class="studio-slider" min="1" max="20" step="0.5" value="4.5" />
+              </div>
+              <div class="studio-param-row">
+                <span class="studio-sub-title">Grubość obwódki punktu:</span>
+                <span id="studio-circle-stroke-width-val" class="studio-val-badge">0 px</span>
+                <input type="range" id="studio-circle-stroke-width-slider" class="studio-slider" min="0" max="6" step="0.5" value="0" />
+              </div>
+              <div class="studio-field-header" style="margin-top: 6px;">
+                <span class="studio-sub-title">Kolor obwódki punktu:</span>
+                <input type="color" id="studio-circle-stroke-color-picker" class="studio-color-picker" />
+              </div>
+            </div>
 
-                    <!-- 3. Grubość linii (dla line) -->
-                    <div class="studio-field-group" id="group-line-width">
-                      <div class="studio-field-header">
-                        <span class="studio-field-title">Grubość linii:</span>
-                        <span id="studio-line-width-val" class="studio-val-badge">2.0 px</span>
-                      </div>
-                      <input type="range" id="studio-line-width-slider" class="studio-slider" min="0.5" max="15"
-                        step="0.5" value="2" />
-                    </div>
-                    <!-- Kontrolki właściwości warstwy -->
-                    <div id="studio-dynamic-controls" class="studio-controls-container">
-                      <!-- 1. Główny kolor -->
-                      <div class="studio-field-group" id="group-main-color">
-                        <div class="studio-field-header">
-                          <span class="studio-field-title">Główny kolor:</span>
-                          <div class="studio-color-input-wrap">
-                            <input type="color" id="studio-main-color-picker" class="studio-color-picker"
-                              title="Wybierz kolor" />
-                            <input type="text" id="studio-main-color-hex" class="studio-hex-input" maxlength="7"
-                              spellcheck="false" title="Wpisz kod koloru HEX" />
-                          </div>
-                        </div>
-                        <!-- Paleta szybkich gotowych kolorów kartograficznych -->
-                        <div class="studio-preset-chips" id="studio-preset-chips"></div>
-                      </div>
+            <!-- 7. Etykiety / Napisy (dla symbol) -->
+            <div class="studio-field-group" id="group-symbol">
+              <div class="studio-param-row">
+                <span class="studio-sub-title">Rozmiar tekstu:</span>
+                <span id="studio-text-size-val" class="studio-val-badge">12 px</span>
+                <input type="range" id="studio-text-size-slider" class="studio-slider" min="8" max="28" step="1" value="12" />
+              </div>
+              <div class="studio-param-row">
+                <span class="studio-sub-title">Szerokość obwódki tekstu (halo):</span>
+                <span id="studio-text-halo-val" class="studio-val-badge">1.5 px</span>
+                <input type="range" id="studio-text-halo-slider" class="studio-slider" min="0" max="6" step="0.5" value="1.5" />
+              </div>
+              <div class="studio-field-header" style="margin-top: 6px;">
+                <span class="studio-sub-title">Kolor tła tekstu (halo):</span>
+                <input type="color" id="studio-text-halo-color-picker" class="studio-color-picker" />
+              </div>
+            </div>
+          </div>
+        </div>
 
-                      <!-- 4. Linia przerywana (dla line) -->
-                      <div class="studio-field-group" id="group-line-dash">
-                        <div class="studio-field-header">
-                          <label class="studio-checkbox-label">
-                            <input type="checkbox" id="studio-line-dash-chk" />
-                            <span class="studio-field-title">Linia przerywana</span>
-                          </label>
-                        </div>
-                        <div id="studio-line-dash-params" class="studio-sub-params" style="display: none;">
-                          <div class="studio-param-row">
-                            <span class="studio-sub-title">Długość kreski:</span>
-                            <span id="studio-dash-len-val" class="studio-val-badge">3 px</span>
-                            <input type="range" id="studio-dash-len-slider" class="studio-slider" min="1" max="15"
-                              step="1" value="3" />
-                            <!-- 2. Przezroczystość / Krycie (dla fill / extrusion) -->
-                            <div class="studio-field-group" id="group-opacity">
-                              <div class="studio-field-header">
-                                <span class="studio-field-title">Krycie (Przezroczystość):</span>
-                                <span id="studio-opacity-val" class="studio-val-badge">60%</span>
-                              </div>
-                              <input type="range" id="studio-opacity-slider" class="studio-slider" min="0" max="100"
-                                step="5" value="60" />
-                            </div>
-                            <div class="studio-param-row">
-                              <span class="studio-sub-title">Długość odstępu:</span>
-                              <span id="studio-dash-gap-val" class="studio-val-badge">2 px</span>
-                              <input type="range" id="studio-dash-gap-slider" class="studio-slider" min="1" max="15"
-                                step="1" value="2" />
+        <!-- Stopka akcji Studia -->
+        <div class="style-studio-footer">
+          <div class="studio-footer-left">
+            <button type="button" id="btn-studio-reset-layer" class="studio-btn-text"
+              title="Przywraca fabryczny styl dla aktualnie wybranej warstwy">
+              ↺ Resetuj tę warstwę
+            </button>
+          </div>
+          <div class="studio-footer-right">
+            <button type="button" id="btn-studio-done" class="studio-btn-primary"
+              title="Zapisz zmiany stylu i zamknij panel">
+              ✓ Zapisz i zamknij
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 
-                              <!-- 3. Grubość linii (dla line) -->
-                              <div class="studio-field-group" id="group-line-width">
-                                <div class="studio-field-header">
-                                  <span class="studio-field-title">Grubość linii:</span>
-                                  <span id="studio-line-width-val" class="studio-val-badge">2.0 px</span>
-                                </div>
-                                <input type="range" id="studio-line-width-slider" class="studio-slider" min="0.5"
-                                  max="15" step="0.5" value="2" />
-                              </div>
-                            </div>
-                          </div>
-
-                          <!-- 5. Obwódka / Kontur (dla fill i line) -->
-                          <div class="studio-field-group" id="group-outline">
-                            <div class="studio-field-header">
-                              <label class="studio-checkbox-label">
-                                <input type="checkbox" id="studio-outline-chk" />
-                                <span class="studio-field-title">Obwódka / Obrys</span>
-                              </label>
-                              <div class="studio-color-input-wrap" id="wrap-outline-color" style="display: none;">
-                                <input type="color" id="studio-outline-color-picker" class="studio-color-picker"
-                                  title="Kolor obwódki" />
-                                <input type="text" id="studio-outline-color-hex" class="studio-hex-input" maxlength="7"
-                                  spellcheck="false" title="Kod HEX obwódki" />
-                                <!-- 4. Linia przerywana (dla line) -->
-                                <div class="studio-field-group" id="group-line-dash">
-                                  <div class="studio-field-header">
-                                    <label class="studio-checkbox-label">
-                                      <input type="checkbox" id="studio-line-dash-chk" />
-                                      <span class="studio-field-title">Linia przerywana</span>
-                                    </label>
-                                  </div>
-                                  <div id="studio-line-dash-params" class="studio-sub-params" style="display: none;">
-                                    <div class="studio-param-row">
-                                      <span class="studio-sub-title">Długość kreski:</span>
-                                      <span id="studio-dash-len-val" class="studio-val-badge">3 px</span>
-                                      <input type="range" id="studio-dash-len-slider" class="studio-slider" min="1"
-                                        max="15" step="1" value="3" />
-                                    </div>
-                                    <div class="studio-param-row">
-                                      <span class="studio-sub-title">Długość odstępu:</span>
-                                      <span id="studio-dash-gap-val" class="studio-val-badge">2 px</span>
-                                      <input type="range" id="studio-dash-gap-slider" class="studio-slider" min="1"
-                                        max="15" step="1" value="2" />
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                              <div id="studio-outline-params" class="studio-sub-params" style="display: none;">
-                                <div class="studio-preset-chips" id="studio-outline-preset-chips"></div>
-
-                                <div class="studio-param-row">
-                                  <span class="studio-sub-title">Grubość obwódki:</span>
-                                  <span id="studio-outline-width-val" class="studio-val-badge">1.5 px</span>
-                                  <input type="range" id="studio-outline-width-slider" class="studio-slider" min="0.5"
-                                    max="8" step="0.5" value="1.5" />
-                                  <!-- 5. Obwódka / Kontur (dla fill i line) -->
-                                  <div class="studio-field-group" id="group-outline">
-                                    <div class="studio-field-header">
-                                      <label class="studio-checkbox-label">
-                                        <input type="checkbox" id="studio-outline-chk" />
-                                        <span class="studio-field-title">Obwódka / Obrys</span>
-                                      </label>
-                                      <div class="studio-color-input-wrap" id="wrap-outline-color"
-                                        style="display: none;">
-                                        <input type="color" id="studio-outline-color-picker" class="studio-color-picker"
-                                          title="Kolor obwódki" />
-                                        <input type="text" id="studio-outline-color-hex" class="studio-hex-input"
-                                          maxlength="7" spellcheck="false" title="Kod HEX obwódki" />
-                                      </div>
-                                    </div>
-                                    <div id="studio-outline-params" class="studio-sub-params" style="display: none;">
-                                      <div class="studio-preset-chips" id="studio-outline-preset-chips"></div>
-
-                                      <div class="studio-param-row">
-                                        <span class="studio-sub-title">Grubość obwódki:</span>
-                                        <span id="studio-outline-width-val" class="studio-val-badge">1.5 px</span>
-                                        <input type="range" id="studio-outline-width-slider" class="studio-slider"
-                                          min="0.5" max="8" step="0.5" value="1.5" />
-                                      </div>
-
-                                      <div class="studio-param-row">
-                                        <label class="studio-checkbox-label">
-                                          <input type="checkbox" id="studio-outline-dash-chk" />
-                                          <span class="studio-sub-title">Przerywana obwódka</span>
-                                        </label>
-                                      </div>
-                                      <div id="studio-outline-dash-params" class="studio-sub-params"
-                                        style="display: none;">
-                                        <div class="studio-param-row">
-                                          <span class="studio-sub-title">Kreska:</span>
-                                          <span id="studio-outline-dash-len-val" class="studio-val-badge">3 px</span>
-                                          <input type="range" id="studio-outline-dash-len-slider" class="studio-slider"
-                                            min="1" max="15" step="1" value="3" />
-                                        </div>
-                                        <div class="studio-param-row">
-                                          <span class="studio-sub-title">Odstęp:</span>
-                                          <span id="studio-outline-dash-gap-val" class="studio-val-badge">2 px</span>
-                                          <input type="range" id="studio-outline-dash-gap-slider" class="studio-slider"
-                                            min="1" max="15" step="1" value="2" />
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </div>
-
-                                  <div class="studio-param-row">
-                                    <label class="studio-checkbox-label">
-                                      <input type="checkbox" id="studio-outline-dash-chk" />
-                                      <span class="studio-sub-title">Przerywana obwódka</span>
-                                    </label>
-                                    <!-- 6. Punkty (dla circle) -->
-                                    <div class="studio-field-group" id="group-circle">
-                                      <div class="studio-param-row">
-                                        <span class="studio-sub-title">Promień punktu:</span>
-                                        <span id="studio-circle-radius-val" class="studio-val-badge">4.5 px</span>
-                                        <input type="range" id="studio-circle-radius-slider" class="studio-slider"
-                                          min="1" max="20" step="0.5" value="4.5" />
-                                      </div>
-                                      <div class="studio-param-row">
-                                        <span class="studio-sub-title">Grubość obwódki punktu:</span>
-                                        <span id="studio-circle-stroke-width-val" class="studio-val-badge">0 px</span>
-                                        <input type="range" id="studio-circle-stroke-width-slider" class="studio-slider"
-                                          min="0" max="6" step="0.5" value="0" />
-                                      </div>
-                                      <div class="studio-field-header" style="margin-top: 6px;">
-                                        <span class="studio-sub-title">Kolor obwódki punktu:</span>
-                                        <input type="color" id="studio-circle-stroke-color-picker"
-                                          class="studio-color-picker" />
-                                      </div>
-                                    </div>
-                                    <div id="studio-outline-dash-params" class="studio-sub-params"
-                                      style="display: none;">
-
-                                      <!-- 7. Etykiety / Napisy (dla symbol) -->
-                                      <div class="studio-field-group" id="group-symbol">
-                                        <div class="studio-param-row">
-                                          <span class="studio-sub-title">Kreska:</span>
-                                          <span id="studio-outline-dash-len-val" class="studio-val-badge">3 px</span>
-                                          <input type="range" id="studio-outline-dash-len-slider" class="studio-slider"
-                                            min="1" max="15" step="1" value="3" />
-                                          <span class="studio-sub-title">Wielkość tekstu:</span>
-                                          <span id="studio-text-size-val" class="studio-val-badge">12 px</span>
-                                          <input type="range" id="studio-text-size-slider" class="studio-slider" min="8"
-                                            max="28" step="1" value="12" />
-                                        </div>
-                                        <div class="studio-param-row">
-                                          <span class="studio-sub-title">Odstęp:</span>
-                                          <span id="studio-outline-dash-gap-val" class="studio-val-badge">2 px</span>
-                                          <input type="range" id="studio-outline-dash-gap-slider" class="studio-slider"
-                                            min="1" max="15" step="1" value="2" />
-                                          <span class="studio-sub-title">Otoczka tekstu (Halo):</span>
-                                          <span id="studio-text-halo-val" class="studio-val-badge">1.5 px</span>
-                                          <input type="range" id="studio-text-halo-slider" class="studio-slider" min="0"
-                                            max="6" step="0.5" value="1.5" />
-                                        </div>
-                                        <div class="studio-field-header" style="margin-top: 6px;">
-                                          <span class="studio-sub-title">Kolor otoczki (Halo):</span>
-                                          <input type="color" id="studio-text-halo-color-picker"
-                                            class="studio-color-picker" />
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </div>
-
-                                  <!-- 6. Punkty (dla circle) -->
-                                  <div class="studio-field-group" id="group-circle">
-                                    <div class="studio-param-row">
-                                      <span class="studio-sub-title">Promień punktu:</span>
-                                      <span id="studio-circle-radius-val" class="studio-val-badge">4.5 px</span>
-                                      <input type="range" id="studio-circle-radius-slider" class="studio-slider" min="1"
-                                        max="20" step="0.5" value="4.5" />
-                                      <!-- Stopka akcji Studia -->
-                                      <div class="style-studio-footer">
-                                        <div class="studio-footer-left">
-                                          <button type="button" id="btn-studio-reset-layer" class="studio-btn-text"
-                                            title="Przywraca fabryczny styl dla aktualnie wybranej warstwy">
-                                            ↺ Resetuj tę warstwę
-                                          </button>
-                                        </div>
-                                        <div class="studio-param-row">
-                                          <span class="studio-sub-title">Grubość obwódki punktu:</span>
-                                          <span id="studio-circle-stroke-width-val" class="studio-val-badge">0 px</span>
-                                          <input type="range" id="studio-circle-stroke-width-slider"
-                                            class="studio-slider" min="0" max="6" step="0.5" value="0" />
-                                          <div class="studio-footer-right">
-                                            <button type="button" id="btn-studio-done" class="studio-btn-primary"
-                                              title="Zapisz zmiany stylu i wróć">
-                                              ✓ Zapisz i wróć
-                                            </button>
-                                          </div>
-                                          <div class="studio-field-header" style="margin-top: 6px;">
-                                            <span class="studio-sub-title">Kolor obwódki punktu:</span>
-                                            <input type="color" id="studio-circle-stroke-color-picker"
-                                              class="studio-color-picker" />
-                                          </div>
-                                        </div>
-
-                                        <!-- 7. Etykiety / Napisy (dla symbol) -->
-                                        <div class="studio-field-group" id="group-symbol">
-                                          <div class="studio-param-row">
-                                            <span class="studio-sub-title">Wielkość tekstu:</span>
-                                            <span id="studio-text-size-val" class="studio-val-badge">12 px</span>
-                                            <input type="range" id="studio-text-size-slider" class="studio-slider"
-                                              min="8" max="28" step="1" value="12" />
-                                          </div>
-                                          <div class="studio-param-row">
-                                            <span class="studio-sub-title">Otoczka tekstu (Halo):</span>
-                                            <span id="studio-text-halo-val" class="studio-val-badge">1.5 px</span>
-                                            <input type="range" id="studio-text-halo-slider" class="studio-slider"
-                                              min="0" max="6" step="0.5" value="1.5" />
-                                          </div>
-                                          <div class="studio-field-header" style="margin-top: 6px;">
-                                            <span class="studio-sub-title">Kolor otoczki (Halo):</span>
-                                            <input type="color" id="studio-text-halo-color-picker"
-                                              class="studio-color-picker" />
-                                          </div>
-                                        </div>
-                                      </div>
-                                    </div>
-
-                                    <!-- Stopka akcji Studia -->
-                                    <div class="style-studio-footer">
-                                      <div class="studio-footer-left">
-                                        <button type="button" id="btn-studio-reset-layer" class="studio-btn-text"
-                                          title="Przywraca fabryczny styl dla aktualnie wybranej warstwy">
-                                          ↺ Resetuj tę warstwę
-                                        </button>
-                                      </div>
-                                      <div class="studio-footer-right">
-                                        <button type="button" id="btn-studio-done" class="studio-btn-primary"
-                                          title="Zapisz zmiany stylu i zamknij panel">
-                                          ✓ Zapisz i zamknij
-                                        </button>
-                                      </div>
-                                    </div>
-                                  </div>
-
-                                  <div id="menu-right" class="collapsed">
+  <div id="menu-right" class="collapsed">
                                     <button id="btn-toggle-menu-right"
                                       class="menu-toggle-handle menu-toggle-handle-right"
                                       title="Rozwiń panel nawigacji i tras" aria-label="Rozwiń panel nawigacji i tras">
@@ -1327,24 +1108,16 @@
 
                                 <div id="map"></div>
 
-                                <script src="runtime-config.js"></script>
-                                <script src="runtime-config.local.js"></script>
-                                <script src="auth-manager.js?v=20261108_v33_style_studio"></script>
-                                <script src="layers.js?v=20261108_v33_style_studio"></script>
-                                <script src="layer-manager.js?v=20261108_v33_style_studio"></script>
-                                <script src="app.js?v=20261108_v33_style_studio"></script>
-                                <script src="playback-inline.js?v=20261108_v33_style_studio"></script>
-                                <script src="route-inline.js?v=20261108_v33_style_studio"></script>
-                                <script src="export-manager.js?v=20261108_v33_style_studio"></script>
-                                <script src="parser-manager.js?v=20261108_v33_style_studio"></script>
-                                <script src="auth-manager.js?v=20261108_v34_fix_dates_and_studio_layout"></script>
-                                <script src="layers.js?v=20261108_v34_fix_dates_and_studio_layout"></script>
-                                <script src="layer-manager.js?v=20261108_v34_fix_dates_and_studio_layout"></script>
-                                <script src="app.js?v=20261108_v34_fix_dates_and_studio_layout"></script>
-                                <script src="playback-inline.js?v=20261108_v34_fix_dates_and_studio_layout"></script>
-                                <script src="route-inline.js?v=20261108_v34_fix_dates_and_studio_layout"></script>
-                                <script src="export-manager.js?v=20261108_v34_fix_dates_and_studio_layout"></script>
-                                <script src="parser-manager.js?v=20261108_v34_fix_dates_and_studio_layout"></script>
+  <script src="runtime-config.js"></script>
+  <script src="runtime-config.local.js"></script>
+  <script src="auth-manager.js?v=20261108_v37_fix_syntax_ok"></script>
+  <script src="layers.js?v=20261108_v37_fix_syntax_ok"></script>
+  <script src="layer-manager.js?v=20261108_v37_fix_syntax_ok"></script>
+  <script src="app.js?v=20261108_v37_fix_syntax_ok"></script>
+  <script src="playback-inline.js?v=20261108_v37_fix_syntax_ok"></script>
+  <script src="route-inline.js?v=20261108_v37_fix_syntax_ok"></script>
+  <script src="export-manager.js?v=20261108_v37_fix_syntax_ok"></script>
+  <script src="parser-manager.js?v=20261108_v37_fix_syntax_ok"></script>
 </body>
 
 </html>

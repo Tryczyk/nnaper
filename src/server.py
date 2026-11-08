@@ -1,6 +1,6 @@
 from collections import OrderedDict
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import threading
 import os
@@ -80,6 +80,11 @@ def run_background_parse_job(job_id: str, file_path_str: str, filename: str, use
 
         with get_db() as conn:
             with conn.cursor() as cur:
+                try:
+                    cur.execute("SET synchronous_commit = OFF;")
+                    cur.execute("SET work_mem = '64MB';")
+                except Exception:
+                    pass
                 for event in parse_file_disk_stream(
                     file_path,
                     filename,

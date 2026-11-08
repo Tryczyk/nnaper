@@ -1,6 +1,9 @@
 *.txt
 *.pkl
 *.pyc
+*.pyo
+*.pyd
+__pycache__/
 *.pbf
 .env
 maps/runtime-config.local.js
@@ -9,4 +12,12 @@ maps/runtime-config.local.js
 *.zip
 osm_data/
 .agents
+data/uploads/
+*.exe
+nnaper-parser
+nnaper-parser.exe
+go-parser/nnaper-parser
+go-parser/nnaper-parser.exe
+.DS_Store
+Thumbs.db
 

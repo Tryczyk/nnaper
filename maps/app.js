@@ -567,7 +567,6 @@ async function expandDayNode(dayItem, monthHeader, yearHeader, monthDayCheckboxe
 
   try {
     const token = (typeof window.getAuthToken === 'function') ? window.getAuthToken() : '';
-    const res = await fetch(`${apiBaseUrl}/api/time-tree?day=${encodeURIComponent(dayItem.dateStr)}&token=${encodeURIComponent(token)}`);
     const profileId = (typeof window.getActiveProfileId === 'function') ? window.getActiveProfileId() : '';
     let url = `${apiBaseUrl}/api/time-tree?day=${encodeURIComponent(dayItem.dateStr)}`;
     if (token) url += `&token=${encodeURIComponent(token)}`;
@@ -733,8 +732,6 @@ async function buildInlineTimeFilter(container) {
   try {
     const token = (typeof window.getAuthToken === 'function') ? window.getAuthToken() : '';
     const profileId = (typeof window.getActiveProfileId === 'function') ? window.getActiveProfileId() : '';
-    const profParam = profileId ? `&profile_id=${encodeURIComponent(profileId)}` : '';
-    const res = await fetch(`${apiBaseUrl}/api/dates-tree?token=${encodeURIComponent(token)}${profParam}`);
     let url = `${apiBaseUrl}/api/dates-tree`;
     const qParams = [];
     if (token) qParams.push(`token=${encodeURIComponent(token)}`);
@@ -748,16 +745,14 @@ async function buildInlineTimeFilter(container) {
     if (!res.ok) throw new Error('Błąd API');
     const data = await res.json();
 
-    if (Object.keys(data).length === 0) {
-      container.innerHTML = '<span style="color:#64748b;font-size:11px;">Brak tras dla Twojego konta.</span>';
-      if (!data || Object.keys(data).length === 0) {
-        container.innerHTML = '<span style="color:#64748b;font-size:11px;">Brak zarejestrowanych tras w bazie danych.</span>';
-        trackMonthLayers.forEach(({ layerId, lineLayerId }) => {
-          if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', 'none');
-          if (lineLayerId && map.getLayer(lineLayerId)) map.setLayoutProperty(lineLayerId, 'visibility', 'none');
-        });
-        return;
-      }
+    if (!data || Object.keys(data).length === 0) {
+      container.innerHTML = '<span style="color:#64748b;font-size:11px;">Brak zarejestrowanych tras dla tego profilu w bazie danych.</span>';
+      trackMonthLayers.forEach(({ layerId, lineLayerId }) => {
+        if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', 'none');
+        if (lineLayerId && map.getLayer(lineLayerId)) map.setLayoutProperty(lineLayerId, 'visibility', 'none');
+      });
+      return;
+    }
 
       const months = [];
       Object.keys(data).forEach(year => {

@@ -1510,73 +1510,6 @@
     });
   }
 
-  const btnPlaybackDeletePoint = document.getElementById('btn-playback-delete-point');
-  if (btnPlaybackDeletePoint) {
-    btnPlaybackDeletePoint.addEventListener('click', async () => {
-      if (!trackData || !trackData[currentIndex]) return;
-      pausePlayback();
-      const pt = trackData[currentIndex];
-      const epochId = pt.epoch_id;
-      if (!epochId) {
-        alert('Ten punkt nie posiada identyfikatora w bazie.');
-        return;
-      }
-
-      const confirmDelete = window.confirm(
-        `Czy na pewno chcesz bezpowrotnie usunąć ten punkt GPS z bazy danych?\n\n` +
-        `ID: ${epochId}\n` +
-        `Czas pomiaru: ${pt.timestamp || 'Brak'}\n` +
-        `Prędkość: ${pt.speed_kmh} km/h\n` +
-        `Współrzędne: ${pt.lat}, ${pt.lon}\n\n` +
-        `Tej operacji nie można cofnąć.`
-      );
-      if (!confirmDelete) return;
-
-      btnPlaybackDeletePoint.disabled = true;
-      btnPlaybackDeletePoint.innerText = 'Usuwanie...';
-
-      try {
-        const token = (typeof window.getAuthToken === 'function') ? window.getAuthToken() : '';
-        const res = await fetch(`${apiBaseUrl}/api/epoch/${epochId}?token=${encodeURIComponent(token)}`, {
-          method: 'DELETE'
-        });
-        if (!res.ok) {
-          const errJson = await res.json().catch(() => ({}));
-          throw new Error(errJson.detail || errJson.error || 'Błąd usuwania punktu');
-        }
-
-        // Usuń punkt z tablicy w pamięci
-        trackData.splice(currentIndex, 1);
-        if (currentIndex >= trackData.length) {
-          currentIndex = Math.max(0, trackData.length - 1);
-        }
-
-        if (slider) {
-          slider.max = Math.max(0, trackData.length - 1);
-          slider.value = currentIndex;
-        }
-
-        computePlaybackStats();
-        if (trackData.length > 0) {
-          renderCarAt(currentIndex, true);
-        } else {
-          closePlaybackMode();
-        }
-
-        if (typeof window.forceRefreshTrackTiles === 'function') {
-          window.forceRefreshTrackTiles();
-        }
-
-        alert('Punkt został trwale i bezpowrotnie usunięty.');
-      } catch (err) {
-        alert('Nie udało się usunąć punktu: ' + err.message);
-      } finally {
-        btnPlaybackDeletePoint.disabled = false;
-        btnPlaybackDeletePoint.innerText = '🗑️ Usuń punkt';
-      }
-    });
-  }
-
   if (slider) {
     slider.addEventListener('input', (e) => {
       pausePlayback();
@@ -1677,15 +1610,6 @@
     window.addEventListener('nnaper_profile_changed', () => {
       if (document.body.classList.contains('playback-mode-active')) {
         loadDates();
-      }
-    });
-
-    window.addEventListener('nnaper_epochs_deleted', (e) => {
-      const currentDay = getSelectedPlaybackDay();
-      if (isPlaybackActive && currentDay) {
-        if (!e.detail?.day || e.detail?.day === currentDay) {
-          loadTrackForDay(currentDay);
-        }
       }
     });
   }
