@@ -20,13 +20,8 @@ from constants import (
     DEFAULT_PROFILE_PASSWORD_HASH,
     DEFAULT_PROFILE_USERNAME,
     MATCH_CHUNK_SIZE,
-    MAX_HDOP,
-    MAX_SNAPPED_SPEED_KMH,
     MAX_SPEED_KMH,
     OSRM_URL,
-    PREFERRED_HDOP,
-    SNAP_THRESHOLD_METERS,
-    SNAP_TO_ROADS,
     STATE_FILE_PATH,
 )
 from utils import ddm_to_dd, parse_nmea_time, to_int_or_none
@@ -93,92 +88,64 @@ class RawEpoch:
         self.gpgsvs = []
 
 
+def haversine_distance_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat / 2.0) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2.0) ** 2
+    return 6371000.0 * 2.0 * math.atan2(math.sqrt(a), math.sqrt(max(0.0, 1.0 - a)))
+
+
 def resolve_and_qualify_epoch(
     epoch: RawEpoch,
     previous_point=None,
-    max_hdop: float = MAX_HDOP,
-    max_speed_kmh: float = MAX_SPEED_KMH,
+    last_known_date=None,
+    max_speed_kmh: float = 1800.0,
 ):
+    rmc_time, rmc_status, rmc_lat, rmc_lon, rmc_date, _ = epoch.gprmc or (None,) * 6
+    gga_time, gga_lat, gga_lon, _, _, _ = epoch.gpgga or (None,) * 6
 
-    rmc_time, rmc_status, rmc_lat, rmc_lon, rmc_date, rmc_speed_knots = epoch.gprmc or (None,) * 6
-    gga_time, gga_lat, gga_lon, gga_fix_q, gga_hdop, altitude = epoch.gpgga or (None,) * 6
-
-    # 1. Złożenie i walidacja dokładnej daty oraz godziny
+    # 1. Złożenie dokładnej daty oraz godziny
     chosen_time = rmc_time or gga_time
+    chosen_date = rmc_date or last_known_date
     epoch_timestamp = None
-    if rmc_date and chosen_time:
-        epoch_timestamp = datetime.combine(rmc_date, chosen_time).replace(tzinfo=timezone.utc)
+    if chosen_date and chosen_time:
+        epoch_timestamp = datetime.combine(chosen_date, chosen_time).replace(tzinfo=timezone.utc)
 
     if epoch_timestamp is None:
         return None
 
-    # 2. Walidacja statusu GPRMC
-    if rmc_status is not None and rmc_status != 'A':
-        return None
-
-    # 3. Walidacja szerokości i długości geograficznej
-    if rmc_lat is None and gga_lat is None:
-        return None
-
-    if rmc_lon is None and gga_lon is None:
-        return None
-
-    # 4. Walidacja jakości fixa i współczynnika HDOP
-    if gga_fix_q is None or gga_fix_q <= 0:
-        return None
-
-    if gga_hdop is None or gga_hdop > max_hdop:
-        return None
-
-    # 5. Wybór optymalnej pozycji
-    chosen_lat = None
-    chosen_lon = None
-
-    if gga_lat is not None and gga_lon is not None and (gga_fix_q and gga_fix_q > 0) and (gga_hdop is None or gga_hdop <= PREFERRED_HDOP):
-        chosen_lat, chosen_lon = gga_lat, gga_lon
-    elif rmc_lat is not None and rmc_lon is not None and rmc_status == 'A':
-        chosen_lat, chosen_lon = rmc_lat, rmc_lon
-    elif gga_lat is not None and gga_lon is not None:
-        chosen_lat, chosen_lon = gga_lat, gga_lon
-    elif rmc_lat is not None and rmc_lon is not None:
-        chosen_lat, chosen_lon = rmc_lat, rmc_lon
+    # 2. Wybór współrzędnych - bez żadnych filtrów jakościowych (bierzemy dostępne współrzędne)
+    chosen_lat = gga_lat if gga_lat is not None else rmc_lat
+    chosen_lon = gga_lon if gga_lon is not None else rmc_lon
 
     if chosen_lat is None or chosen_lon is None:
         return None
 
+    # 3. Wyznaczenie prędkości za każdym razem wyłącznie na bazie lat, lon, czas
     speed_kmh = 0.0
-    if rmc_speed_knots is not None and rmc_speed_knots >= 0:
-        speed_kmh = round(rmc_speed_knots * 1.852, 2)
-        if speed_kmh > max_speed_kmh:
-            return None
-    elif previous_point is not None:
+    if previous_point is not None:
         previous_timestamp, previous_lat, previous_lon = previous_point
         elapsed_seconds = (epoch_timestamp - previous_timestamp).total_seconds()
         if elapsed_seconds <= 0:
-            return None
+            dist_meters = haversine_distance_meters(previous_lat, previous_lon, chosen_lat, chosen_lon)
+            if dist_meters > 1.0:
+                speed_kmh = 999999.0
+            else:
+                speed_kmh = 0.0
+        else:
+            dist_meters = haversine_distance_meters(previous_lat, previous_lon, chosen_lat, chosen_lon)
+            speed_kmh = (dist_meters / elapsed_seconds) * 3.6
 
-        lat1 = math.radians(previous_lat)
-        lat2 = math.radians(chosen_lat)
-        delta_lat = math.radians(chosen_lat - previous_lat)
-        delta_lon = math.radians(chosen_lon - previous_lon)
-        haversine = (
-            math.sin(delta_lat / 2) ** 2
-            + math.cos(lat1) * math.cos(lat2) * math.sin(delta_lon / 2) ** 2
-        )
-        haversine = min(1.0, max(0.0, haversine))
-        distance_km = 6371.0 * 2 * math.atan2(
-            math.sqrt(haversine),
-            math.sqrt(1.0 - haversine),
-        )
-        speed_kmh = distance_km / (elapsed_seconds / 3600.0)
-        if speed_kmh > max_speed_kmh:
-            return None
+    # 4. Usunięcie punktów przekraczających 1800 km/h
+    if speed_kmh > max_speed_kmh:
+        return None
 
     chosen_lat = round(chosen_lat, 6)
     chosen_lon = round(chosen_lon, 6)
     geom_wkt = f"SRID=4326;POINT({chosen_lon} {chosen_lat})"
 
-    return chosen_lat, chosen_lon, geom_wkt, epoch_timestamp, altitude, speed_kmh
+    # Wysokość nie jest parsowana (zawsze None / NULL)
+    return chosen_lat, chosen_lon, geom_wkt, epoch_timestamp, None, round(speed_kmh, 2), chosen_date
 
 
 class OSRMConnectionPool:
@@ -278,25 +245,15 @@ def get_snap_cache_key(lon: float, lat: float):
     return (round(lon, 5), round(lat, 5))
 
 
-def haversine_distance_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    dlat = math.radians(lat2 - lat1)
-    dlon = math.radians(lon2 - lon1)
-    a = math.sin(dlat / 2.0) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2.0) ** 2
-    return 6371000.0 * 2.0 * math.atan2(math.sqrt(a), math.sqrt(max(0.0, 1.0 - a)))
-
-
 def run_map_matching_on_epochs(
     epochs: list,
     osrm_url: str = OSRM_URL,
     chunk_size: int = MATCH_CHUNK_SIZE,
-    max_distance: float = SNAP_THRESHOLD_METERS,
 ):
     """
-    Wysoce zoptymalizowany silnik snapowania punktów do sieci drogowej OSM:
-    1. Błyskawiczny in-memory cache (redukuje powtarzające się punkty i postoje o 80-90%).
-    2. Propagacja postojowa (samochód na światłach/parkingu nie generuje zapytań do OSRM).
-    3. Trajektorie w ruchu dociągane paczkami do OSRM /match.
-    4. Równoległe (wielowątkowe) dociąganie przez OSRM /nearest z pulą połączeń Keep-Alive dla pozostałych unikalnych punktów.
+    Dociąganie punktów do sieci drogowej OSM:
+    Każdy punkt ma mieć swój snapnięty odpowiednik (geom_snapped),
+    nawet jeśli najbliższa droga znajduje się kilometr (lub więcej) dalej.
     """
     if not epochs:
         return
@@ -357,16 +314,16 @@ def run_map_matching_on_epochs(
                         for ep, tp in zip(chunk, tracepoints):
                             key = get_snap_cache_key(ep["lon"], ep["lat"])
                             if tp and isinstance(tp, dict):
-                                d = float(tp.get("distance", 9999.0))
                                 loc = tp.get("location")
-                                if loc and len(loc) == 2 and d <= max_distance:
+                                if loc and len(loc) == 2:
                                     snapped_wkt = f"SRID=4326;POINT({loc[0]:.6f} {loc[1]:.6f})"
                                     ep["geom_snapped"] = snapped_wkt
                                     GLOBAL_SNAP_CACHE[key] = snapped_wkt
                 except Exception:
                     pass
 
-    # Krok 5: Równoległe (wielowątkowe) dociąganie przez /nearest wyłącznie dla unikalnych brakujących punktów
+    # Krok 5: Równoległe (wielowątkowe) dociąganie przez /nearest bez limitu odległości
+    # (choćby najbliższa droga była kilometr lub dalej)
     to_query_nearest = []
     seen_in_batch = set()
     for ep in epochs:
@@ -383,7 +340,7 @@ def run_map_matching_on_epochs(
             k, lon, lat = item
             try:
                 dist, loc = pool.nearest(lon, lat)
-                if loc and len(loc) == 2 and dist is not None and dist <= max_distance:
+                if loc and len(loc) == 2:
                     return k, f"SRID=4326;POINT({loc[0]:.6f} {loc[1]:.6f})"
             except Exception:
                 pass
@@ -393,122 +350,49 @@ def run_map_matching_on_epochs(
         with ThreadPoolExecutor(max_workers=workers) as executor:
             results = executor.map(fetch_nearest, to_query_nearest)
             for k, snapped_wkt in results:
-                GLOBAL_SNAP_CACHE[k] = snapped_wkt
+                if snapped_wkt:
+                    GLOBAL_SNAP_CACHE[k] = snapped_wkt
 
         for ep in epochs:
             if ep.get("geom_snapped") is None:
                 key = get_snap_cache_key(ep["lon"], ep["lat"])
-                ep["geom_snapped"] = GLOBAL_SNAP_CACHE.get(key)
+                if key in GLOBAL_SNAP_CACHE:
+                    ep["geom_snapped"] = GLOBAL_SNAP_CACHE[key]
 
-    # Krok 6: Końcowa propagacja postojowa dla ciągów stojących pojazdów
-    for i in range(1, len(epochs)):
-        curr = epochs[i]
-        prev = epochs[i - 1]
-        if curr.get("geom_snapped") is None and prev.get("geom_snapped") is not None:
-            dist = haversine_distance_meters(prev["lat"], prev["lon"], curr["lat"], curr["lon"])
-            if dist < 3.0 and curr.get("speed_kmh", 0) < 2.0:
-                curr["geom_snapped"] = prev["geom_snapped"]
-                GLOBAL_SNAP_CACHE[get_snap_cache_key(curr["lon"], curr["lat"])] = prev["geom_snapped"]
-
-
-def parse_point_coords(geom_wkt: str):
-    """Wyciąga krotkę (lat, lon) ze stringa WKT, np. 'SRID=4326;POINT(lon lat)'."""
-    if not geom_wkt:
-        return None
-    try:
-        coords_str = geom_wkt.split("POINT(")[1].split(")")[0].strip()
-        parts = coords_str.split()
-        return float(parts[1]), float(parts[0])
-    except Exception:
-        return None
-
-
-def validate_snapped_epochs_speed(
-    epochs: list,
-    osrm_url: str = OSRM_URL,
-    max_speed_kmh: float = MAX_SNAPPED_SPEED_KMH,
-    previous_snapped_point=None,
-):
-    """
-    Sprawdzacz wyznaczający drogę od poprzedniego snapniętego punktu do następnego
-    snapowanego punktu. Oblicza dystans i czas między punktami.
-    Jeśli wyliczona prędkość przekracza max_speed_kmh (500 km/h), punkt jest uznawany
-    za nieważny (oznaczany flagą _is_invalid = True).
-    """
-    if not epochs:
-        return previous_snapped_point
-
-    pool = get_osrm_pool(osrm_url)
-    last_valid = previous_snapped_point
-
+    # Krok 6: Ostateczna gwarancja snapnięcia dla każdego punktu
+    # Każdy punkt ma posiadać swój snapnięty odpowiednik (chociażby droga była daleko lub OSRM nie odpowiedział)
     for ep in epochs:
-        geom_snapped = ep.get("geom_snapped")
-        if not geom_snapped:
-            continue
+        if ep.get("geom_snapped") is None:
+            ep["geom_snapped"] = ep["geom"]
 
-        coords = parse_point_coords(geom_snapped)
-        if not coords:
-            continue
 
-        curr_lat, curr_lon = coords
-        curr_ts = ep.get("timestamp")
-        if not curr_ts:
-            continue
-
-        if last_valid is not None:
-            prev_ts, prev_lat, prev_lon = last_valid
-            elapsed_seconds = (curr_ts - prev_ts).total_seconds()
-
-            is_invalid = False
-            if elapsed_seconds <= 0:
-                dist_hav = haversine_distance_meters(prev_lat, prev_lon, curr_lat, curr_lon)
-                if dist_hav > 1.0:
-                    is_invalid = True
-            else:
-                dist_hav = haversine_distance_meters(prev_lat, prev_lon, curr_lat, curr_lon)
-                speed_hav = (dist_hav / elapsed_seconds) * 3.6
-
-                if speed_hav > max_speed_kmh:
-                    is_invalid = True
-                elif dist_hav < 1.0:
-                    is_invalid = False
-                else:
-                    dist_road = None
-                    try:
-                        dist_road = pool.route(prev_lon, prev_lat, curr_lon, curr_lat)
-                    except Exception:
-                        pass
-
-                    dist_to_check = dist_road if dist_road is not None else dist_hav
-                    speed_road = (dist_to_check / elapsed_seconds) * 3.6
-                    if speed_road > max_speed_kmh:
-                        is_invalid = True
-
-            if is_invalid:
-                ep["_is_invalid"] = True
-                continue
-
-        last_valid = (curr_ts, curr_lat, curr_lon)
-
-    return last_valid
 
 
 class CopyBatchBuffer:
-    def __init__(self, profile_id: str, previous_point=None, previous_snapped_point=None):
+    def __init__(self, profile_id: str, previous_point=None):
         self.profile_id = profile_id
         self.batch_timestamps = set()
         self.epochs = []
         self.satellite = []
         self.last_point = previous_point
-        self.last_snapped_point = previous_snapped_point
+        self.last_known_date = previous_point[0].date() if previous_point else None
 
-    def add_epoch(self, epoch: RawEpoch):
-        result = resolve_and_qualify_epoch(epoch, previous_point=self.last_point)
+    def add_epoch(self, epoch: RawEpoch, last_known_date=None):
+        date_to_use = last_known_date or self.last_known_date
+        result = resolve_and_qualify_epoch(
+            epoch,
+            previous_point=self.last_point,
+            last_known_date=date_to_use,
+            max_speed_kmh=MAX_SPEED_KMH,
+        )
 
         if result is None:
             return
 
-        lat, lon, geom_wkt, epoch_ts, altitude, speed_kmh = result
+        lat, lon, geom_wkt, epoch_ts, _, speed_kmh, chosen_date = result
+        if chosen_date:
+            self.last_known_date = chosen_date
+
         epoch_key = (self.profile_id, epoch_ts)
         if epoch_key in self.batch_timestamps:
             return
@@ -521,7 +405,7 @@ class CopyBatchBuffer:
             "profile_id": self.profile_id,
             "timestamp": epoch_ts,
             "geom": geom_wkt,
-            "altitude": altitude,
+            "altitude": None,
             "speed_kmh": round(speed_kmh, 2),
             "g_x": to_float_or_none(epoch.gsensord[0]) if epoch.gsensord else None,
             "g_y": to_float_or_none(epoch.gsensord[1]) if epoch.gsensord else None,
@@ -541,26 +425,11 @@ class CopyBatchBuffer:
         if not self.epochs:
             return
 
-        if SNAP_TO_ROADS:
-            run_map_matching_on_epochs(
-                self.epochs,
-                osrm_url=OSRM_URL,
-                chunk_size=MATCH_CHUNK_SIZE,
-                max_distance=SNAP_THRESHOLD_METERS,
-            )
-            # Sprawdzenie drogi i prędkości między kolejnymi snapniętymi punktami (maks. 500 km/h)
-            self.last_snapped_point = validate_snapped_epochs_speed(
-                self.epochs,
-                osrm_url=OSRM_URL,
-                max_speed_kmh=MAX_SNAPPED_SPEED_KMH,
-                previous_snapped_point=self.last_snapped_point,
-            )
-            # Odrzucenie punktów oznaczonych jako nieważne
-            if any(ep.get("_is_invalid") for ep in self.epochs):
-                self.epochs = [ep for ep in self.epochs if not ep.get("_is_invalid")]
-                if self.satellite:
-                    valid_ids = {ep["epoch_id"] for ep in self.epochs}
-                    self.satellite = [sat for sat in self.satellite if sat[1] in valid_ids]
+        run_map_matching_on_epochs(
+            self.epochs,
+            osrm_url=OSRM_URL,
+            chunk_size=MATCH_CHUNK_SIZE,
+        )
 
         if not self.epochs:
             self.satellite.clear()
@@ -582,7 +451,7 @@ class CopyBatchBuffer:
                     ep["profile_id"],
                     ep["timestamp"],
                     ep["geom"],
-                    ep["altitude"],
+                    None,
                     ep["speed_kmh"],
                     ep["g_x"],
                     ep["g_y"],
@@ -681,32 +550,13 @@ def parse_data(data_file_path=DATA_FILE_PATH, batch_size=BATCH_SIZE):
                     float(last_row[2]),
                 )
 
-            # Pobranie ostatniego snapniętego punktu do sprawdzacza prędkości dróg
-            cur.execute(
-                """
-                SELECT timestamp, ST_Y(geom_snapped), ST_X(geom_snapped)
-                FROM epochs
-                WHERE profile_id = %s AND geom_snapped IS NOT NULL
-                ORDER BY timestamp DESC
-                LIMIT 1
-                """,
-                (profile_id,),
-            )
-            last_snapped_row = cur.fetchone()
-            previous_snapped_point = None
-            if last_snapped_row and last_snapped_row[1] is not None and last_snapped_row[2] is not None:
-                previous_snapped_point = (
-                    last_snapped_row[0],
-                    float(last_snapped_row[1]),
-                    float(last_snapped_row[2]),
-                )
+            last_known_date = previous_point[0].date() if previous_point else None
 
             epoch = RawEpoch()
             epochs_in_batch = 0
             buffer = CopyBatchBuffer(
                 profile_id=profile_id,
                 previous_point=previous_point,
-                previous_snapped_point=previous_snapped_point,
             )
 
             with open(str(data_file_path), "r", encoding="utf-8", errors="ignore") as data_file:
@@ -724,7 +574,7 @@ def parse_data(data_file_path=DATA_FILE_PATH, batch_size=BATCH_SIZE):
 
                     if tag == "$GSENSORD":
                         if epoch.gsensord:
-                            buffer.add_epoch(epoch)
+                            buffer.add_epoch(epoch, last_known_date=last_known_date)
                             epochs_in_batch += 1
                             epoch = RawEpoch()
                         epoch.gsensord = (
@@ -733,7 +583,7 @@ def parse_data(data_file_path=DATA_FILE_PATH, batch_size=BATCH_SIZE):
 
                     elif tag == "$GPRMC":
                         if epoch.gprmc:
-                            buffer.add_epoch(epoch)
+                            buffer.add_epoch(epoch, last_known_date=last_known_date)
                             epochs_in_batch += 1
                             epoch = RawEpoch()
 
@@ -754,14 +604,16 @@ def parse_data(data_file_path=DATA_FILE_PATH, batch_size=BATCH_SIZE):
                         if not parsed_time and t_utc:
                             parsed_time = parse_nmea_time(t_utc)
 
-                        speed_knots = to_float_or_none(get_part(parts, 7))
+                        if parsed_date:
+                            last_known_date = parsed_date
+
                         epoch.gprmc = (
-                            parsed_time, get_part(parts, 2), lat, lon, parsed_date, speed_knots
+                            parsed_time, get_part(parts, 2), lat, lon, parsed_date, None
                         )
 
                     elif tag == "$GPGGA":
                         if epoch.gpgga:
-                            buffer.add_epoch(epoch)
+                            buffer.add_epoch(epoch, last_known_date=last_known_date)
                             epochs_in_batch += 1
                             epoch = RawEpoch()
 
@@ -773,15 +625,15 @@ def parse_data(data_file_path=DATA_FILE_PATH, batch_size=BATCH_SIZE):
                             parse_nmea_time(t_utc),
                             lat,
                             lon,
-                            to_int_or_none(get_part(parts, 6)),
-                            to_float_or_none(get_part(parts, 8)),
-                            to_float_or_none(get_part(parts, 9)),
+                            None,
+                            None,
+                            None,
                         )
 
                     elif tag == "$GPGSV":
                         tot_msg = to_int_or_none(get_part(parts, 1)) or 0
                         if epoch.gpgsvs and len(epoch.gpgsvs) == tot_msg:
-                            buffer.add_epoch(epoch)
+                            buffer.add_epoch(epoch, last_known_date=last_known_date)
                             epochs_in_batch += 1
                             epoch = RawEpoch()
 
@@ -812,7 +664,7 @@ def parse_data(data_file_path=DATA_FILE_PATH, batch_size=BATCH_SIZE):
                     last_line_index = current_number
 
             if epoch.gprmc or epoch.gpgga or epoch.gpgsvs or epoch.gsensord:
-                buffer.add_epoch(epoch)
+                buffer.add_epoch(epoch, last_known_date=last_known_date)
 
             buffer.flush(cur)
             conn.commit()
