@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from datetime import datetime
 import json
+import threading
 from typing import Optional
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.responses import Response
@@ -36,6 +37,7 @@ def get_db():
 
 app = FastAPI(title="nnaper API", lifespan=lifespan)
 
+
 @app.on_event("startup")
 def ensure_db_indices():
     try:
@@ -48,6 +50,7 @@ def ensure_db_indices():
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_epochs_geom_snapped ON epochs USING GIST (geom_snapped);")
                 cur.execute("DROP INDEX IF EXISTS idx_epochs_geom_offroad;")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_epochs_geom_active ON epochs USING GIST (COALESCE(geom_snapped, geom));")
+                conn.commit()
     except Exception as e:
         pass
 
@@ -126,10 +129,24 @@ def get_time_tree(day: str = Query(...)):
 
 
 @app.get("/api/track/{z}/{x}/{y}.pbf")
-def get_track_tile(z: int, x: int, y: int, days: str = Query(None), snapped: bool = Query(False)):
-    """Zwraca dynamiczny kafelek Mapbox Vector Tile dla śladu GPS."""
+def get_track_tile(
+    z: int,
+    x: int,
+    y: int,
+    days: str = Query(None),
+    snapped: bool = Query(False),
+    mode: str = Query("raw"),
+):
+    """Zwraca dynamiczny kafelek Mapbox Vector Tile dla śladu GPS w wybranym trybie:
+    - raw: surowe pozycje GPS (punkty e.geom)
+    - snapped: zsnapowane pozycje GPS (punkty e.geom_snapped)
+    - osm: pozycje na drogach OSM wykorzystywane do podświetlenia dróg w tle
+    """
     if z < 0 or x < 0 or y < 0 or x >= 2 ** z or y >= 2 ** z:
         raise HTTPException(status_code=400, detail="Nieprawidłowe współrzędne kafelka")
+
+    if snapped and mode == "raw":
+        mode = "snapped"
 
     day_list = None
     if days and days not in ("__none__", "none", "empty", "false"):
@@ -137,12 +154,12 @@ def get_track_tile(z: int, x: int, y: int, days: str = Query(None), snapped: boo
         if not day_list:
             day_list = None
 
-    active_geom = "COALESCE(e.geom_snapped, e.geom)" if snapped else "e.geom"
-
+    active_geom = "COALESCE(e.geom_snapped, e.geom)" if (mode == "snapped" or mode == "osm" or snapped) else "e.geom"
     where_clauses = [
-        f"{active_geom} && ST_Transform(ST_TileEnvelope(%s, %s, %s), 4326)",
+        f"{active_geom} && ST_Transform(ST_TileEnvelope(%s, %s, %s), 4326)"
     ]
     params = [z, x, y]
+
     if days in ("__none__", "none", "empty", "false"):
         where_clauses.append("FALSE")
     elif day_list:
@@ -168,6 +185,8 @@ def get_track_tile(z: int, x: int, y: int, days: str = Query(None), snapped: boo
         else:
             where_clauses.append("FALSE")
 
+    lat_lon_fields = f"round(ST_Y({active_geom})::numeric, 6) AS latitude, round(ST_X({active_geom})::numeric, 6) AS longitude,"
+
     query = f"""
         WITH bounds AS (
             SELECT ST_TileEnvelope(%s, %s, %s) AS geom
@@ -180,8 +199,7 @@ def get_track_tile(z: int, x: int, y: int, days: str = Query(None), snapped: boo
                 COALESCE(to_char(e.timestamp, 'YYYY-MM-DD"T"HH24'), 'None') AS h,
                 COALESCE(to_char(e.timestamp, 'YYYY-MM-DD"T"HH24:MI'), 'None') AS m,
                 COALESCE(to_char(e.timestamp, 'YYYY-MM-DD"T"HH24:MI:SS'), 'None') AS s,
-                round(ST_Y({active_geom})::numeric, 6) AS latitude,
-                round(ST_X({active_geom})::numeric, 6) AS longitude,
+                {lat_lon_fields}
                 ST_AsMVTGeom(
                     ST_Transform({active_geom}, 3857),
                     bounds.geom,
@@ -197,8 +215,6 @@ def get_track_tile(z: int, x: int, y: int, days: str = Query(None), snapped: boo
         FROM tile_features
         WHERE geom IS NOT NULL;
     """
-    # ST_TileEnvelope is used once for the CTE and once for the index-friendly
-    # bounding-box predicate, so both sets of placeholders are intentional.
     params = [z, x, y] + params
     with get_db() as conn:
         with conn.cursor() as cur:

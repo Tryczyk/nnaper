@@ -445,7 +445,7 @@ class CopyBatchBuffer:
         """)
 
         with cur.copy("""COPY staging_epochs (
-            epoch_id, profile_id, timestamp, geom, speed_kmh, g_x, g_y, g_z, geom_snapped
+            epoch_id, profile_id, timestamp, geom, speed_kmh, g_x, g_y, g_z, geom_snapped, geom_line
         ) FROM STDIN""") as copy:
             for ep in self.epochs:
                 copy.write_row((
@@ -458,6 +458,7 @@ class CopyBatchBuffer:
                     ep["g_y"],
                     ep["g_z"],
                     ep.get("geom_snapped"),
+                    ep.get("geom_line"),
                 ))
 
         if self.satellite:
@@ -473,12 +474,14 @@ class CopyBatchBuffer:
         # Wstawienie epok z automatycznym i bezpiecznym pomijaniem duplikatów
         cur.execute("""
             INSERT INTO epochs (
-                epoch_id, profile_id, timestamp, geom, speed_kmh, g_x, g_y, g_z, geom_snapped
+                epoch_id, profile_id, timestamp, geom, speed_kmh, g_x, g_y, g_z, geom_snapped, geom_line
             )
             SELECT
-                epoch_id, profile_id, timestamp, geom, speed_kmh, g_x, g_y, g_z, geom_snapped
+                epoch_id, profile_id, timestamp, geom, speed_kmh, g_x, g_y, g_z, geom_snapped, geom_line
             FROM staging_epochs
-            ON CONFLICT (profile_id, timestamp) DO NOTHING;
+            ON CONFLICT (profile_id, timestamp) DO UPDATE SET
+                geom_snapped = EXCLUDED.geom_snapped,
+                geom_line = EXCLUDED.geom_line;
         """)
 
         # Wstawienie satelitów tylko dla epok faktycznie zapisanych w bazie
@@ -523,11 +526,13 @@ def parse_data(data_file_path=DATA_FILE_PATH, batch_size=BATCH_SIZE):
             cur.execute("ALTER TABLE epochs DROP COLUMN IF EXISTS altitude CASCADE;")
             cur.execute("ALTER TABLE epochs ALTER COLUMN timestamp DROP NOT NULL;")
             cur.execute("ALTER TABLE epochs ADD COLUMN IF NOT EXISTS geom_snapped GEOMETRY(Point, 4326);")
+            cur.execute("ALTER TABLE epochs ADD COLUMN IF NOT EXISTS geom_line GEOMETRY(LineString, 4326);")
             cur.execute("ALTER TABLE epochs DROP COLUMN IF EXISTS geom_offroad CASCADE;")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_epochs_geom ON epochs USING GIST (geom);")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_epochs_geom_snapped ON epochs USING GIST (geom_snapped);")
             cur.execute("DROP INDEX IF EXISTS idx_epochs_geom_offroad;")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_epochs_geom_active ON epochs USING GIST (COALESCE(geom_snapped, geom));")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_epochs_geom_line ON epochs USING GIST (geom_line);")
             conn.commit()
 
             profile_id = get_or_create_default_profile(cur)

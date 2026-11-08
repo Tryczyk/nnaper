@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS epochs (
     timestamp     TIMESTAMPTZ,
     geom          GEOMETRY(Point, 4326) NOT NULL,
     geom_snapped  GEOMETRY(Point, 4326),
+    geom_line     GEOMETRY(LineString, 4326),
     speed_kmh     NUMERIC(7, 2) NOT NULL DEFAULT 0,
     g_x           NUMERIC(6, 3),
     g_y           NUMERIC(6, 3),
@@ -46,6 +47,7 @@ CREATE TABLE IF NOT EXISTS epochs (
 CREATE INDEX IF NOT EXISTS idx_epochs_geom ON epochs USING GIST (geom);
 CREATE INDEX IF NOT EXISTS idx_epochs_geom_snapped ON epochs USING GIST (geom_snapped);
 CREATE INDEX IF NOT EXISTS idx_epochs_geom_active ON epochs USING GIST (COALESCE(geom_snapped, geom));
+CREATE INDEX IF NOT EXISTS idx_epochs_geom_line ON epochs USING GIST (geom_line);
 CREATE INDEX IF NOT EXISTS idx_epochs_timestamp ON epochs (timestamp ASC);
 
 CREATE TABLE IF NOT EXISTS satellite (

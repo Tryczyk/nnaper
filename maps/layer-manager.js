@@ -106,6 +106,9 @@
   }
 
   function ensureOutlineLayer(map, layerId) {
+    if (!layerId || layerId.includes('Zaznaczone drogi') || layerId.startsWith('osm-traversed') || layerId.startsWith('GPS')) {
+      return null;
+    }
     const outlineId = `${layerId}-outline-line`;
     if (map.getLayer(outlineId)) return outlineId;
 
@@ -232,10 +235,23 @@
 
   function applyCustomizationsToMap(map) {
     if (!map) return;
+
+    ['GPS / Zaznaczone drogi OSM', 'GPS / Zaznaczone drogi OSM-outline-line', 'Zaznaczone drogi OSM', 'Zaznaczone drogi OSM-outline-line', 'osm-traversed-roads-layer-outline-line'].forEach(id => {
+      if (map.getLayer(id)) {
+        try { map.removeLayer(id); } catch (e) {}
+      }
+    });
+
     const cfg = getStoredConfig();
+    let configModified = false;
 
     // 1. Zastosowanie styli poszczególnych warstw
     Object.keys(cfg.layers || {}).forEach(layerId => {
+      if (layerId.includes('Zaznaczone drogi') || layerId.startsWith('osm-traversed-') || layerId.includes('outline-line')) {
+        delete cfg.layers[layerId];
+        configModified = true;
+        return;
+      }
       const saved = cfg.layers[layerId];
       if (!saved) return;
 
@@ -370,6 +386,10 @@
         }
       }
     } catch (e) {}
+
+    if (configModified) {
+      saveStoredConfig(cfg);
+    }
   }
 
   function set3DMap(map, enabled, resetPitch = false) {
@@ -485,7 +505,11 @@
         layer.id.startsWith('sat-') ||
         layer.id.startsWith('playback-sat-') ||
         layer.id.startsWith('GPS / Ślad trasy / ') ||
-        layer.id.startsWith('Budynki')
+        layer.id.startsWith('osm-traversed-') ||
+        layer.id.includes('Zaznaczone drogi') ||
+        layer.id.startsWith('Budynki') ||
+        (layer.id.startsWith('GPS / ') && layer.id !== 'GPS / Ślad trasy') ||
+        layer.id === 'GPS'
       ) return;
 
       const parts = layer.id.split('/').map(p => p.trim());
@@ -545,27 +569,54 @@
       childrenBox.className = isGpsGroup ? 'node-children' : 'node-children collapsed';
 
       if (isGpsGroup) {
-        const snapBtnHolder = document.createElement('div');
-        snapBtnHolder.style.cssText = 'padding: 4px 0 6px 0; border-bottom: 1px dashed #334155; margin-bottom: 6px;';
-        const btnSnap = document.createElement('button');
-        btnSnap.id = 'btn-toggle-snap-roads';
-        btnSnap.className = 'menu-toggle-btn';
-        btnSnap.type = 'button';
-        btnSnap.setAttribute('aria-pressed', (localStorage.getItem('nnaper_snap_roads') === 'true') ? 'true' : 'false');
-        if (localStorage.getItem('nnaper_snap_roads') === 'true') {
-          btnSnap.classList.add('active');
+        const modeHolder = document.createElement('div');
+        modeHolder.className = 'track-mode-holder';
+        modeHolder.style.cssText = 'padding: 4px 0 8px 0; border-bottom: 1px dashed #334155; margin-bottom: 6px; display: flex; flex-direction: column; gap: 4px;';
+
+        const modeLabel = document.createElement('label');
+        modeLabel.htmlFor = 'select-track-mode';
+        modeLabel.style.cssText = 'font-size: 10.5px; color: #94a3b8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;';
+        modeLabel.innerText = 'Styl wyświetlania tras:';
+
+        const selectMode = document.createElement('select');
+        selectMode.id = 'select-track-mode';
+        selectMode.className = 'sidebar-select track-mode-select';
+        selectMode.style.cssText = 'cursor: pointer; font-size: 11.5px; padding: 5px 8px; background: #1e293b; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; outline: none; width: 100%; box-sizing: border-box;';
+
+        const optRaw = document.createElement('option');
+        optRaw.value = 'raw';
+        optRaw.innerText = 'Surowe pozycje GPS';
+
+        const optSnapped = document.createElement('option');
+        optSnapped.value = 'snapped';
+        optSnapped.innerText = 'Zsnapowane pozycje GPS';
+
+        const optOsm = document.createElement('option');
+        optOsm.value = 'osm';
+        optOsm.innerText = 'Zaznaczone ścieżki OSM';
+
+        selectMode.appendChild(optRaw);
+        selectMode.appendChild(optSnapped);
+        selectMode.appendChild(optOsm);
+
+        let initialMode = localStorage.getItem('nnaper_track_mode');
+        if (!initialMode || !['raw', 'snapped', 'osm'].includes(initialMode)) {
+          initialMode = (localStorage.getItem('nnaper_snap_roads') === 'true') ? 'snapped' : 'raw';
         }
-        btnSnap.title = 'Włącz lub wyłącz dociąganie punktów GPS do najbliższej drogi';
-        btnSnap.innerHTML = '<span class="menu-toggle-label">Snap do dróg</span><span class="toggle-switch"></span>';
-        btnSnap.onclick = (e) => {
+        selectMode.value = initialMode;
+
+        selectMode.addEventListener('click', (e) => e.stopPropagation());
+        selectMode.addEventListener('change', (e) => {
           e.stopPropagation();
-          const current = localStorage.getItem('nnaper_snap_roads') === 'true';
-          if (typeof window.setSnapRoadsEnabled === 'function') {
-            window.setSnapRoadsEnabled(!current);
+          const newMode = e.target.value;
+          if (typeof window.setTrackMode === 'function') {
+            window.setTrackMode(newMode);
           }
-        };
-        snapBtnHolder.appendChild(btnSnap);
-        childrenBox.appendChild(snapBtnHolder);
+        });
+
+        modeHolder.appendChild(modeLabel);
+        modeHolder.appendChild(selectMode);
+        childrenBox.appendChild(modeHolder);
       }
 
       header.addEventListener('click', (e) => {
@@ -749,26 +800,6 @@
           ctrlDiv.appendChild(rowStroke);
 
           if (child.id === 'GPS / Ślad trasy') {
-            const rowSnap = document.createElement('label');
-            rowSnap.className = 'control-row';
-            rowSnap.style.cssText = 'display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: #cbd5e1; cursor: pointer; user-select: none; margin: 4px 0; padding: 4px 0; border-top: 1px dashed #334155;';
-            const snapCheckbox = document.createElement('input');
-            snapCheckbox.type = 'checkbox';
-            snapCheckbox.id = 'layer-snap-roads-toggle';
-            snapCheckbox.style.cursor = 'pointer';
-            snapCheckbox.checked = (localStorage.getItem('nnaper_snap_roads') === 'true');
-            const snapLabel = document.createElement('span');
-            snapLabel.innerText = 'Snap do dróg';
-            rowSnap.appendChild(snapLabel);
-            rowSnap.appendChild(snapCheckbox);
-            ctrlDiv.appendChild(rowSnap);
-
-            snapCheckbox.addEventListener('change', () => {
-              if (typeof window.setSnapRoadsEnabled === 'function') {
-                window.setSnapRoadsEnabled(snapCheckbox.checked);
-              }
-            });
-
             if (typeof options.onRenderGps === 'function') {
               const timeSection = document.createElement('div');
               timeSection.className = 'time-filter-section';
