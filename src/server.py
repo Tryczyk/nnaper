@@ -154,10 +154,25 @@ def get_track_tile(
         if not day_list:
             day_list = None
 
-    active_geom = "COALESCE(e.geom_snapped, e.geom)" if (mode == "snapped" or mode == "osm" or snapped) else "e.geom"
-    where_clauses = [
-        f"{active_geom} && ST_Transform(ST_TileEnvelope(%s, %s, %s), 4326)"
-    ]
+    if mode == "osm":
+        active_geom = "e.geom_line"
+        where_clauses = [
+            "e.geom_line IS NOT NULL",
+            "e.geom_line && ST_Transform(ST_TileEnvelope(%s, %s, %s), 4326)"
+        ]
+        lat_lon_fields = "NULL::numeric AS latitude, NULL::numeric AS longitude,"
+    elif mode == "snapped" or snapped:
+        active_geom = "COALESCE(e.geom_snapped, e.geom)"
+        where_clauses = [
+            f"{active_geom} && ST_Transform(ST_TileEnvelope(%s, %s, %s), 4326)"
+        ]
+        lat_lon_fields = f"round(ST_Y({active_geom})::numeric, 6) AS latitude, round(ST_X({active_geom})::numeric, 6) AS longitude,"
+    else:
+        active_geom = "e.geom"
+        where_clauses = [
+            f"{active_geom} && ST_Transform(ST_TileEnvelope(%s, %s, %s), 4326)"
+        ]
+        lat_lon_fields = f"round(ST_Y({active_geom})::numeric, 6) AS latitude, round(ST_X({active_geom})::numeric, 6) AS longitude,"
     params = [z, x, y]
 
     if days in ("__none__", "none", "empty", "false"):
@@ -184,8 +199,6 @@ def get_track_tile(
             where_clauses.append(f"({' OR '.join(date_conditions)})")
         else:
             where_clauses.append("FALSE")
-
-    lat_lon_fields = f"round(ST_Y({active_geom})::numeric, 6) AS latitude, round(ST_X({active_geom})::numeric, 6) AS longitude,"
 
     query = f"""
         WITH bounds AS (

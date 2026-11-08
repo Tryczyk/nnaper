@@ -203,7 +203,7 @@ class OSRMConnectionPool:
     def match(self, coords_list: list):
         coords_str = ";".join(f"{lon:.6f},{lat:.6f}" for lon, lat in coords_list)
         radiuses_str = ";".join("30" for _ in coords_list)
-        path = f"/match/v1/driving/{coords_str}?overview=false&geometries=geojson&gaps=ignore&tidy=true&radiuses={radiuses_str}"
+        path = f"/match/v1/driving/{coords_str}?overview=full&geometries=geojson&steps=true&gaps=ignore&tidy=true&radiuses={radiuses_str}"
         return self.request_json(path)
 
     def nearest(self, lon: float, lat: float):
@@ -226,10 +226,22 @@ class OSRMConnectionPool:
             return float(route.get("distance", 0.0))
         return None
 
+    def route_geom(self, lon1: float, lat1: float, lon2: float, lat2: float):
+        """Wyznacza geometrię drogi między dwoma punktami przez OSRM jako WKT LINESTRING."""
+        path = f"/route/v1/driving/{lon1:.6f},{lat1:.6f};{lon2:.6f},{lat2:.6f}?overview=full&geometries=geojson"
+        status, data = self.request_json(path)
+        if status == 200 and data and data.get("code") == "Ok" and data.get("routes"):
+            geom = data["routes"][0].get("geometry")
+            if geom and geom.get("coordinates") and len(geom["coordinates"]) >= 2:
+                coords = geom["coordinates"]
+                return f"SRID=4326;LINESTRING({', '.join(f'{c[0]:.6f} {c[1]:.6f}' for c in coords)})"
+        return None
+
 
 # Globalna pula połączeń oraz in-memory cache dla współrzędnych (klucz: ~1m dokładności)
 OSRM_POOL = None
 GLOBAL_SNAP_CACHE = {}
+GLOBAL_ROUTE_CACHE = {}
 
 
 def get_osrm_pool(osrm_url: str):
@@ -303,12 +315,13 @@ def run_map_matching_on_epochs(
             if not chunk_unresolved:
                 continue
 
-            if len(chunk) >= 3:
+            if len(chunk) >= 2:
                 coords_list = [(ep["lon"], ep["lat"]) for ep in chunk]
                 try:
                     status, data = pool.match(coords_list)
                     if status == 200 and data and data.get("code") == "Ok":
                         tracepoints = data.get("tracepoints", [])
+                        matchings = data.get("matchings", [])
                         for ep, tp in zip(chunk, tracepoints):
                             key = get_snap_cache_key(ep["lon"], ep["lat"])
                             if tp and isinstance(tp, dict):
@@ -317,6 +330,36 @@ def run_map_matching_on_epochs(
                                     snapped_wkt = f"SRID=4326;POINT({loc[0]:.6f} {loc[1]:.6f})"
                                     ep["geom_snapped"] = snapped_wkt
                                     GLOBAL_SNAP_CACHE[key] = snapped_wkt
+
+                        for i in range(len(chunk) - 1):
+                            tp_curr = tracepoints[i] if i < len(tracepoints) else None
+                            tp_next = tracepoints[i + 1] if (i + 1) < len(tracepoints) else None
+                            if (
+                                tp_curr and tp_next
+                                and isinstance(tp_curr, dict) and isinstance(tp_next, dict)
+                                and tp_curr.get("matchings_index") is not None
+                                and tp_curr.get("matchings_index") == tp_next.get("matchings_index")
+                            ):
+                                m_idx = tp_curr["matchings_index"]
+                                w_idx = tp_curr.get("waypoint_index")
+                                if m_idx < len(matchings):
+                                    legs = matchings[m_idx].get("legs", [])
+                                    if w_idx is not None and w_idx < len(legs):
+                                        leg = legs[w_idx]
+                                        leg_coords = []
+                                        for st in leg.get("steps", []):
+                                            sc = st.get("geometry", {}).get("coordinates", [])
+                                            if not sc:
+                                                continue
+                                            if not leg_coords:
+                                                leg_coords.extend(sc)
+                                            else:
+                                                if sc[0] == leg_coords[-1]:
+                                                    leg_coords.extend(sc[1:])
+                                                else:
+                                                    leg_coords.extend(sc)
+                                        if len(leg_coords) >= 2:
+                                            chunk[i]["geom_line"] = f"SRID=4326;LINESTRING({', '.join(f'{c[0]:.6f} {c[1]:.6f}' for c in leg_coords)})"
                 except Exception:
                     pass
 
@@ -362,6 +405,41 @@ def run_map_matching_on_epochs(
     for ep in epochs:
         if ep.get("geom_snapped") is None:
             ep["geom_snapped"] = ep["geom"]
+
+    # Krok 7: Uzupełnienie brakujących geometrii dróg (geom_line) dla kolejnych punktów w każdym segmencie
+    for seg in segments:
+        for i in range(len(seg) - 1):
+            curr_ep = seg[i]
+            next_ep = seg[i + 1]
+            if curr_ep.get("geom_line") is not None:
+                continue
+
+            snap_curr = curr_ep.get("geom_snapped")
+            snap_next = next_ep.get("geom_snapped")
+            if not snap_curr or not snap_next:
+                continue
+
+            if snap_curr == snap_next:
+                continue
+
+            try:
+                c1_str = snap_curr.split("(")[1].split(")")[0].split()
+                c2_str = snap_next.split("(")[1].split(")")[0].split()
+                lon1, lat1 = float(c1_str[0]), float(c1_str[1])
+                lon2, lat2 = float(c2_str[0]), float(c2_str[1])
+
+                dist_m = haversine_distance_meters(lat1, lon1, lat2, lon2)
+                if 2.0 <= dist_m <= 500.0:
+                    r_key = (round(lon1, 5), round(lat1, 5), round(lon2, 5), round(lat2, 5))
+                    if r_key in GLOBAL_ROUTE_CACHE:
+                        curr_ep["geom_line"] = GLOBAL_ROUTE_CACHE[r_key]
+                    else:
+                        line_wkt = pool.route_geom(lon1, lat1, lon2, lat2)
+                        if line_wkt:
+                            GLOBAL_ROUTE_CACHE[r_key] = line_wkt
+                            curr_ep["geom_line"] = line_wkt
+            except Exception:
+                pass
 
 
 
@@ -413,6 +491,7 @@ class CopyBatchBuffer:
             "lat": lat,
             "lon": lon,
             "geom_snapped": None,
+            "geom_line": None,
         })
         self.last_point = (epoch_ts, lat, lon)
         if epoch_ts is not None:
