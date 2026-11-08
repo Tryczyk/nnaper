@@ -3,9 +3,14 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 import json
 import threading
-from typing import Optional
-from fastapi import FastAPI, Query, HTTPException, Header
-from fastapi.responses import Response, JSONResponse
+import os
+from pathlib import Path
+import tempfile
+import urllib.parse
+import uuid
+from typing import Optional, List
+from fastapi import FastAPI, Query, HTTPException, Header, Request
+from fastapi.responses import Response, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 import psycopg
 from psycopg.rows import dict_row
@@ -14,7 +19,129 @@ import hashlib
 import secrets
 from pydantic import BaseModel
 
-from constants import DB_URL, CORS_ORIGINS
+from constants import DB_URL, CORS_ORIGINS, DATA_DIR_PATH
+from upload_parser import parse_file_disk_stream
+
+UPLOAD_DIR = DATA_DIR_PATH / "uploads"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+HISTORY_FILE = DATA_DIR_PATH / "parsed_history.json"
+
+PARSER_JOBS = {}
+PARSER_JOBS_LOCK = threading.Lock()
+
+def get_user_history(user_id: str) -> dict:
+    with PARSER_JOBS_LOCK:
+        if HISTORY_FILE.exists():
+            try:
+                with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    return data.get(str(user_id), {})
+            except Exception:
+                pass
+        return {}
+
+def record_user_file_parsed(user_id: str, filename: str, size: int, epochs: int, profile_id: str = None, profile_name: str = None):
+    with PARSER_JOBS_LOCK:
+        data = {}
+        if HISTORY_FILE.exists():
+            try:
+                with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception:
+                data = {}
+        user_key = str(user_id)
+        if user_key not in data:
+            data[user_key] = {}
+        data[user_key][filename] = {
+            "name": filename,
+            "size": size,
+            "epochs": epochs,
+            "profile_id": profile_id,
+            "profile_name": profile_name,
+            "parsed_at": datetime.now(timezone.utc).isoformat(),
+        }
+        try:
+            with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+def run_background_parse_job(job_id: str, file_path_str: str, filename: str, user_id: str, profile_id: str, snap: bool):
+    file_path = Path(file_path_str)
+    try:
+        file_size = file_path.stat().st_size if file_path.exists() else 0
+        with PARSER_JOBS_LOCK:
+            job = PARSER_JOBS.get(job_id)
+            if job:
+                job["status"] = "running"
+                job["stage"] = "parsing"
+                job["message"] = "Parsowanie na serwerze..."
+                job["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                for event in parse_file_disk_stream(
+                    file_path,
+                    filename,
+                    profile_id,
+                    cur,
+                    conn,
+                    snap_to_roads=snap,
+                    abort_check=lambda: PARSER_JOBS.get(job_id, {}).get("abort_requested", False),
+                ):
+                    with PARSER_JOBS_LOCK:
+                        job = PARSER_JOBS.get(job_id)
+                        if not job or job.get("abort_requested"):
+                            break
+                        ev_type = event.get("type")
+                        if ev_type == "progress":
+                            job["percent"] = event.get("percent", job["percent"])
+                            job["stage"] = event.get("stage", job["stage"])
+                            job["lines"] = event.get("lines", job["lines"])
+                            job["epochs"] = event.get("epochs", job["epochs"])
+                            job["satellites"] = event.get("satellites", job["satellites"])
+                            job["eta_str"] = event.get("eta_str", job["eta_str"])
+                            job["speed_mb_s"] = event.get("speed_mb_s", job["speed_mb_s"])
+                            job["message"] = event.get("message", job["message"])
+                            job["updated_at"] = datetime.now(timezone.utc).isoformat()
+                        elif ev_type == "done":
+                            job["status"] = "done"
+                            job["percent"] = 100
+                            job["stage"] = "done"
+                            job["epochs"] = event.get("epochs", job["epochs"])
+                            job["satellites"] = event.get("satellites", job["satellites"])
+                            job["message"] = event.get("message", "Zakończono pomyślnie.")
+                            job["eta_str"] = "00:00"
+                            job["updated_at"] = datetime.now(timezone.utc).isoformat()
+                            record_user_file_parsed(
+                                user_id,
+                                filename,
+                                file_size,
+                                job["epochs"],
+                                profile_id=profile_id,
+                                profile_name=job.get("profile_name") if job else None,
+                            )
+                        elif ev_type == "error":
+                            job["status"] = "error"
+                            job["error"] = event.get("message", "Błąd parsowania")
+                            job["message"] = event.get("message", "Błąd parsowania")
+                            job["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+                clear_tile_cache()
+    except Exception as exc:
+        with PARSER_JOBS_LOCK:
+            job = PARSER_JOBS.get(job_id)
+            if job:
+                job["status"] = "error"
+                job["error"] = str(exc)
+                job["message"] = f"Błąd zadania: {str(exc)}"
+                job["updated_at"] = datetime.now(timezone.utc).isoformat()
+    finally:
+        try:
+            if file_path.exists():
+                file_path.unlink(missing_ok=True)
+        except Exception:
+            pass
 
 pool: ConnectionPool | None = None
 
@@ -85,6 +212,7 @@ def ensure_db_indices():
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_epochs_geom_snapped ON epochs USING GIST (geom_snapped);")
                 cur.execute("DROP INDEX IF EXISTS idx_epochs_geom_offroad;")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_epochs_geom_active ON epochs USING GIST (COALESCE(geom_snapped, geom));")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_epochs_profile_id ON epochs (profile_id);")
                 conn.commit()
     except Exception as e:
         print(f"[STARTUP DB WARNING] {e}")
@@ -111,6 +239,10 @@ class LoginRequest(BaseModel):
 
 class AvatarRequest(BaseModel):
     avatar_url: Optional[str] = None
+
+
+class CreateProfileRequest(BaseModel):
+    name: str
 
 
 def hash_password(password: str) -> str:
@@ -353,6 +485,138 @@ def logout_user(token: Optional[str] = Query(None), authorization: Optional[str]
     return {"status": "ok"}
 
 
+@app.get("/api/auth/profiles")
+def list_user_profiles(
+    token: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    user_id = get_auth_user_id(token, authorization)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Wymagane logowanie.")
+
+    with get_db() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute("""
+                SELECT 
+                    p.profile_id,
+                    p.user_id,
+                    p.name,
+                    p.avatar_url,
+                    p.created_at,
+                    COALESCE(count(e.epoch_id), 0) AS epochs_count,
+                    COALESCE(count(DISTINCT e.timestamp::date), 0) AS days_count
+                FROM profiles p
+                LEFT JOIN epochs e ON p.profile_id = e.profile_id
+                WHERE p.user_id = %s::uuid
+                GROUP BY p.profile_id, p.user_id, p.name, p.avatar_url, p.created_at
+                ORDER BY p.created_at ASC
+            """, (user_id,))
+            profiles = cur.fetchall()
+
+            if not profiles:
+                cur.execute("""
+                    INSERT INTO profiles (user_id, name)
+                    VALUES (%s::uuid, 'Główny')
+                    RETURNING profile_id, user_id, name, avatar_url, created_at
+                """, (user_id,))
+                new_p = cur.fetchone()
+                conn.commit()
+                new_p["epochs_count"] = 0
+                new_p["days_count"] = 0
+                profiles = [new_p]
+
+            result = []
+            for p in profiles:
+                result.append({
+                    "profile_id": str(p["profile_id"]),
+                    "user_id": str(p["user_id"]),
+                    "name": p["name"],
+                    "avatar_url": p.get("avatar_url"),
+                    "created_at": p["created_at"].isoformat() if p.get("created_at") else None,
+                    "epochs_count": int(p.get("epochs_count", 0)),
+                    "days_count": int(p.get("days_count", 0)),
+                })
+            return result
+
+
+@app.post("/api/auth/profiles")
+def create_user_profile(
+    req: CreateProfileRequest,
+    token: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    user_id = get_auth_user_id(token, authorization)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Wymagane logowanie.")
+
+    name = req.name.strip()
+    if not name or len(name) > 64:
+        raise HTTPException(status_code=400, detail="Nazwa profilu musi mieć od 1 do 64 znaków.")
+
+    with get_db() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute("""
+                SELECT profile_id FROM profiles
+                WHERE user_id = %s::uuid AND LOWER(name) = LOWER(%s)
+            """, (user_id, name))
+            if cur.fetchone():
+                raise HTTPException(status_code=400, detail="Profil o takiej nazwie już istnieje.")
+
+            cur.execute("""
+                INSERT INTO profiles (user_id, name)
+                VALUES (%s::uuid, %s)
+                RETURNING profile_id, user_id, name, avatar_url, created_at
+            """, (user_id, name))
+            new_p = cur.fetchone()
+            conn.commit()
+
+            return {
+                "status": "ok",
+                "profile": {
+                    "profile_id": str(new_p["profile_id"]),
+                    "user_id": str(new_p["user_id"]),
+                    "name": new_p["name"],
+                    "avatar_url": new_p.get("avatar_url"),
+                    "created_at": new_p["created_at"].isoformat() if new_p.get("created_at") else None,
+                    "epochs_count": 0,
+                    "days_count": 0,
+                }
+            }
+
+
+@app.delete("/api/auth/profiles/{profile_id}")
+def delete_user_profile(
+    profile_id: str,
+    token: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    user_id = get_auth_user_id(token, authorization)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Wymagane logowanie.")
+
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT count(*) FROM profiles WHERE user_id = %s::uuid", (user_id,))
+            count = cur.fetchone()[0]
+            if count <= 1:
+                raise HTTPException(status_code=400, detail="Nie możesz usunąć jedynego profilu konta.")
+
+            cur.execute("""
+                DELETE FROM profiles
+                WHERE profile_id = %s::uuid AND user_id = %s::uuid
+                RETURNING profile_id
+            """, (profile_id, user_id))
+            deleted = cur.fetchone()
+            if not deleted:
+                raise HTTPException(status_code=404, detail="Profil nie został odnaleziony.")
+            conn.commit()
+
+    with tile_cache_lock:
+        tile_cache.clear()
+
+    return {"status": "ok", "message": "Profil oraz powiązane z nim ślady zostały usunięte."}
+
+
 @app.exception_handler(Exception)
 async def generic_exception_handler(request, exc):
     import traceback
@@ -366,57 +630,110 @@ async def generic_exception_handler(request, exc):
 
 
 @app.get("/api/dates-tree")
-def get_dates_tree(token: Optional[str] = Query(None), authorization: Optional[str] = Header(None)):
+def get_dates_tree(
+    token: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+    profile_id: Optional[str] = Query(None),
+):
     user_id = get_auth_user_id(token, authorization)
-    if not user_id:
-        return {}
 
-    query = """
+    valid_profile_uuid = None
+    if profile_id and str(profile_id).strip() not in ("all", "__all__", "", "undefined", "null", "None"):
+        try:
+            valid_profile_uuid = str(uuid.UUID(str(profile_id).strip()))
+        except (ValueError, AttributeError):
+            valid_profile_uuid = None
+
+    if user_id:
+        if valid_profile_uuid:
+            where_profile = "e.profile_id = %s::uuid AND e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = %s::uuid)"
+            prof_params = (valid_profile_uuid, user_id)
+        else:
+            where_profile = "e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = %s::uuid)"
+            prof_params = (user_id,)
+    else:
+        if valid_profile_uuid:
+            where_profile = "e.profile_id = %s::uuid"
+            prof_params = (valid_profile_uuid,)
+        else:
+            where_profile = "1=1"
+            prof_params = ()
+
+    query = f"""
         SELECT DISTINCT 
             EXTRACT(YEAR FROM e.timestamp)::int AS y,
             EXTRACT(MONTH FROM e.timestamp)::int AS m,
             EXTRACT(DAY FROM e.timestamp)::int AS d
         FROM epochs e
-        WHERE e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = %s::uuid)
+        WHERE {where_profile}
         ORDER BY y DESC NULLS LAST, m DESC NULLS LAST, d DESC NULLS LAST;
     """
     tree = {}
-    with get_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute(query, (user_id,))
-            for y, m, d in cur.fetchall():
-                if y is None or m is None or d is None:
-                    y_str = "None"
-                    m_str = "None"
-                    d_str = "None"
-                else:
-                    y_str = str(y)
-                    m_str = str(m).zfill(2)
-                    d_str = str(d).zfill(2)
-                tree.setdefault(y_str, {}).setdefault(m_str, [])
-                if d_str not in tree[y_str][m_str]:
-                    tree[y_str][m_str].append(d_str)
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, prof_params)
+                for y, m, d in cur.fetchall():
+                    if y is None or m is None or d is None:
+                        y_str = "None"
+                        m_str = "None"
+                        d_str = "None"
+                    else:
+                        y_str = str(y)
+                        m_str = str(m).zfill(2)
+                        d_str = str(d).zfill(2)
+                    tree.setdefault(y_str, {}).setdefault(m_str, [])
+                    if d_str not in tree[y_str][m_str]:
+                        tree[y_str][m_str].append(d_str)
+    except Exception as exc:
+        print(f"[ERROR /api/dates-tree] {exc}")
+        return {}
     return tree
 
 
 @app.get("/api/time-tree")
-def get_time_tree(day: str = Query(...), token: Optional[str] = Query(None), authorization: Optional[str] = Header(None)):
+def get_time_tree(
+    day: str = Query(...),
+    token: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+    profile_id: Optional[str] = Query(None),
+):
     """Pobiera dynamicznie strukturę godzin, minut i sekund dla wybranego dnia (lub None)."""
     user_id = get_auth_user_id(token, authorization)
-    if not user_id:
-        return {}
+
+    valid_profile_uuid = None
+    if profile_id and str(profile_id).strip() not in ("all", "__all__", "", "undefined", "null", "None"):
+        try:
+            valid_profile_uuid = str(uuid.UUID(str(profile_id).strip()))
+        except (ValueError, AttributeError):
+            valid_profile_uuid = None
+
+    if user_id:
+        if valid_profile_uuid:
+            where_profile = "e.profile_id = %s::uuid AND e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = %s::uuid)"
+            prof_params = [valid_profile_uuid, user_id]
+        else:
+            where_profile = "e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = %s::uuid)"
+            prof_params = [user_id]
+    else:
+        if valid_profile_uuid:
+            where_profile = "e.profile_id = %s::uuid"
+            prof_params = [valid_profile_uuid]
+        else:
+            where_profile = "1=1"
+            prof_params = []
 
     day_str = day.strip()
     if day_str in ("None", "null"):
         where_time = "e.timestamp IS NULL"
-        params = (user_id,)
+        params = tuple(prof_params)
     else:
         try:
             datetime.strptime(day_str, "%Y-%m-%d")
         except ValueError:
             raise HTTPException(status_code=400, detail="Nieprawidłowy format daty. Oczekiwano YYYY-MM-DD lub None.")
         where_time = "e.timestamp >= %s::date AND e.timestamp < (%s::date + INTERVAL '1 day')"
-        params = (user_id, day_str, day_str)
+        params = tuple(prof_params + [day_str, day_str])
 
     query = f"""
         SELECT DISTINCT 
@@ -424,19 +741,23 @@ def get_time_tree(day: str = Query(...), token: Optional[str] = Query(None), aut
             to_char(e.timestamp, 'MI') AS mi,
             to_char(e.timestamp, 'SS') AS s
         FROM epochs e
-        WHERE e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = %s::uuid)
+        WHERE {where_profile}
           AND {where_time}
         ORDER BY h DESC NULLS LAST, mi DESC NULLS LAST, s DESC NULLS LAST;
     """
     tree = {}
-    with get_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute(query, params)
-            for h, mi, s in cur.fetchall():
-                h_str = h if h is not None else "None"
-                mi_str = mi if mi is not None else "None"
-                s_str = s if s is not None else "None"
-                tree.setdefault(h_str, {}).setdefault(mi_str, []).append(s_str)
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, params)
+                for h, mi, s in cur.fetchall():
+                    h_str = h if h is not None else "None"
+                    mi_str = mi if mi is not None else "None"
+                    s_str = s if s is not None else "None"
+                    tree.setdefault(h_str, {}).setdefault(mi_str, []).append(s_str)
+    except Exception as exc:
+        print(f"[ERROR /api/time-tree] {exc}")
+        return {}
     return tree
 
 
@@ -477,6 +798,7 @@ def get_track_tile(
     mode: str = Query("raw"),
     token: Optional[str] = Query(None),
     authorization: Optional[str] = Header(None),
+    profile_id: Optional[str] = Query(None),
 ):
     """Zwraca dynamiczny kafelek Mapbox Vector Tile dla śladu GPS w wybranym trybie:
     - raw: surowe pozycje GPS (punkty e.geom)
@@ -500,7 +822,7 @@ def get_track_tile(
     if snapped and mode == "raw":
         mode = "snapped"
 
-    cache_key = (user_id, z, x, y, days, snapped, mode)
+    cache_key = (user_id, profile_id, z, x, y, days, snapped, mode)
     cached_tile = get_from_tile_cache(cache_key)
     if cached_tile is not None:
         return Response(
@@ -540,8 +862,12 @@ def get_track_tile(
         ]
         lat_lon_fields = f"round(ST_Y({active_geom})::numeric, 6) AS latitude, round(ST_X({active_geom})::numeric, 6) AS longitude,"
 
-    where_clauses.append("e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = %s::uuid)")
-    where_params.append(user_id)
+    if profile_id and profile_id not in ("all", "__all__", ""):
+        where_clauses.append("e.profile_id = %s::uuid AND e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = %s::uuid)")
+        where_params.extend([profile_id, user_id])
+    else:
+        where_clauses.append("e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = %s::uuid)")
+        where_params.append(user_id)
 
     if days in ("__none__", "none", "empty", "false"):
         where_clauses.append("FALSE")
@@ -717,22 +1043,148 @@ def get_epoch_details(epoch_id: str, token: Optional[str] = Query(None), authori
             return row["epoch"]
 
 
+@app.delete("/api/epoch/{epoch_id}")
+def delete_epoch(
+    epoch_id: str,
+    token: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Trwale usuwa pojedynczy punkt GPS (epokę) z bazy danych wraz z powiązanymi satelitami."""
+    user_id = get_auth_user_id(token, authorization)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Brak autoryzacji")
+
+    query = """
+        DELETE FROM epochs
+        WHERE epoch_id = %(eid)s::uuid
+          AND profile_id IN (SELECT profile_id FROM profiles WHERE user_id = %(uid)s::uuid)
+        RETURNING epoch_id;
+    """
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, {"eid": epoch_id, "uid": user_id})
+            deleted = cur.fetchone()
+            if not deleted:
+                raise HTTPException(status_code=404, detail="Punkt nie istnieje lub brak uprawnień do jego usunięcia")
+            conn.commit()
+
+    with tile_cache_lock:
+        tile_cache.clear()
+
+    return {"success": True, "message": "Punkt został trwale usunięty z bazy", "epoch_id": epoch_id}
+
+
+@app.delete("/api/epochs/day")
+def delete_epochs_by_day(
+    day: str = Query(..., description="Data w formacie YYYY-MM-DD lub 'None'"),
+    profile_id: Optional[str] = Query(None),
+    token: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Trwale usuwa wszystkie punkty GPS z wybranego dnia dla danego profilu (lub wszystkich profili użytkownika)."""
+    user_id = get_auth_user_id(token, authorization)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Brak autoryzacji")
+
+    if profile_id and profile_id not in ("all", "__all__", ""):
+        where_profile = "profile_id = %s::uuid AND profile_id IN (SELECT profile_id FROM profiles WHERE user_id = %s::uuid)"
+        prof_params = [profile_id, user_id]
+    else:
+        where_profile = "profile_id IN (SELECT profile_id FROM profiles WHERE user_id = %s::uuid)"
+        prof_params = [user_id]
+
+    day_str = day.strip()
+    if day_str in ("None", "null"):
+        where_time = "timestamp IS NULL"
+        params = tuple(prof_params)
+    else:
+        try:
+            datetime.strptime(day_str, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Nieprawidłowy format daty. Oczekiwano YYYY-MM-DD lub None.")
+        where_time = "timestamp >= %s::date AND timestamp < (%s::date + INTERVAL '1 day')"
+        params = tuple(prof_params + [day_str, day_str])
+
+    query = f"""
+        DELETE FROM epochs
+        WHERE {where_profile}
+          AND {where_time}
+        RETURNING epoch_id;
+    """
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, params)
+            deleted_rows = cur.fetchall()
+            count = len(deleted_rows)
+            conn.commit()
+
+    with tile_cache_lock:
+        tile_cache.clear()
+
+    return {"success": True, "deleted_count": count, "day": day_str}
+
+
+class BatchDeletePayload(BaseModel):
+    epoch_ids: List[str]
+
+
+@app.post("/api/epochs/delete-batch")
+def delete_epochs_batch(
+    payload: BatchDeletePayload,
+    token: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    """Trwale usuwa listę punktów GPS (epok) po ich ID dla zalogowanego użytkownika."""
+    user_id = get_auth_user_id(token, authorization)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Brak autoryzacji")
+
+    if not payload.epoch_ids:
+        return {"success": True, "deleted_count": 0}
+
+    query = """
+        DELETE FROM epochs
+        WHERE epoch_id = ANY(%s::uuid[])
+          AND profile_id IN (SELECT profile_id FROM profiles WHERE user_id = %s::uuid)
+        RETURNING epoch_id;
+    """
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(query, (payload.epoch_ids, user_id))
+            deleted_rows = cur.fetchall()
+            count = len(deleted_rows)
+            conn.commit()
+
+    with tile_cache_lock:
+        tile_cache.clear()
+
+    return {"success": True, "deleted_count": count}
+
+
 @app.get("/api/playback-day")
 def get_playback_day(
     day: str = Query(...),
     snapped: bool = Query(False),
     token: Optional[str] = Query(None),
-    authorization: Optional[str] = Header(None)
+    authorization: Optional[str] = Header(None),
+    profile_id: Optional[str] = Query(None),
 ):
     """Pobiera uporządkowaną listę epok telemetrycznych dla wybranego dnia z satelitami (zoptymalizowana wersja JSON)."""
     user_id = get_auth_user_id(token, authorization)
     if not user_id:
         return Response(content="[]", media_type="application/json")
 
+    if profile_id and profile_id not in ("all", "__all__", ""):
+        where_profile = "e.profile_id = %s::uuid AND e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = %s::uuid)"
+        prof_params = [profile_id, user_id]
+    else:
+        where_profile = "e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = %s::uuid)"
+        prof_params = [user_id]
+
     day_str = day.strip()
     if day_str in ("None", "null"):
         where_time = "e.timestamp IS NULL"
-        query_params = (user_id,)
+        query_params = tuple(prof_params)
         order_clause = "e.epoch_id ASC"
     else:
         try:
@@ -740,7 +1192,7 @@ def get_playback_day(
         except ValueError:
             raise HTTPException(status_code=400, detail="Nieprawidłowy format daty. Oczekiwano YYYY-MM-DD lub None.")
         where_time = "e.timestamp >= %s::date AND e.timestamp < (%s::date + INTERVAL '1 day')"
-        query_params = (user_id, day_str, day_str)
+        query_params = tuple(prof_params + [day_str, day_str])
         order_clause = "e.timestamp ASC"
 
     active_geom = "COALESCE(e.geom_snapped, e.geom)" if snapped else "e.geom"
@@ -758,7 +1210,7 @@ def get_playback_day(
             e.g_y,
             e.g_z
         FROM epochs e
-        WHERE e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = %s::uuid)
+        WHERE {where_profile}
           AND {where_time}
         ORDER BY {order_clause}
     ),
@@ -806,14 +1258,18 @@ def get_playback_day(
         raise HTTPException(status_code=500, detail=f"Błąd bazy danych: {str(e)}")
 
 
-def build_scope_filter(scope: str, day: Optional[str] = None, year: Optional[int] = None, month: Optional[int] = None, days: Optional[str] = None, user_id: Optional[str] = None):
+def build_scope_filter(scope: str, day: Optional[str] = None, year: Optional[int] = None, month: Optional[int] = None, days: Optional[str] = None, user_id: Optional[str] = None, profile_id: Optional[str] = None):
     where_clauses = []
     params = []
     scope_name = "trasa"
 
     if user_id:
-        where_clauses.append("e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = %s::uuid)")
-        params.append(user_id)
+        if profile_id and profile_id not in ("all", "__all__", ""):
+            where_clauses.append("e.profile_id = %s::uuid AND e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = %s::uuid)")
+            params.extend([profile_id, user_id])
+        else:
+            where_clauses.append("e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = %s::uuid)")
+            params.append(user_id)
     else:
         where_clauses.append("FALSE")
 
@@ -879,13 +1335,14 @@ def get_export_data(
     snapped: bool = Query(False),
     token: Optional[str] = Query(None),
     authorization: Optional[str] = Header(None),
+    profile_id: Optional[str] = Query(None),
 ):
     """Pobiera dane telemetryczne trasy dla zadanego zakresu (dzień, miesiąc, rok, wybrane dni, wszystko)."""
     user_id = get_auth_user_id(token, authorization)
     if not user_id:
         return Response(content="[]", media_type="application/json")
 
-    where_clauses, params, scope_name = build_scope_filter(scope, day, year, month, days, user_id=user_id)
+    where_clauses, params, scope_name = build_scope_filter(scope, day, year, month, days, user_id=user_id, profile_id=profile_id)
     where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
     step = int(downsample) if downsample and downsample > 1 else 1
@@ -969,13 +1426,14 @@ def download_export_file(
     snapped: bool = Query(False),
     token: Optional[str] = Query(None),
     authorization: Optional[str] = Header(None),
+    profile_id: Optional[str] = Query(None),
 ):
     """Generuje i zwraca bezpośrednio plik eksportu (GPX, CSV, GeoJSON, KML)."""
     user_id = get_auth_user_id(token, authorization)
     if not user_id:
         raise HTTPException(status_code=401, detail="Brak autoryzacji")
 
-    where_clauses, params, scope_name = build_scope_filter(scope, day, year, month, days, user_id=user_id)
+    where_clauses, params, scope_name = build_scope_filter(scope, day, year, month, days, user_id=user_id, profile_id=profile_id)
     where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
     active_geom = "COALESCE(e.geom_snapped, e.geom)" if snapped else "e.geom"
 
@@ -1105,3 +1563,165 @@ def download_export_file(
 
     else:
         raise HTTPException(status_code=400, detail=f"Nieobsługiwany format: {fmt}")
+
+
+@app.post("/api/parser/upload")
+async def upload_and_start_job(
+    request: Request,
+    token: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+    snap: bool = Query(True),
+    filename: Optional[str] = Query(None),
+    x_filename: Optional[str] = Header(None),
+    profile_id: Optional[str] = Query(None),
+):
+    user_id = get_auth_user_id(token, authorization)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Musisz być zalogowany, aby importować dane GPS.")
+
+    raw_fname = filename or x_filename or "plik.txt"
+    try:
+        real_filename = urllib.parse.unquote(raw_fname)
+    except Exception:
+        real_filename = raw_fname
+
+    job_id = f"job_{uuid.uuid4().hex[:12]}"
+    saved_path = UPLOAD_DIR / f"{user_id}_{job_id}_{real_filename}"
+
+    try:
+        with open(str(saved_path), "wb") as tf:
+            async for chunk in request.stream():
+                if chunk:
+                    tf.write(chunk)
+    except Exception as e:
+        if saved_path.exists():
+            try:
+                saved_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+        raise HTTPException(status_code=500, detail=f"Błąd zapisu pliku: {str(e)}")
+
+    # Pobranie lub utworzenie profilu
+    target_profile_id = None
+    target_profile_name = None
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            if profile_id and profile_id not in ("all", "__all__", ""):
+                cur.execute(
+                    "SELECT profile_id, name FROM profiles WHERE profile_id = %s::uuid AND user_id = %s::uuid",
+                    (profile_id, user_id),
+                )
+                p_row = cur.fetchone()
+                if p_row:
+                    target_profile_id = str(p_row[0])
+                    target_profile_name = str(p_row[1])
+
+            if not target_profile_id:
+                cur.execute(
+                    "SELECT profile_id, name FROM profiles WHERE user_id = %s::uuid ORDER BY created_at ASC LIMIT 1",
+                    (user_id,),
+                )
+                row = cur.fetchone()
+                if row:
+                    target_profile_id = str(row[0])
+                    target_profile_name = str(row[1])
+                else:
+                    cur.execute(
+                        "INSERT INTO profiles (user_id, name) VALUES (%s::uuid, 'Główny') RETURNING profile_id, name",
+                        (user_id,),
+                    )
+                    ins_row = cur.fetchone()
+                    target_profile_id = str(ins_row[0])
+                    target_profile_name = str(ins_row[1])
+                    conn.commit()
+
+    file_size = saved_path.stat().st_size if saved_path.exists() else 0
+
+    job_record = {
+        "job_id": job_id,
+        "user_id": str(user_id),
+        "profile_id": str(target_profile_id),
+        "profile_name": target_profile_name,
+        "filename": real_filename,
+        "file_size": file_size,
+        "status": "queued",
+        "stage": "queued",
+        "percent": 0,
+        "lines": 0,
+        "epochs": 0,
+        "satellites": 0,
+        "eta_str": "--:--",
+        "speed_mb_s": 0.0,
+        "message": f"Plik przesłany. Zadanie przypisane do profilu '{target_profile_name}' oczekuje w kolejce...",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "abort_requested": False,
+        "error": None,
+    }
+
+    with PARSER_JOBS_LOCK:
+        PARSER_JOBS[job_id] = job_record
+
+    # Uruchomienie parsowania asynchronicznie w tle na serwerze!
+    worker_thread = threading.Thread(
+        target=run_background_parse_job,
+        args=(job_id, str(saved_path), real_filename, str(user_id), str(target_profile_id), snap),
+        daemon=True,
+    )
+    worker_thread.start()
+
+    return JSONResponse({
+        "status": "ok",
+        "job_id": job_id,
+        "job": job_record,
+        "message": "Plik został pomyślnie przesłany i jest przetwarzany w tle na serwerze."
+    })
+
+
+@app.get("/api/parser/jobs")
+def get_parser_jobs(
+    token: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    user_id = get_auth_user_id(token, authorization)
+    if not user_id:
+        return JSONResponse({"active_jobs": [], "jobs": [], "history": {}})
+
+    with PARSER_JOBS_LOCK:
+        user_jobs = [
+            j for j in PARSER_JOBS.values()
+            if j.get("user_id") == str(user_id)
+        ]
+        user_jobs_sorted = sorted(user_jobs, key=lambda x: x.get("created_at", ""), reverse=True)[:20]
+
+    history = get_user_history(user_id)
+    return JSONResponse({
+        "jobs": user_jobs_sorted,
+        "active_jobs": [j for j in user_jobs_sorted if j.get("status") in ("queued", "running")],
+        "history": history
+    })
+
+
+@app.post("/api/parser/job/{job_id}/abort")
+def abort_parser_job(
+    job_id: str,
+    token: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    user_id = get_auth_user_id(token, authorization)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Wymagane logowanie.")
+
+    with PARSER_JOBS_LOCK:
+        job = PARSER_JOBS.get(job_id)
+        if not job or job.get("user_id") != str(user_id):
+            raise HTTPException(status_code=404, detail="Zadanie nie zostało znalezione.")
+        job["abort_requested"] = True
+        job["status"] = "error"
+        job["message"] = "Przerwano na życzenie użytkownika."
+        job["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    return JSONResponse({"status": "ok", "message": "Zadanie zostało przerwane."})
+
+
+

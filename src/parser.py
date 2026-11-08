@@ -59,7 +59,7 @@ def get_or_create_default_profile(
 def to_float_or_none(v):
     if v is None:
         return None
-    val = str(v).strip()
+    val = str(v).strip().replace(",", ".")
     if not val:
         return None
     try:

@@ -55,6 +55,19 @@
     `;
   }
 
+  function getProfileIcon(name) {
+    const lower = (name || '').toLowerCase();
+    if (lower.includes('samochód') || lower.includes('samochod') || lower.includes('auto') || lower.includes('car')) return '🚗';
+    if (lower.includes('lot') || lower.includes('samolot') || lower.includes('plane') || lower.includes('awiacja')) return '✈️';
+    if (lower.includes('rower') || lower.includes('bike') || lower.includes('kolar') || lower.includes('cycling')) return '🚲';
+    if (lower.includes('bieg') || lower.includes('run') || lower.includes('jogging')) return '🏃';
+    if (lower.includes('piesz') || lower.includes('walk') || lower.includes('hike') || lower.includes('spacer') || lower.includes('gór')) return '🥾';
+    if (lower.includes('żegl') || lower.includes('lodz') || lower.includes('łódź') || lower.includes('żeglarsk') || lower.includes('boat') || lower.includes('sail')) return '⛵';
+    if (lower.includes('motocykl') || lower.includes('moto') || lower.includes('motor')) return '🏍️';
+    if (lower.includes('pociąg') || lower.includes('kolej') || lower.includes('train')) return '🚆';
+    return '🏷️';
+  }
+
   /**
    * Kompresuje/skaluje obraz do maksymalnej rozdzielczości 512px przy użyciu Canvas
    */
@@ -259,6 +272,12 @@
       userDetails.appendChild(usernameEl);
       userDetails.appendChild(hintEl);
       card.appendChild(userDetails);
+
+      // 2.5. Profile aktywności wewnątrz konta
+      const profilesContainer = document.createElement('div');
+      profilesContainer.className = 'auth-profiles-box';
+      card.appendChild(profilesContainer);
+      this.populateProfilesUI(profilesContainer, token);
 
       // 3. Przycisk wylogowania
       const logoutBtn = document.createElement('button');
@@ -493,6 +512,209 @@
       btn.disabled = isSubmitting;
       btn.innerText = text;
     }
+
+    async populateProfilesUI(container, token) {
+      container.innerHTML = '<div class="auth-profiles-loading">Ładowanie profili...</div>';
+      try {
+        const profiles = await window.fetchUserProfiles();
+        container.innerHTML = '';
+
+        const head = document.createElement('div');
+        head.className = 'auth-profiles-head';
+
+        const title = document.createElement('span');
+        title.className = 'auth-profiles-title';
+        title.innerText = 'Aktywny profil:';
+
+        const addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.className = 'auth-btn-add-profile';
+        addBtn.innerText = '➕ Nowy profil';
+        addBtn.title = 'Utwórz nowy profil (np. Samochodowy, Rowerowy, Lotniczy, Do biegu)';
+        addBtn.onclick = () => {
+          this.showCreateProfileModal(() => this.populateProfilesUI(container, token));
+        };
+
+        head.appendChild(title);
+        head.appendChild(addBtn);
+        container.appendChild(head);
+
+        const currentActive = window.getActiveProfileId();
+        const selectWrap = document.createElement('div');
+        selectWrap.className = 'auth-profiles-select-wrap';
+
+        const select = document.createElement('select');
+        select.className = 'auth-profiles-select';
+
+        const allOpt = document.createElement('option');
+        allOpt.value = '';
+        allOpt.innerText = '🌐 Wszystkie profile (zsumowane)';
+        if (!currentActive) allOpt.selected = true;
+        select.appendChild(allOpt);
+
+        let activeFound = false;
+        profiles.forEach(p => {
+          const icon = getProfileIcon(p.name);
+          const opt = document.createElement('option');
+          opt.value = p.profile_id;
+          opt.innerText = `${icon} ${p.name} (${p.epochs_count || 0} pkt)`;
+          if (p.profile_id === currentActive) {
+            opt.selected = true;
+            activeFound = true;
+          }
+          select.appendChild(opt);
+        });
+
+        if (currentActive && !activeFound) {
+          // Jeśli zapisany profil już nie istnieje
+          window.setActiveProfileId('');
+          allOpt.selected = true;
+        }
+
+        select.onchange = (e) => {
+          window.setActiveProfileId(e.target.value);
+        };
+
+        selectWrap.appendChild(select);
+        container.appendChild(selectWrap);
+
+        // Zarządzanie bieżącym profilem (np. usuwanie jeśli profil wybrany)
+        const activeProfileObj = profiles.find(p => p.profile_id === currentActive);
+        if (activeProfileObj && profiles.length > 1) {
+          const deleteRow = document.createElement('div');
+          deleteRow.className = 'auth-profile-delete-row';
+          const delBtn = document.createElement('button');
+          delBtn.type = 'button';
+          delBtn.className = 'auth-btn-del-profile';
+          delBtn.innerText = `Usuń profil "${activeProfileObj.name}"`;
+          delBtn.onclick = async () => {
+            if (confirm(`Czy na pewno chcesz usunąć profil "${activeProfileObj.name}" oraz WSZYSTKIE przypisane do niego trasy?`)) {
+              try {
+                await window.deleteUserProfile(activeProfileObj.profile_id);
+                window.setActiveProfileId('');
+                this.populateProfilesUI(container, token);
+              } catch (err) {
+                alert('Błąd usuwania profilu: ' + err.message);
+              }
+            }
+          };
+          deleteRow.appendChild(delBtn);
+          container.appendChild(deleteRow);
+        }
+
+      } catch (err) {
+        console.warn('Błąd renderowania profili:', err);
+        container.innerHTML = '<div class="auth-profiles-error">Nie udało się załadować profili</div>';
+      }
+    }
+
+    showCreateProfileModal(onCreated) {
+      let modal = document.getElementById('nnaper-create-profile-modal');
+      if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'nnaper-create-profile-modal';
+        modal.className = 'export-modal-backdrop';
+        modal.style.zIndex = '10005';
+        modal.innerHTML = `
+          <div class="create-profile-dialog">
+            <div class="create-profile-header">
+              <span style="font-size: 20px;">🏷️</span>
+              <div>
+                <h4 style="margin: 0; color: #38bdf8;">Nowy profil aktywności</h4>
+                <p style="margin: 2px 0 0; font-size: 11px; color: #94a3b8;">Przypisuj ślady do różnych kategorii (samochód, rower, lot, bieg...)</p>
+              </div>
+              <button type="button" class="create-profile-close-btn" id="btn-close-create-profile">✕</button>
+            </div>
+            <div class="create-profile-body">
+              <label style="font-size: 11.5px; color: #cbd5e1; display: block; margin-bottom: 6px; font-weight: 600;">Szybki wybór gotowego profilu:</label>
+              <div class="profile-presets-grid">
+                <button type="button" class="profile-preset-pill" data-name="Samochodowy">🚗 Samochodowy</button>
+                <button type="button" class="profile-preset-pill" data-name="Lotniczy">✈️ Lotniczy</button>
+                <button type="button" class="profile-preset-pill" data-name="Rowerowy">🚲 Rowerowy</button>
+                <button type="button" class="profile-preset-pill" data-name="Do biegu">🏃 Do biegu</button>
+                <button type="button" class="profile-preset-pill" data-name="Pieszy">🥾 Pieszy</button>
+                <button type="button" class="profile-preset-pill" data-name="Żeglarski">⛵ Żeglarski</button>
+              </div>
+              <label for="create-profile-name-input" style="font-size: 11.5px; color: #cbd5e1; display: block; margin: 12px 0 6px; font-weight: 600;">Wpisz lub zmodyfikuj nazwę:</label>
+              <input type="text" id="create-profile-name-input" placeholder="Wpisz nazwę profilu..." maxlength="64" class="create-profile-input" autocomplete="off" />
+              <div id="create-profile-error" class="auth-error-box" style="display: none; margin-top: 8px;"></div>
+            </div>
+            <div class="create-profile-footer">
+              <button type="button" id="btn-cancel-create-profile" class="btn-cancel-create-profile">Anuluj</button>
+              <button type="button" id="btn-confirm-create-profile" class="btn-confirm-create-profile">Utwórz profil</button>
+            </div>
+          </div>
+        `;
+        document.body.appendChild(modal);
+      }
+
+      const input = modal.querySelector('#create-profile-name-input');
+      const errBox = modal.querySelector('#create-profile-error');
+      const confirmBtn = modal.querySelector('#btn-confirm-create-profile');
+      const cancelBtn = modal.querySelector('#btn-cancel-create-profile');
+      const closeBtn = modal.querySelector('#btn-close-create-profile');
+      const pills = modal.querySelectorAll('.profile-preset-pill');
+
+      input.value = '';
+      errBox.style.display = 'none';
+      confirmBtn.disabled = false;
+      modal.style.display = 'flex';
+      setTimeout(() => input.focus(), 50);
+
+      const closeModal = () => {
+        modal.style.display = 'none';
+      };
+
+      cancelBtn.onclick = closeModal;
+      closeBtn.onclick = closeModal;
+      modal.onclick = (e) => {
+        if (e.target === modal) closeModal();
+      };
+
+      pills.forEach(pill => {
+        pill.onclick = () => {
+          input.value = pill.getAttribute('data-name');
+          errBox.style.display = 'none';
+          input.focus();
+        };
+      });
+
+      const handleConfirm = async () => {
+        const val = input.value.trim();
+        if (!val) {
+          errBox.innerText = 'Podaj nazwę profilu.';
+          errBox.style.display = 'block';
+          return;
+        }
+        confirmBtn.disabled = true;
+        confirmBtn.innerText = 'Tworzenie...';
+        try {
+          const res = await window.createUserProfile(val);
+          const newProfile = res.profile;
+          if (newProfile && newProfile.profile_id) {
+            window.setActiveProfileId(newProfile.profile_id);
+          }
+          closeModal();
+          if (typeof onCreated === 'function') onCreated(newProfile);
+        } catch (err) {
+          errBox.innerText = err.message || 'Błąd tworzenia profilu';
+          errBox.style.display = 'block';
+        } finally {
+          confirmBtn.disabled = false;
+          confirmBtn.innerText = 'Utwórz profil';
+        }
+      };
+
+      confirmBtn.onclick = handleConfirm;
+      input.onkeydown = (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          handleConfirm();
+        } else if (e.key === 'Escape') {
+          closeModal();
+        }
+      };
+    }
   }
 
   window.getAuthToken = function () {
@@ -503,6 +725,62 @@
   window.getAuthUser = function () {
     const s = getStoredSession();
     return s?.user || null;
+  };
+
+  window.getActiveProfileId = function () {
+    return localStorage.getItem('nnaper_active_profile_id') || '';
+  };
+
+  window.setActiveProfileId = function (profileId) {
+    if (!profileId) {
+      localStorage.removeItem('nnaper_active_profile_id');
+    } else {
+      localStorage.setItem('nnaper_active_profile_id', profileId);
+    }
+    window.dispatchEvent(new CustomEvent('nnaper_profile_changed', { detail: { profile_id: profileId || '' } }));
+  };
+
+  window.getProfileIcon = getProfileIcon;
+
+  window.fetchUserProfiles = async function () {
+    const token = window.getAuthToken?.() || '';
+    if (!token) return [];
+    try {
+      const res = await fetch(`${getApiBaseUrl()}/api/auth/profiles?token=${encodeURIComponent(token)}`);
+      if (!res.ok) return [];
+      return await res.json();
+    } catch (e) {
+      console.warn('Błąd pobierania profili:', e);
+      return [];
+    }
+  };
+
+  window.createUserProfile = async function (name) {
+    const token = window.getAuthToken?.() || '';
+    if (!token) throw new Error('Wymagane logowanie');
+    const res = await fetch(`${getApiBaseUrl()}/api/auth/profiles?token=${encodeURIComponent(token)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Błąd tworzenia profilu');
+    }
+    return await res.json();
+  };
+
+  window.deleteUserProfile = async function (profileId) {
+    const token = window.getAuthToken?.() || '';
+    if (!token) throw new Error('Wymagane logowanie');
+    const res = await fetch(`${getApiBaseUrl()}/api/auth/profiles/${encodeURIComponent(profileId)}?token=${encodeURIComponent(token)}`, {
+      method: 'DELETE'
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Błąd usuwania profilu');
+    }
+    return await res.json();
   };
 
   window.AuthManager = new AuthManager();
