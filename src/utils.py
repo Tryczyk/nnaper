@@ -8,9 +8,13 @@ def any_none(arguments):
 
 def ddm_to_dd(ddm_str, hemisphere):
     if any_none([ddm_str, hemisphere]):
-        return
+        return None
 
-    val = float(ddm_str)
+    try:
+        val = float(ddm_str)
+    except (ValueError, TypeError):
+        return None
+
     degrees = int(val // 100)
     minutes = val % 100
     

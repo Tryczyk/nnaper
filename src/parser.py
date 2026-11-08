@@ -99,7 +99,7 @@ def resolve_and_qualify_epoch(
     epoch: RawEpoch,
     previous_point=None,
     last_known_date=None,
-    max_speed_kmh: float = 1800.0,
+    max_speed_kmh: float = 1000.0,
 ):
     rmc_time, rmc_status, rmc_lat, rmc_lon, rmc_date, _ = epoch.gprmc or (None,) * 6
     gga_time, gga_lat, gga_lon, _, _, _ = epoch.gpgga or (None,) * 6
@@ -134,7 +134,7 @@ def resolve_and_qualify_epoch(
                 dist_meters = haversine_distance_meters(previous_lat, previous_lon, chosen_lat, chosen_lon)
                 speed_kmh = (dist_meters / elapsed_seconds) * 3.6
 
-    # 4. Usunięcie punktów przekraczających 1800 km/h
+    # 4. Usunięcie punktów przekraczających próg prędkości (domyślnie 1000 km/h)
     if speed_kmh > max_speed_kmh:
         return None
 

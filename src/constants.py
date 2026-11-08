@@ -29,7 +29,7 @@ DEFAULT_PROFILE_PASSWORD_HASH = os.getenv("DEFAULT_PROFILE_PASSWORD_HASH", "plac
 
 MAX_HDOP = float(os.getenv("MAX_HDOP", "5.0"))
 PREFERRED_HDOP = float(os.getenv("PREFERRED_HDOP", "3.0"))
-MAX_SPEED_KMH = float(os.getenv("MAX_SPEED_KMH", "1800.0"))
+MAX_SPEED_KMH = float(os.getenv("MAX_SPEED_KMH", "1000.0"))
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "10000"))
 
 # OSRM / Map Matching
