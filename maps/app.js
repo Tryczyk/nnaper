@@ -28,6 +28,13 @@ window.map = map;
 const navControl = new maplibregl.NavigationControl({ showCompass: true });
 map.addControl(navControl, 'bottom-right');
 
+map.on('error', (e) => {
+  if (e?.error?.name === 'AbortError' || e?.error?.message === 'AbortError' || e?.status === 0) {
+    return;
+  }
+  console.warn('MapLibre error:', e);
+});
+
 
 /* ------------------- FILTR CZASU & JEDYNY PRZEŁĄCZNIK ŚLADU GPS ------------------- */
 const MONTH_NAMES = {
@@ -170,7 +177,12 @@ function updateTrackFilters() {
       conditions.push(['match', ['get', 'm'], activeMinutes, true, false]);
     }
     if (activeSeconds.length > 0) {
-      conditions.push(['match', ['get', 's'], activeSeconds, true, false]);
+      const minutesFromSeconds = Array.from(new Set(activeSeconds.map(s => s.substring(0, 16))));
+      conditions.push([
+        'any',
+        ['match', ['get', 's'], activeSeconds, true, false],
+        ['match', ['get', 'm'], minutesFromSeconds, true, false]
+      ]);
     }
 
     if (conditions.length > 0) {
@@ -345,8 +357,12 @@ function buildTrackTilesUrl(days) {
 
 function updateTrackTilesSource() {
   const baseSrc = map.getSource('gps-track');
+  const baseTiles = [buildTrackTilesUrl('__none__')];
   if (baseSrc && typeof baseSrc.setTiles === 'function') {
-    baseSrc.setTiles([buildTrackTilesUrl('__none__')]);
+    const cur = baseSrc.tiles || baseSrc._options?.tiles;
+    if (!cur || cur[0] !== baseTiles[0]) {
+      baseSrc.setTiles(baseTiles);
+    }
   }
 
   trackMonthLayers.forEach(({ layerId, days }, key) => {
@@ -355,7 +371,10 @@ function updateTrackTilesSource() {
     const src = map.getSource(sourceId);
     const newTiles = [buildTrackTilesUrl(days.join(','))];
     if (src && typeof src.setTiles === 'function') {
-      src.setTiles(newTiles);
+      const cur = src.tiles || src._options?.tiles;
+      if (!cur || cur[0] !== newTiles[0]) {
+        src.setTiles(newTiles);
+      }
     }
   });
 

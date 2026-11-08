@@ -1,3 +1,4 @@
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 from datetime import datetime
 import json
@@ -61,6 +62,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(Exception)
+async def generic_exception_handler(request, exc):
+    import traceback
+    traceback.print_exc()
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc)},
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
 
 
 @app.get("/api/dates-tree")
@@ -128,6 +141,33 @@ def get_time_tree(day: str = Query(...)):
     return tree
 
 
+tile_cache = OrderedDict()
+tile_cache_lock = threading.Lock()
+MAX_CACHE_TILES = 8192
+
+def get_from_tile_cache(key):
+    with tile_cache_lock:
+        if key in tile_cache:
+            tile_cache.move_to_end(key)
+            return tile_cache[key]
+    return None
+
+def put_in_tile_cache(key, value):
+    with tile_cache_lock:
+        tile_cache[key] = value
+        tile_cache.move_to_end(key)
+        if len(tile_cache) > MAX_CACHE_TILES:
+            tile_cache.popitem(last=False)
+
+
+@app.get("/api/cache/clear")
+@app.post("/api/cache/clear")
+def clear_tile_cache():
+    with tile_cache_lock:
+        tile_cache.clear()
+    return {"status": "ok", "message": "Pamięć podręczna kafelków została wyczyszczona"}
+
+
 @app.get("/api/track/{z}/{x}/{y}.pbf")
 def get_track_tile(
     z: int,
@@ -148,11 +188,25 @@ def get_track_tile(
     if snapped and mode == "raw":
         mode = "snapped"
 
+    cache_key = (z, x, y, days, snapped, mode)
+    cached_tile = get_from_tile_cache(cache_key)
+    if cached_tile is not None:
+        return Response(
+            content=cached_tile,
+            media_type="application/vnd.mapbox-vector-tile",
+            headers={
+                "Cache-Control": "public, max-age=1800, stale-while-revalidate=3600",
+                "Access-Control-Allow-Origin": "*",
+            },
+        )
+
     day_list = None
     if days and days not in ("__none__", "none", "empty", "false"):
         day_list = [day.strip() for day in days.split(",") if day.strip()]
         if not day_list:
             day_list = None
+
+    where_params = [z, x, y]
 
     if mode == "osm":
         active_geom = "e.geom_line"
@@ -173,7 +227,6 @@ def get_track_tile(
             f"{active_geom} && ST_Transform(ST_TileEnvelope(%s, %s, %s), 4326)"
         ]
         lat_lon_fields = f"round(ST_Y({active_geom})::numeric, 6) AS latitude, round(ST_X({active_geom})::numeric, 6) AS longitude,"
-    params = [z, x, y]
 
     if days in ("__none__", "none", "empty", "false"):
         where_clauses.append("FALSE")
@@ -191,7 +244,7 @@ def get_track_tile(
             date_conditions.append(
                 "(e.timestamp::date = ANY(%s::date[]) AND e.timestamp >= %s::date AND e.timestamp < (%s::date + INTERVAL '1 day'))"
             )
-            params.extend([valid_dates, min(valid_dates), max(valid_dates)])
+            where_params.extend([valid_dates, min(valid_dates), max(valid_dates)])
         if has_null_date:
             date_conditions.append("(e.timestamp IS NULL)")
 
@@ -200,45 +253,108 @@ def get_track_tile(
         else:
             where_clauses.append("FALSE")
 
-    query = f"""
-        WITH bounds AS (
-            SELECT ST_TileEnvelope(%s, %s, %s) AS geom
-        ),
-        tile_features AS (
-            SELECT
-                e.epoch_id::text AS epoch_id,
-                COALESCE(e.timestamp::date::text, 'None') AS day,
-                to_char(e.timestamp, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS timestamp,
-                COALESCE(to_char(e.timestamp, 'YYYY-MM-DD"T"HH24'), 'None') AS h,
-                COALESCE(to_char(e.timestamp, 'YYYY-MM-DD"T"HH24:MI'), 'None') AS m,
-                COALESCE(to_char(e.timestamp, 'YYYY-MM-DD"T"HH24:MI:SS'), 'None') AS s,
-                {lat_lon_fields}
-                ST_AsMVTGeom(
-                    ST_Transform({active_geom}, 3857),
-                    bounds.geom,
-                    4096,
-                    64,
-                    TRUE
-                ) AS geom
-            FROM epochs e
-            CROSS JOIN bounds
-            WHERE {' AND '.join(where_clauses)}
+    where_sql = " AND ".join(where_clauses)
+    params = [z, x, y] + where_params
+
+    if mode == "osm" and z < 15:
+        query = f"""
+            WITH bounds AS (
+                SELECT ST_TileEnvelope(%s, %s, %s) AS geom
+            ),
+            grouped_lines AS (
+                SELECT
+                    min(e.epoch_id::text) AS epoch_id,
+                    COALESCE(e.timestamp::date::text, 'None') AS day,
+                    min(to_char(e.timestamp, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')) AS timestamp,
+                    COALESCE(to_char(e.timestamp, 'YYYY-MM-DD"T"HH24'), 'None') AS h,
+                    COALESCE(to_char(e.timestamp, 'YYYY-MM-DD"T"HH24:MI'), 'None') AS m,
+                    min(COALESCE(to_char(e.timestamp, 'YYYY-MM-DD"T"HH24:MI:SS'), 'None')) AS s,
+                    NULL::numeric AS latitude,
+                    NULL::numeric AS longitude,
+                    ST_LineMerge(ST_SnapToGrid(ST_Collect(e.geom_line), 0.00001)) AS continuous_geom
+                FROM epochs e
+                WHERE {where_sql}
+                GROUP BY
+                    COALESCE(e.timestamp::date::text, 'None'),
+                    COALESCE(to_char(e.timestamp, 'YYYY-MM-DD"T"HH24'), 'None'),
+                    COALESCE(to_char(e.timestamp, 'YYYY-MM-DD"T"HH24:MI'), 'None')
+            ),
+            tile_features AS (
+                SELECT
+                    epoch_id, day, timestamp, h, m, s, latitude, longitude,
+                    ST_AsMVTGeom(
+                        ST_Transform(continuous_geom, 3857),
+                        bounds.geom,
+                        4096,
+                        256,
+                        TRUE
+                    ) AS geom
+                FROM grouped_lines
+                CROSS JOIN bounds
+                WHERE continuous_geom IS NOT NULL AND NOT ST_IsEmpty(continuous_geom)
+            )
+            SELECT ST_AsMVT(tile_features, 'gps-track', 4096, 'geom')
+            FROM tile_features
+            WHERE geom IS NOT NULL;
+        """
+    else:
+        query = f"""
+            WITH bounds AS (
+                SELECT ST_TileEnvelope(%s, %s, %s) AS geom
+            ),
+            tile_features AS (
+                SELECT
+                    e.epoch_id::text AS epoch_id,
+                    COALESCE(e.timestamp::date::text, 'None') AS day,
+                    to_char(e.timestamp, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS timestamp,
+                    COALESCE(to_char(e.timestamp, 'YYYY-MM-DD"T"HH24'), 'None') AS h,
+                    COALESCE(to_char(e.timestamp, 'YYYY-MM-DD"T"HH24:MI'), 'None') AS m,
+                    COALESCE(to_char(e.timestamp, 'YYYY-MM-DD"T"HH24:MI:SS'), 'None') AS s,
+                    {lat_lon_fields}
+                    ST_AsMVTGeom(
+                        ST_Transform({active_geom}, 3857),
+                        bounds.geom,
+                        4096,
+                        256,
+                        TRUE
+                    ) AS geom
+                FROM epochs e
+                CROSS JOIN bounds
+                WHERE {where_sql}
+            )
+            SELECT ST_AsMVT(tile_features, 'gps-track', 4096, 'geom')
+            FROM tile_features
+            WHERE geom IS NOT NULL;
+        """
+
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SET LOCAL max_parallel_workers_per_gather = 0")
+                cur.execute(query, params)
+                tile = cur.fetchone()[0] or b""
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        return Response(
+            content=b"",
+            media_type="application/vnd.mapbox-vector-tile",
+            headers={
+                "Cache-Control": "no-store",
+                "Access-Control-Allow-Origin": "*",
+            },
         )
-        SELECT ST_AsMVT(tile_features, 'gps-track', 4096, 'geom')
-        FROM tile_features
-        WHERE geom IS NOT NULL;
-    """
-    params = [z, x, y] + params
-    with get_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SET LOCAL max_parallel_workers_per_gather = 0")
-            cur.execute(query, params)
-            tile = cur.fetchone()[0] or b""
+
+    tile_bytes = bytes(tile)
+    put_in_tile_cache(cache_key, tile_bytes)
 
     return Response(
-        content=bytes(tile),
+        content=tile_bytes,
         media_type="application/vnd.mapbox-vector-tile",
-        headers={"Cache-Control": "no-store"},
+        headers={
+            "Cache-Control": "public, max-age=1800, stale-while-revalidate=3600",
+            "Access-Control-Allow-Origin": "*",
+        },
     )
 
 
