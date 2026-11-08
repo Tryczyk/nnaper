@@ -348,7 +348,8 @@ window.setSnapRoadsEnabled = function(bool) {
 };
 
 function buildTrackTilesUrl(days) {
-  let url = `${TRACK_TILES_URL}?days=${encodeURIComponent(days)}&mode=${currentTrackMode}`;
+  const token = (typeof window.getAuthToken === 'function') ? window.getAuthToken() : '';
+  let url = `${TRACK_TILES_URL}?days=${encodeURIComponent(days)}&mode=${currentTrackMode}&token=${encodeURIComponent(token)}`;
   if (currentTrackMode === 'snapped') {
     url += '&snapped=true';
   }
@@ -556,7 +557,8 @@ async function expandDayNode(dayItem, monthHeader, yearHeader, monthDayCheckboxe
   dayItem.dayChildren.innerHTML = '<div style="color:#64748b;font-size:11px;padding:2px 8px;">Ładowanie...</div>';
 
   try {
-    const res = await fetch(`${apiBaseUrl}/api/time-tree?day=${encodeURIComponent(dayItem.dateStr)}`);
+    const token = (typeof window.getAuthToken === 'function') ? window.getAuthToken() : '';
+    const res = await fetch(`${apiBaseUrl}/api/time-tree?day=${encodeURIComponent(dayItem.dateStr)}&token=${encodeURIComponent(token)}`);
     if (!res.ok) throw new Error('Błąd API');
     const data = await res.json();
     dayItem.dayChildren.innerHTML = '';
@@ -703,13 +705,26 @@ async function expandDayNode(dayItem, monthHeader, yearHeader, monthDayCheckboxe
 }
 
 async function buildInlineTimeFilter(container) {
+  const token = (typeof window.getAuthToken === 'function') ? window.getAuthToken() : '';
+  if (!token) {
+    container.innerHTML = '<span style="color:#94a3b8;font-size:11px;">Zaloguj się w prawym panelu, aby zobaczyć swoje trasy.</span>';
+    trackMonthLayers.forEach(({ layerId, lineLayerId }) => {
+      if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', 'none');
+      if (lineLayerId && map.getLayer(lineLayerId)) map.setLayoutProperty(lineLayerId, 'visibility', 'none');
+    });
+    return;
+  }
   try {
-    const res = await fetch(`${apiBaseUrl}/api/dates-tree`);
+    const res = await fetch(`${apiBaseUrl}/api/dates-tree?token=${encodeURIComponent(token)}`);
     if (!res.ok) throw new Error('Błąd API');
     const data = await res.json();
 
     if (Object.keys(data).length === 0) {
-      container.innerHTML = '<span style="color:#64748b;font-size:11px;">Brak danych czasowych.</span>';
+      container.innerHTML = '<span style="color:#64748b;font-size:11px;">Brak tras dla Twojego konta.</span>';
+      trackMonthLayers.forEach(({ layerId, lineLayerId }) => {
+        if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', 'none');
+        if (lineLayerId && map.getLayer(lineLayerId)) map.setLayoutProperty(lineLayerId, 'visibility', 'none');
+      });
       return;
     }
 
@@ -933,6 +948,28 @@ function autoBuildTree() {
     setupSnapButtons();
   }
 }
+
+window.addEventListener('nnaper_auth_changed', () => {
+  try {
+    trackMonthLayers.forEach(({ layerId, lineLayerId }, key) => {
+      if (map.getLayer(lineLayerId)) map.removeLayer(lineLayerId);
+      if (map.getLayer(layerId)) map.removeLayer(layerId);
+      const suffix = key.replaceAll('-', '_');
+      const sourceId = `gps-track-${suffix}`;
+      if (map.getSource(sourceId)) map.removeSource(sourceId);
+    });
+    trackMonthLayers.clear();
+    trackLayerIds.clear();
+    dayNodesRegistry.clear();
+    allGpsDayCheckboxes.length = 0;
+    allGpsYearCheckboxes.length = 0;
+
+    autoBuildTree();
+    updateTrackTilesSource();
+  } catch (e) {
+    console.error('Błąd podczas odświeżania po zmianie logowania:', e);
+  }
+});
 
 /* ------------------- INTERFEJS OKNA ------------------- */
 const menuEl = document.getElementById('menu');
@@ -1267,7 +1304,8 @@ async function loadPointFullDetails(epochId) {
   if (content) content.innerHTML = '<div style="color:#94a3b8;">Odpytywanie bazy danych...</div>';
 
   try {
-    const res = await fetch(`${apiBaseUrl}/api/epoch/${epochId}`);
+    const token = (typeof window.getAuthToken === 'function') ? window.getAuthToken() : '';
+    const res = await fetch(`${apiBaseUrl}/api/epoch/${epochId}?token=${encodeURIComponent(token)}`);
     if (!res.ok) throw new Error('Błąd odpytania serwera');
     const data = await res.json();
     if (data.error) throw new Error(data.error);
@@ -1393,8 +1431,6 @@ map.on('load', () => {
 
   autoBuildTree();
 });
-
-
 
 /* ------------------- WYSZUKIWARKA MIEJSC I GEODECODROWANIE ------------------- */
 const searchInput = document.getElementById('search-input');

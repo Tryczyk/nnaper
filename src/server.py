@@ -4,12 +4,15 @@ from datetime import datetime
 import json
 import threading
 from typing import Optional
-from fastapi import FastAPI, Query, HTTPException
-from fastapi.responses import Response
+from fastapi import FastAPI, Query, HTTPException, Header
+from fastapi.responses import Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import psycopg
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
+import hashlib
+import secrets
+from pydantic import BaseModel
 
 from constants import DB_URL, CORS_ORIGINS
 
@@ -44,6 +47,37 @@ def ensure_db_indices():
     try:
         with psycopg.connect(DB_URL) as conn:
             with conn.cursor() as cur:
+                cur.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto;")
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS users (
+                        user_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        username      VARCHAR(64) NOT NULL UNIQUE,
+                        email         VARCHAR(255) UNIQUE,
+                        password_hash VARCHAR(255) NOT NULL,
+                        avatar_url    TEXT,
+                        created_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    );
+                """)
+                cur.execute("ALTER TABLE users ALTER COLUMN email DROP NOT NULL;")
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS profiles (
+                        profile_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        user_id    UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+                        name       VARCHAR(64) NOT NULL,
+                        avatar_url TEXT,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        CONSTRAINT uq_user_profile_name UNIQUE (user_id, name)
+                    );
+                """)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS user_sessions (
+                        token       VARCHAR(128) PRIMARY KEY,
+                        user_id     UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+                        created_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    );
+                """)
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions (user_id);")
                 cur.execute("ALTER TABLE epochs ADD COLUMN IF NOT EXISTS geom_snapped GEOMETRY(Point, 4326);")
                 cur.execute("ALTER TABLE epochs DROP COLUMN IF EXISTS geom_offroad CASCADE;")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_epochs_timestamp ON epochs (timestamp ASC);")
@@ -53,7 +87,7 @@ def ensure_db_indices():
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_epochs_geom_active ON epochs USING GIST (COALESCE(geom_snapped, geom));")
                 conn.commit()
     except Exception as e:
-        pass
+        print(f"[STARTUP DB WARNING] {e}")
 
 app.add_middleware(
     CORSMiddleware,
@@ -62,6 +96,261 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
+    email: Optional[str] = None
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class AvatarRequest(BaseModel):
+    avatar_url: Optional[str] = None
+
+
+def hash_password(password: str) -> str:
+    salt = secrets.token_hex(16)
+    key = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 100_000)
+    return f"{salt}${key.hex()}"
+
+
+def verify_password(password: str, hashed: str) -> bool:
+    try:
+        if "$" not in hashed:
+            return False
+        salt, key_hex = hashed.split("$", 1)
+        key = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 100_000)
+        return secrets.compare_digest(key.hex(), key_hex)
+    except Exception:
+        return False
+
+
+_db_indices_ensured = False
+
+def ensure_tables():
+    global _db_indices_ensured
+    if not _db_indices_ensured:
+        ensure_db_indices()
+        _db_indices_ensured = True
+
+
+def get_user_from_token(token: Optional[str]) -> Optional[dict]:
+    if not token:
+        return None
+    ensure_tables()
+    try:
+        with get_db() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute("""
+                    SELECT u.user_id, u.username, u.email, u.avatar_url, s.token
+                    FROM user_sessions s
+                    JOIN users u ON s.user_id = u.user_id
+                    WHERE s.token = %s
+                """, (token,))
+                row = cur.fetchone()
+                if row:
+                    row["user_id"] = str(row["user_id"])
+                    return row
+    except Exception as err:
+        print(f"[AUTH GET_USER ERROR] {err}")
+    return None
+
+
+def get_auth_user_id(token: Optional[str] = None, authorization: Optional[str] = None) -> Optional[str]:
+    auth_token = token
+    if not auth_token and authorization:
+        parts = authorization.split(" ")
+        if len(parts) == 2 and parts[0].lower() == "bearer":
+            auth_token = parts[1]
+    user = get_user_from_token(auth_token)
+    if user and user.get("user_id"):
+        return str(user["user_id"])
+    return None
+
+
+@app.post("/api/auth/register")
+def register_user(req: RegisterRequest):
+    ensure_tables()
+    username = req.username.strip()
+    password = req.password.strip()
+    if len(username) < 3 or len(username) > 64:
+        raise HTTPException(status_code=400, detail="Nazwa użytkownika musi mieć od 3 do 64 znaków.")
+    if len(password) < 4:
+        raise HTTPException(status_code=400, detail="Hasło musi mieć co najmniej 4 znaki.")
+
+    email = req.email.strip() if req.email else None
+    pw_hash = hash_password(password)
+
+    with get_db() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute("SELECT user_id, password_hash FROM users WHERE LOWER(username) = LOWER(%s)", (username,))
+            existing = cur.fetchone()
+            if existing:
+                if existing.get("password_hash") == "placeholder_hash":
+                    cur.execute("""
+                        UPDATE users SET password_hash = %s WHERE user_id = %s
+                        RETURNING user_id, username, email, avatar_url
+                    """, (pw_hash, existing["user_id"]))
+                    user = cur.fetchone()
+                    user_id = user["user_id"]
+                else:
+                    raise HTTPException(status_code=400, detail="Użytkownik o takiej nazwie już istnieje.")
+            else:
+                if email:
+                    cur.execute("SELECT user_id FROM users WHERE LOWER(email) = LOWER(%s)", (email,))
+                    if cur.fetchone():
+                        raise HTTPException(status_code=400, detail="Konto z takim adresem email już istnieje.")
+
+                cur.execute("""
+                    INSERT INTO users (username, email, password_hash, avatar_url)
+                    VALUES (%s, %s, %s, NULL)
+                    RETURNING user_id, username, email, avatar_url
+                """, (username, email, pw_hash))
+                user = cur.fetchone()
+                user_id = user["user_id"]
+
+                cur.execute("""
+                    INSERT INTO profiles (user_id, name, avatar_url)
+                    VALUES (%s, %s, NULL)
+                    ON CONFLICT (user_id, name) DO NOTHING
+                """, (user_id, username))
+
+            token = secrets.token_urlsafe(32)
+            cur.execute("""
+                INSERT INTO user_sessions (token, user_id)
+                VALUES (%s, %s)
+            """, (token, user_id))
+            conn.commit()
+
+            return {
+                "status": "ok",
+                "token": token,
+                "user": {
+                    "user_id": str(user_id),
+                    "username": user["username"],
+                    "email": user["email"],
+                    "avatar_url": user["avatar_url"]
+                }
+            }
+
+
+@app.post("/api/auth/login")
+def login_user(req: LoginRequest):
+    ensure_tables()
+    identifier = req.username.strip()
+    password = req.password.strip()
+
+    with get_db() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute("""
+                SELECT user_id, username, email, password_hash, avatar_url
+                FROM users
+                WHERE LOWER(username) = LOWER(%s) OR (email IS NOT NULL AND LOWER(email) = LOWER(%s))
+            """, (identifier, identifier))
+            user = cur.fetchone()
+
+            if user and user.get("password_hash") == "placeholder_hash":
+                # Użytkownik seedowy parsera - ustaw hasło przy pierwszym logowaniu
+                pw_hash = hash_password(password)
+                cur.execute("UPDATE users SET password_hash = %s WHERE user_id = %s", (pw_hash, user["user_id"]))
+            elif not user or not verify_password(password, user["password_hash"]):
+                raise HTTPException(status_code=401, detail="Nieprawidłowa nazwa użytkownika lub hasło.")
+
+            user_id = user["user_id"]
+            token = secrets.token_urlsafe(32)
+            cur.execute("""
+                INSERT INTO user_sessions (token, user_id)
+                VALUES (%s, %s)
+            """, (token, user_id))
+            conn.commit()
+
+            return {
+                "status": "ok",
+                "token": token,
+                "user": {
+                    "user_id": str(user_id),
+                    "username": user["username"],
+                    "email": user["email"],
+                    "avatar_url": user["avatar_url"]
+                }
+            }
+
+
+@app.get("/api/auth/me")
+def get_current_user(token: Optional[str] = Query(None), authorization: Optional[str] = Header(None)):
+    auth_token = token
+    if not auth_token and authorization:
+        parts = authorization.split(" ")
+        if len(parts) == 2 and parts[0].lower() == "bearer":
+            auth_token = parts[1]
+
+    user = get_user_from_token(auth_token)
+    if not user:
+        return {"authenticated": False, "user": None}
+
+    return {
+        "authenticated": True,
+        "user": {
+            "user_id": user["user_id"],
+            "username": user["username"],
+            "email": user["email"],
+            "avatar_url": user["avatar_url"]
+        }
+    }
+
+
+@app.post("/api/auth/avatar")
+def update_user_avatar(req: AvatarRequest, token: Optional[str] = Query(None), authorization: Optional[str] = Header(None)):
+    auth_token = token
+    if not auth_token and authorization:
+        parts = authorization.split(" ")
+        if len(parts) == 2 and parts[0].lower() == "bearer":
+            auth_token = parts[1]
+
+    user = get_user_from_token(auth_token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Brak autoryzacji.")
+
+    avatar_data = req.avatar_url.strip() if req.avatar_url else None
+    user_id = user["user_id"]
+
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE users
+                SET avatar_url = %s, updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = %s::uuid
+            """, (avatar_data, user_id))
+            cur.execute("""
+                UPDATE profiles
+                SET avatar_url = %s
+                WHERE user_id = %s::uuid
+            """, (avatar_data, user_id))
+            conn.commit()
+
+    return {"status": "ok", "avatar_url": avatar_data}
+
+
+@app.post("/api/auth/logout")
+def logout_user(token: Optional[str] = Query(None), authorization: Optional[str] = Header(None)):
+    auth_token = token
+    if not auth_token and authorization:
+        parts = authorization.split(" ")
+        if len(parts) == 2 and parts[0].lower() == "bearer":
+            auth_token = parts[1]
+
+    if auth_token:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM user_sessions WHERE token = %s", (auth_token,))
+                conn.commit()
+
+    return {"status": "ok"}
 
 
 @app.exception_handler(Exception)
@@ -77,19 +366,24 @@ async def generic_exception_handler(request, exc):
 
 
 @app.get("/api/dates-tree")
-def get_dates_tree():
+def get_dates_tree(token: Optional[str] = Query(None), authorization: Optional[str] = Header(None)):
+    user_id = get_auth_user_id(token, authorization)
+    if not user_id:
+        return {}
+
     query = """
         SELECT DISTINCT 
-            EXTRACT(YEAR FROM timestamp)::int AS y,
-            EXTRACT(MONTH FROM timestamp)::int AS m,
-            EXTRACT(DAY FROM timestamp)::int AS d
-        FROM epochs
+            EXTRACT(YEAR FROM e.timestamp)::int AS y,
+            EXTRACT(MONTH FROM e.timestamp)::int AS m,
+            EXTRACT(DAY FROM e.timestamp)::int AS d
+        FROM epochs e
+        WHERE e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = %s::uuid)
         ORDER BY y DESC NULLS LAST, m DESC NULLS LAST, d DESC NULLS LAST;
     """
     tree = {}
     with get_db() as conn:
         with conn.cursor() as cur:
-            cur.execute(query)
+            cur.execute(query, (user_id,))
             for y, m, d in cur.fetchall():
                 if y is None or m is None or d is None:
                     y_str = "None"
@@ -106,27 +400,32 @@ def get_dates_tree():
 
 
 @app.get("/api/time-tree")
-def get_time_tree(day: str = Query(...)):
+def get_time_tree(day: str = Query(...), token: Optional[str] = Query(None), authorization: Optional[str] = Header(None)):
     """Pobiera dynamicznie strukturę godzin, minut i sekund dla wybranego dnia (lub None)."""
+    user_id = get_auth_user_id(token, authorization)
+    if not user_id:
+        return {}
+
     day_str = day.strip()
     if day_str in ("None", "null"):
-        where_time = "timestamp IS NULL"
-        params = ()
+        where_time = "e.timestamp IS NULL"
+        params = (user_id,)
     else:
         try:
             datetime.strptime(day_str, "%Y-%m-%d")
         except ValueError:
             raise HTTPException(status_code=400, detail="Nieprawidłowy format daty. Oczekiwano YYYY-MM-DD lub None.")
-        where_time = "timestamp >= %s::date AND timestamp < (%s::date + INTERVAL '1 day')"
-        params = (day_str, day_str)
+        where_time = "e.timestamp >= %s::date AND e.timestamp < (%s::date + INTERVAL '1 day')"
+        params = (user_id, day_str, day_str)
 
     query = f"""
         SELECT DISTINCT 
-            to_char(timestamp, 'HH24') AS h,
-            to_char(timestamp, 'MI') AS mi,
-            to_char(timestamp, 'SS') AS s
-        FROM epochs
-        WHERE {where_time}
+            to_char(e.timestamp, 'HH24') AS h,
+            to_char(e.timestamp, 'MI') AS mi,
+            to_char(e.timestamp, 'SS') AS s
+        FROM epochs e
+        WHERE e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = %s::uuid)
+          AND {where_time}
         ORDER BY h DESC NULLS LAST, mi DESC NULLS LAST, s DESC NULLS LAST;
     """
     tree = {}
@@ -176,26 +475,39 @@ def get_track_tile(
     days: str = Query(None),
     snapped: bool = Query(False),
     mode: str = Query("raw"),
+    token: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
 ):
     """Zwraca dynamiczny kafelek Mapbox Vector Tile dla śladu GPS w wybranym trybie:
     - raw: surowe pozycje GPS (punkty e.geom)
     - snapped: zsnapowane pozycje GPS (punkty e.geom_snapped)
     - osm: pozycje na drogach OSM wykorzystywane do podświetlenia dróg w tle
     """
+    user_id = get_auth_user_id(token, authorization)
+    if not user_id:
+        return Response(
+            content=b"",
+            media_type="application/vnd.mapbox-vector-tile",
+            headers={
+                "Cache-Control": "no-store",
+                "Access-Control-Allow-Origin": "*",
+            },
+        )
+
     if z < 0 or x < 0 or y < 0 or x >= 2 ** z or y >= 2 ** z:
         raise HTTPException(status_code=400, detail="Nieprawidłowe współrzędne kafelka")
 
     if snapped and mode == "raw":
         mode = "snapped"
 
-    cache_key = (z, x, y, days, snapped, mode)
+    cache_key = (user_id, z, x, y, days, snapped, mode)
     cached_tile = get_from_tile_cache(cache_key)
     if cached_tile is not None:
         return Response(
             content=cached_tile,
             media_type="application/vnd.mapbox-vector-tile",
             headers={
-                "Cache-Control": "public, max-age=1800, stale-while-revalidate=3600",
+                "Cache-Control": "private, max-age=1800, stale-while-revalidate=3600",
                 "Access-Control-Allow-Origin": "*",
             },
         )
@@ -227,6 +539,9 @@ def get_track_tile(
             f"{active_geom} && ST_Transform(ST_TileEnvelope(%s, %s, %s), 4326)"
         ]
         lat_lon_fields = f"round(ST_Y({active_geom})::numeric, 6) AS latitude, round(ST_X({active_geom})::numeric, 6) AS longitude,"
+
+    where_clauses.append("e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = %s::uuid)")
+    where_params.append(user_id)
 
     if days in ("__none__", "none", "empty", "false"):
         where_clauses.append("FALSE")
@@ -359,7 +674,11 @@ def get_track_tile(
 
 
 @app.get("/api/epoch/{epoch_id}")
-def get_epoch_details(epoch_id: str):
+def get_epoch_details(epoch_id: str, token: Optional[str] = Query(None), authorization: Optional[str] = Header(None)):
+    user_id = get_auth_user_id(token, authorization)
+    if not user_id:
+        return {"error": "Brak autoryzacji"}
+
     query = """
     SELECT json_build_object(
         'epoch_id', e.epoch_id,
@@ -386,11 +705,12 @@ def get_epoch_details(epoch_id: str):
         )
     ) AS epoch
     FROM epochs e
-    WHERE e.epoch_id = %(eid)s;
+    WHERE e.epoch_id = %(eid)s
+      AND e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = %(uid)s::uuid);
     """
     with get_db() as conn:
         with conn.cursor(row_factory=dict_row) as cur:
-            cur.execute(query, {"eid": epoch_id})
+            cur.execute(query, {"eid": epoch_id, "uid": user_id})
             row = cur.fetchone()
             if not row or not row["epoch"]:
                 return {"error": "Epoch not found"}
@@ -398,12 +718,21 @@ def get_epoch_details(epoch_id: str):
 
 
 @app.get("/api/playback-day")
-def get_playback_day(day: str = Query(...), snapped: bool = Query(False)):
+def get_playback_day(
+    day: str = Query(...),
+    snapped: bool = Query(False),
+    token: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None)
+):
     """Pobiera uporządkowaną listę epok telemetrycznych dla wybranego dnia z satelitami (zoptymalizowana wersja JSON)."""
+    user_id = get_auth_user_id(token, authorization)
+    if not user_id:
+        return Response(content="[]", media_type="application/json")
+
     day_str = day.strip()
     if day_str in ("None", "null"):
         where_time = "e.timestamp IS NULL"
-        query_params = ()
+        query_params = (user_id,)
         order_clause = "e.epoch_id ASC"
     else:
         try:
@@ -411,7 +740,7 @@ def get_playback_day(day: str = Query(...), snapped: bool = Query(False)):
         except ValueError:
             raise HTTPException(status_code=400, detail="Nieprawidłowy format daty. Oczekiwano YYYY-MM-DD lub None.")
         where_time = "e.timestamp >= %s::date AND e.timestamp < (%s::date + INTERVAL '1 day')"
-        query_params = (day_str, day_str)
+        query_params = (user_id, day_str, day_str)
         order_clause = "e.timestamp ASC"
 
     active_geom = "COALESCE(e.geom_snapped, e.geom)" if snapped else "e.geom"
@@ -429,7 +758,8 @@ def get_playback_day(day: str = Query(...), snapped: bool = Query(False)):
             e.g_y,
             e.g_z
         FROM epochs e
-        WHERE {where_time}
+        WHERE e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = %s::uuid)
+          AND {where_time}
         ORDER BY {order_clause}
     ),
     day_satellites AS (
@@ -476,10 +806,16 @@ def get_playback_day(day: str = Query(...), snapped: bool = Query(False)):
         raise HTTPException(status_code=500, detail=f"Błąd bazy danych: {str(e)}")
 
 
-def build_scope_filter(scope: str, day: Optional[str] = None, year: Optional[int] = None, month: Optional[int] = None, days: Optional[str] = None):
+def build_scope_filter(scope: str, day: Optional[str] = None, year: Optional[int] = None, month: Optional[int] = None, days: Optional[str] = None, user_id: Optional[str] = None):
     where_clauses = []
     params = []
     scope_name = "trasa"
+
+    if user_id:
+        where_clauses.append("e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = %s::uuid)")
+        params.append(user_id)
+    else:
+        where_clauses.append("FALSE")
 
     if scope == "day" and day:
         day_str = day.strip()
@@ -541,9 +877,15 @@ def get_export_data(
     days: Optional[str] = Query(None),
     downsample: Optional[int] = Query(None),
     snapped: bool = Query(False),
+    token: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
 ):
     """Pobiera dane telemetryczne trasy dla zadanego zakresu (dzień, miesiąc, rok, wybrane dni, wszystko)."""
-    where_clauses, params, scope_name = build_scope_filter(scope, day, year, month, days)
+    user_id = get_auth_user_id(token, authorization)
+    if not user_id:
+        return Response(content="[]", media_type="application/json")
+
+    where_clauses, params, scope_name = build_scope_filter(scope, day, year, month, days, user_id=user_id)
     where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
     step = int(downsample) if downsample and downsample > 1 else 1
@@ -625,9 +967,15 @@ def download_export_file(
     month: Optional[int] = Query(None),
     days: Optional[str] = Query(None),
     snapped: bool = Query(False),
+    token: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
 ):
     """Generuje i zwraca bezpośrednio plik eksportu (GPX, CSV, GeoJSON, KML)."""
-    where_clauses, params, scope_name = build_scope_filter(scope, day, year, month, days)
+    user_id = get_auth_user_id(token, authorization)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Brak autoryzacji")
+
+    where_clauses, params, scope_name = build_scope_filter(scope, day, year, month, days, user_id=user_id)
     where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
     active_geom = "COALESCE(e.geom_snapped, e.geom)" if snapped else "e.geom"
 

@@ -3127,10 +3127,15 @@ ${placemarks}
     '09': 'Wrzesień', '10': 'Październik', '11': 'Listopad', '12': 'Grudzień'
   };
 
-  async function loadDatesTree() {
-    if (cachedDatesTree) return cachedDatesTree;
+  async function loadDatesTree(forceRefresh = false) {
+    if (cachedDatesTree && !forceRefresh) return cachedDatesTree;
     try {
-      const res = await fetch(`${apiBaseUrl}/api/dates-tree`);
+      const token = window.getAuthToken?.() || '';
+      if (!token) {
+        cachedDatesTree = {};
+        return {};
+      }
+      const res = await fetch(`${apiBaseUrl}/api/dates-tree?token=${encodeURIComponent(token)}`, { credentials: 'include', cache: 'no-store' });
       if (res.ok) {
         cachedDatesTree = await res.json();
       }
@@ -3574,7 +3579,14 @@ ${placemarks}
     };
 
     try {
+      const token = window.getAuthToken?.() || '';
+      if (!token && activeScope !== 'planned') {
+        throw new Error('Musisz być zalogowany, aby wyeksportować swoje trasy.');
+      }
       let queryUrl = `${apiBaseUrl}/api/export-data?scope=${activeScope}`;
+      if (token) {
+        queryUrl += `&token=${encodeURIComponent(token)}`;
+      }
       let title = 'Trasa';
       let scopeFilename = 'trasa';
       let rawPoints = null;
@@ -3743,6 +3755,10 @@ ${placemarks}
   if (btnDoExport) {
     btnDoExport.addEventListener('click', performExport);
   }
+
+  window.addEventListener('nnaper_auth_changed', () => {
+    cachedDatesTree = null;
+  });
 
   // Globalny interfejs pomocniczy
   window.ExportManager = {

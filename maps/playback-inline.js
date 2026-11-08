@@ -1044,8 +1044,19 @@
 
   async function loadDates() {
     try {
+      const token = window.getAuthToken?.() || '';
+      if (!token) {
+        datesTree = {};
+        availableDates = [];
+        if (dateSelect) dateSelect.innerHTML = '<option value="">Wymagane logowanie</option>';
+        if (selYear) selYear.innerHTML = '<option value="">--</option>';
+        if (selMonth) selMonth.innerHTML = '<option value="">--</option>';
+        if (selDay) selDay.innerHTML = '<option value="">Wymagane logowanie</option>';
+        if (hudProgressInfo) hudProgressInfo.innerText = 'Zaloguj się w prawym panelu, aby odtworzyć trasy';
+        return;
+      }
       if (hudProgressInfo) hudProgressInfo.innerText = 'Pobieranie listy dat...';
-      const res = await fetch(`${apiBaseUrl}/api/dates-tree`, { cache: 'no-store' });
+      const res = await fetch(`${apiBaseUrl}/api/dates-tree?token=${encodeURIComponent(token)}`, { credentials: 'include', cache: 'no-store' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       datesTree = await res.json();
       availableDates = [];
@@ -1060,7 +1071,7 @@
       if (availableDates.length === 0) {
         if (dateSelect) dateSelect.innerHTML = '<option value="">Brak dostępnych tras</option>';
         if (selDay) selDay.innerHTML = '<option value="">Brak tras</option>';
-        if (hudProgressInfo) hudProgressInfo.innerText = 'Brak zarejestrowanych tras w bazie';
+        if (hudProgressInfo) hudProgressInfo.innerText = 'Brak zarejestrowanych tras dla tego konta';
         return;
       }
 
@@ -1107,9 +1118,11 @@
     if (btnPlay) btnPlay.disabled = true;
 
     try {
+      const token = window.getAuthToken?.() || '';
       const isSnapped = localStorage.getItem('nnaper_snap_roads') === 'true';
       const snapParam = isSnapped ? '&snapped=true' : '';
-      const res = await fetch(`${apiBaseUrl}/api/playback-day?day=${encodeURIComponent(dayStr)}${snapParam}`, { signal });
+      const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
+      const res = await fetch(`${apiBaseUrl}/api/playback-day?day=${encodeURIComponent(dayStr)}${snapParam}${tokenParam}`, { signal, credentials: 'include' });
       if (!res.ok) {
         const errJson = await res.json().catch(() => ({}));
         throw new Error(errJson.detail || `HTTP ${res.status}`);
@@ -1583,6 +1596,12 @@
     } else {
       m.once('load', onMapLoaded);
     }
+
+    window.addEventListener('nnaper_auth_changed', () => {
+      if (document.body.classList.contains('playback-mode-active')) {
+        loadDates();
+      }
+    });
   }
 
   if (document.readyState === 'loading') {
