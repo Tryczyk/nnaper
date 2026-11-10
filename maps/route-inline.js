@@ -829,7 +829,7 @@
       copyTextToClipboard(url).then(() => {
         const originalText = btnCopyGoogleUrl.innerText;
         btnCopyGoogleUrl.innerText = 'Skopiowano!';
-        setGoogleFeedback('✓ Skopiowano link do schowka!', false);
+        setGoogleFeedback('Skopiowano link do schowka!', false);
         setTimeout(() => {
           btnCopyGoogleUrl.innerText = originalText;
         }, 2000);
@@ -983,7 +983,7 @@
 
     scheduleInlineRouteCalculation();
     updateGoogleMapsOutputIfVisible();
-    setImportFeedback(`✓ Wczytano trasę z ${coords.length} punktów.`, false);
+    setImportFeedback(`Wczytano trasę z ${coords.length} punktów.`, false);
     return true;
   }
 

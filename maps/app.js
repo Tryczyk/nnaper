@@ -1,3 +1,53 @@
+// Zabezpieczenie przed bledem Chromium net::ERR_CACHE_OPERATION_NOT_SUPPORTED na zapytaniach HTTP Range (PMTiles)
+(function () {
+  const originalFetch = window.fetch;
+  window.fetch = function (input, init) {
+    let url = '';
+    if (typeof input === 'string') {
+      url = input;
+    } else if (input && typeof input.url === 'string') {
+      url = input.url;
+    }
+    if (url && (url.includes('.pmtiles') || url.includes('/osm_data/'))) {
+      init = init ? Object.assign({}, init) : {};
+      init.cache = 'no-store';
+    }
+    return originalFetch.call(this, input, init);
+  };
+
+  if (window.pmtiles && window.pmtiles.FetchSource) {
+    const origGetBytes = window.pmtiles.FetchSource.prototype.getBytes;
+    if (origGetBytes) {
+      window.pmtiles.FetchSource.prototype.getBytes = async function (offset, length, signal, etag) {
+        const headers = new Headers(this.customHeaders);
+        headers.set('Range', `bytes=${offset}-${offset + length - 1}`);
+        if (etag) {
+          headers.set('If-Match', etag);
+        }
+        const res = await fetch(this.url, {
+          headers,
+          signal,
+          credentials: this.credentials,
+          cache: 'no-store'
+        });
+        if (res.status === 416) {
+          return origGetBytes.call(this, offset, length, signal, etag);
+        }
+        if (!res.ok) {
+          throw new Error(`Blad pobierania PMTiles: HTTP ${res.status} ${res.statusText}`);
+        }
+        const data = await res.arrayBuffer();
+        return {
+          data,
+          etag: res.headers.get('ETag') || undefined,
+          cacheControl: res.headers.get('Cache-Control') || undefined,
+          expires: res.headers.get('Expires') || undefined
+        };
+      };
+    }
+  }
+})();
+
 const protocol = new pmtiles.Protocol();
 maplibregl.addProtocol("pmtiles", protocol.tile);
 
@@ -730,7 +780,6 @@ async function buildInlineTimeFilter(container) {
     return;
   }
   try {
-    const token = (typeof window.getAuthToken === 'function') ? window.getAuthToken() : '';
     const profileId = (typeof window.getActiveProfileId === 'function') ? window.getActiveProfileId() : '';
     let url = `${apiBaseUrl}/api/dates-tree`;
     const qParams = [];
@@ -741,7 +790,14 @@ async function buildInlineTimeFilter(container) {
     if (qParams.length > 0) {
       url += '?' + qParams.join('&');
     }
-    const res = await fetch(url);
+    const fetchCtrl = new AbortController();
+    const fetchTimeout = setTimeout(() => fetchCtrl.abort(), 15000);
+    let res;
+    try {
+      res = await fetch(url, { signal: fetchCtrl.signal });
+    } finally {
+      clearTimeout(fetchTimeout);
+    }
     if (!res.ok) throw new Error('Błąd API');
     const data = await res.json();
 
@@ -824,7 +880,7 @@ async function buildInlineTimeFilter(container) {
             const btnDeleteDay = document.createElement('button');
             btnDeleteDay.className = 'btn-day-delete';
             btnDeleteDay.type = 'button';
-            btnDeleteDay.innerHTML = '🗑️';
+            btnDeleteDay.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14H7L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>';
             btnDeleteDay.title = `Trwale usuń wszystkie punkty z dnia ${dateStr}`;
             btnDeleteDay.addEventListener('click', async (e) => {
               e.stopPropagation();
@@ -836,7 +892,7 @@ async function buildInlineTimeFilter(container) {
               if (!confirmDay) return;
 
               btnDeleteDay.disabled = true;
-              btnDeleteDay.innerText = '⏳';
+              btnDeleteDay.innerText = '...';
 
               try {
                 const token = (typeof window.getAuthToken === 'function') ? window.getAuthToken() : '';
@@ -863,7 +919,7 @@ async function buildInlineTimeFilter(container) {
               } catch (err) {
                 alert(`Nie udało się usunąć dnia: ${err.message}`);
                 btnDeleteDay.disabled = false;
-                btnDeleteDay.innerText = '🗑️';
+                btnDeleteDay.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14H7L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>';
               }
             });
             dayHeader.element.insertBefore(btnDeleteDay, dayHeader.arrow);
@@ -1008,7 +1064,8 @@ async function buildInlineTimeFilter(container) {
       }
 
     } catch (err) {
-      container.innerHTML = `<span style="color:#ef4444;font-size:11px;">Brak połączenia z API dat.</span>`;
+      const isTimeout = err.name === 'AbortError';
+      container.innerHTML = `<span style="color:#ef4444;font-size:11px;">${isTimeout ? 'Przekroczono limit czasu połączenia z serwerem.' : 'Brak połączenia z API dat.'}</span>`;
     }
   }
 
@@ -1484,7 +1541,7 @@ function autoBuildTree() {
 
       <div class="point-actions-box">
         <button type="button" class="btn-delete-epoch" id="btn-delete-epoch" data-epoch-id="${e.epoch_id}">
-          🗑️ Trwale usuń ten punkt z bazy
+          Trwale usuń ten punkt z bazy
         </button>
         <div class="point-actions-hint">
           Punkt oraz powiązane z nim rekordy satelitów zostaną bezpowrotnie usunięte z bazy danych.
@@ -1531,7 +1588,7 @@ function autoBuildTree() {
           } catch (delErr) {
             alert('Nie udało się usunąć punktu: ' + delErr.message);
             btnDelEpoch.disabled = false;
-            btnDelEpoch.innerText = '🗑️ Trwale usuń ten punkt z bazy';
+            btnDelEpoch.innerText = 'Trwale usuń ten punkt z bazy';
           }
         });
       }
@@ -1751,7 +1808,7 @@ function autoBuildTree() {
         div.className = 'suggestion-item';
         div.style.color = '#38bdf8';
         div.style.fontWeight = 'bold';
-        div.innerText = `🗺️ Wczytaj trasę z linku Google Maps (${coords.length} punktów)`;
+        div.innerText = `Wczytaj trasę z linku Google Maps (${coords.length} punktów)`;
         div.addEventListener('click', () => {
           searchInput.value = '';
           suggestionsBox.style.display = 'none';

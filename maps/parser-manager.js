@@ -35,7 +35,7 @@
   const btnChooseFolder = document.getElementById('btn-choose-folder');
 
   const authWarningEl = document.getElementById('parser-auth-warning');
-  const optSnap = document.getElementById('parser-opt-snap');
+  // optSnap removed - snapping is always enabled
 
   // Sekcja duplikatów
   const dupPromptEl = document.getElementById('parser-duplicates-prompt');
@@ -66,7 +66,8 @@
   const metricEta = document.getElementById('metric-eta-time');
   const metricSpeed = document.getElementById('metric-speed');
   const metricEpochs = document.getElementById('metric-epochs-count');
-  const metricSats = document.getElementById('metric-sats-count');
+  const metricData = document.getElementById('metric-data-progress');
+  const metricDataLabel = document.getElementById('metric-data-label');
 
   const successBox = document.getElementById('parser-success-box');
   const successDetails = document.getElementById('parser-success-details');
@@ -79,10 +80,11 @@
   let timerInterval = null;
   let pollingInterval = null;
   let startTime = 0;
+  let liveRemainingSec = 0;
   let totalEpochsAccumulator = 0;
-  let totalSatsAccumulator = 0;
   let processedFilesCount = 0;
   let serverHistoryCache = {};
+  let estimatedParsingSpeedMBs = 4.0; // Domyślna/zmierzona szybkość parsowania danych GPS w MB/s
 
   function formatBytes(bytes) {
     if (!bytes || bytes <= 0) return '0 B';
@@ -93,9 +95,48 @@
 
   function formatTime(seconds) {
     if (!seconds || seconds <= 0 || isNaN(seconds)) return '00:00';
-    const m = Math.floor(seconds / 60);
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
     const s = Math.floor(seconds % 60);
+    if (h > 0) {
+      return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    }
     return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  }
+
+  // Estymuje całkowity czas ukończenia (ETA) w sekundach na bazie megabajtów danych w kolejce
+  function estimateQueueRemainingSeconds(currentIndex, currentPhase, loadedBytes, totalFileBytes, parsedBytesRatio, currentUploadSpeed) {
+    let totalSec = 0;
+    const currItem = queue[currentIndex];
+    const fileBytes = totalFileBytes || (currItem?.size || currItem?.file?.size || 0);
+
+    // 1. Szacunek dla bieżącego pliku
+    if (currentPhase === 'upload') {
+      const upRemaining = Math.max(0, fileBytes - (loadedBytes || 0));
+      const upSpeed = Math.max(256 * 1024, currentUploadSpeed || 10 * 1024 * 1024);
+      const upSec = upRemaining / upSpeed;
+      // Cały plik w MB musi jeszcze zostać sparsowany na serwerze:
+      const parseSec = (fileBytes / (1024 * 1024)) / Math.max(0.5, estimatedParsingSpeedMBs);
+      totalSec += (upSec + parseSec);
+    } else {
+      // Faza parsowania na serwerze
+      const ratio = typeof parsedBytesRatio === 'number' ? Math.max(0, Math.min(1, parsedBytesRatio)) : 0;
+      const bytesLeft = Math.max(0, fileBytes * (1 - ratio));
+      const parseSec = (bytesLeft / (1024 * 1024)) / Math.max(0.5, estimatedParsingSpeedMBs);
+      totalSec += parseSec;
+    }
+
+    // 2. Szacunek dla kolejnych plików oczekujących w kolejce (wielkość w MB / prędkość)
+    for (let i = currentIndex + 1; i < queue.length; i++) {
+      const item = queue[i];
+      if (item.status === 'done') continue;
+      const b = item.size || item.file?.size || 0;
+      const upSec = b / Math.max(1024 * 1024, currentUploadSpeed || 10 * 1024 * 1024);
+      const parseSec = (b / (1024 * 1024)) / Math.max(0.5, estimatedParsingSpeedMBs);
+      totalSec += (upSec + parseSec);
+    }
+
+    return Math.max(1, Math.round(totalSec));
   }
 
   // ------------------ REJESTR HISTORII SPARSOWANYCH PLIKÓW ------------------
@@ -138,9 +179,9 @@
 
   function setupBeforeUnloadProtection() {
     window.addEventListener('beforeunload', (e) => {
-      if (isProcessing) {
+      if (isProcessing && activeXhr) {
         e.preventDefault();
-        e.returnValue = 'Trwa przesyłanie i przetwarzanie plików GPS na serwerze. Czy na pewno chcesz opuścić stronę?';
+        e.returnValue = 'Trwa przesyłanie pliku GPS na serwer.';
         return e.returnValue;
       }
     });
@@ -148,11 +189,32 @@
 
   // ------------------ MODAL & STAN ------------------
 
+  function updateMenuButtonRunningState(isRunning, job) {
+    if (!btnOpenMenu) return;
+    if (isRunning && job) {
+      const pct = job.percent || 0;
+      btnOpenMenu.innerHTML = `<span style="display:inline-flex;align-items:center;gap:6px;"><span class="running-dot" style="width:7px;height:7px;border-radius:50%;background:#38bdf8;box-shadow:0 0 8px #38bdf8;display:inline-block;"></span>Parsowanie (${pct}%)</span>`;
+    } else {
+      btnOpenMenu.innerText = 'Parsowanie plików';
+    }
+  }
+
   function openParserModal() {
     if (!modalEl) return;
     modalEl.style.display = 'flex';
     checkAuthStatus();
     loadProfilesIntoParserSelect();
+
+    if (isProcessing) {
+      if (dropzoneEl) dropzoneEl.style.display = 'none';
+      const profBox = document.getElementById('parser-profile-box');
+      if (profBox) profBox.style.display = 'none';
+      if (btnStart) btnStart.style.display = 'none';
+      if (btnAbort) btnAbort.style.display = 'inline-flex';
+      if (progressSection) progressSection.style.display = 'block';
+      if (queueSection) queueSection.style.display = 'block';
+    }
+
     syncWithServerJobs();
   }
 
@@ -168,10 +230,9 @@
       }
       const activeId = window.getActiveProfileId?.() || '';
       profiles.forEach(p => {
-        const icon = window.getProfileIcon ? window.getProfileIcon(p.name) : '🏷️';
         const opt = document.createElement('option');
         opt.value = p.profile_id;
-        opt.innerText = `${icon} ${p.name}`;
+        opt.innerText = p.name;
         if (p.profile_id === activeId) opt.selected = true;
         targetProfileSelect.appendChild(opt);
       });
@@ -184,11 +245,6 @@
   }
 
   function closeParserModal() {
-    if (isProcessing) {
-      if (!confirm('Trwa przetwarzanie plików GPS. Zamknięcie okna nie przerwie pracy serwera w tle, ale czy chcesz zamknąć widok?')) {
-        return;
-      }
-    }
     if (modalEl) {
       modalEl.style.display = 'none';
     }
@@ -224,14 +280,90 @@
       }
 
       const activeJobs = data.active_jobs || [];
-      if (activeJobs.length > 0 && !isProcessing) {
+      if (activeJobs.length > 0) {
         // Serwer przetwarza zadanie w tle! Odtwórz stan w UI
         const runningJob = activeJobs[0];
-        restoreRunningServerJob(runningJob);
+        updateMenuButtonRunningState(true, runningJob);
+        if (!isProcessing || activeServerJobId !== runningJob.job_id) {
+          restoreRunningServerJob(runningJob);
+        }
+      } else {
+        updateMenuButtonRunningState(false);
+        if (data.jobs && data.jobs.length > 0 && (!isProcessing || queue.length === 0)) {
+          // Jeśli zadanie zakończyło się w tle (np. podczas odświeżania strony)
+          const latestJob = data.jobs[0];
+          const jobAgeSec = (Date.now() - new Date(latestJob.updated_at || latestJob.created_at).getTime()) / 1000;
+          if (jobAgeSec < 1800) {
+            restoreFinishedServerJob(latestJob);
+          }
+        }
       }
     } catch (e) {
       console.warn('Nie udało się pobrać stanu zadań z serwera:', e);
     }
+  }
+
+  function restoreFinishedServerJob(job) {
+    if (dropzoneEl) dropzoneEl.style.display = 'none';
+    const profBox = document.getElementById('parser-profile-box');
+    if (profBox) profBox.style.display = 'none';
+
+    queue = [{
+      id: 'job_' + job.job_id,
+      name: job.filename,
+      size: job.file_size || 0,
+      status: job.status,
+      percent: job.percent || 100,
+      message: job.message || (job.status === 'done' ? 'Zakończono pomyślnie' : 'Błąd zadania'),
+      epochs: job.epochs || 0,
+      satellites: job.satellites || 0,
+      error: job.error || null,
+    }];
+    renderQueueUI();
+
+    if (btnStart) btnStart.style.display = 'none';
+    if (btnAbort) btnAbort.style.display = 'none';
+    if (progressSection) progressSection.style.display = 'block';
+
+    if (overallFillEl) overallFillEl.style.width = '100%';
+    if (overallPercentEl) overallPercentEl.innerText = `${job.percent || 100}%`;
+    if (activeFilePctEl) activeFilePctEl.innerText = `${job.percent || 100}%`;
+    if (activeFillEl) activeFillEl.style.width = `${job.percent || 100}%`;
+    if (metricFiles) metricFiles.innerText = '1 / 1';
+    if (metricEta) metricEta.innerText = '00:00';
+    if (metricSpeed) metricSpeed.innerText = `${job.speed_mb_s || 0} MB/s`;
+    if (metricEpochs) metricEpochs.innerText = (job.epochs || 0).toLocaleString('pl-PL');
+    if (metricDataLabel) metricDataLabel.innerText = 'Przetworzono:';
+    if (metricData) {
+      const curMB = ((job.processed_bytes || job.file_size || 0) / (1024 * 1024)).toFixed(1);
+      const totMB = ((job.file_size || 0) / (1024 * 1024)).toFixed(1);
+      metricData.innerText = `${curMB} / ${totMB} MB`;
+    }
+
+    if (successBox && successDetails) {
+      successBox.style.display = 'block';
+      const iconEl = successBox.querySelector('.success-icon');
+      const titleEl = successBox.querySelector('.success-title');
+
+      if (job.status === 'done') {
+        if (iconEl) iconEl.innerText = '';
+        if (titleEl) {
+          titleEl.innerText = 'Parsowanie zakończone sukcesem!';
+          titleEl.style.color = '';
+        }
+        successDetails.innerHTML = `Pomyślnie przetworzono <strong>1</strong> plik (w tle na serwerze). Zapisano łącznie <strong>${(job.epochs || 0).toLocaleString('pl-PL')}</strong> nowych punktów telemetrycznych GPS.`;
+      } else if (job.status === 'error') {
+        if (iconEl) iconEl.innerText = '';
+        if (titleEl) {
+          titleEl.innerText = 'Błąd przetwarzania pliku w tle';
+          titleEl.style.color = '#ef4444';
+        }
+        successDetails.innerHTML = `<span style="color:#f87171;font-weight:600;">Wystąpił błąd:</span><br><span style="font-size:12px;color:#cbd5e1;">${job.error || job.message}</span>`;
+      }
+    }
+
+    if (btnViewMap) btnViewMap.style.display = job.status === 'done' ? 'inline-flex' : 'none';
+    updateMenuButtonRunningState(false);
   }
 
   function restoreRunningServerJob(job) {
@@ -239,13 +371,21 @@
     activeServerJobId = job.job_id;
     startTime = new Date(job.created_at).getTime() || Date.now();
 
+    // Ukryj dropzone i profil docelowy - trwa aktywne zadanie
+    if (dropzoneEl) dropzoneEl.style.display = 'none';
+    const profBox = document.getElementById('parser-profile-box');
+    if (profBox) profBox.style.display = 'none';
+
+    const srvPct = Math.min(100, Math.max(0, job.percent || 0));
+    const mappedPct = (job.status === 'done') ? 100 : Math.max(18, Math.min(99, Math.round(18 + (srvPct * 0.81))));
+
     // Dodaj plik do widoku kolejki
     queue = [{
       id: 'job_' + job.job_id,
       name: job.filename,
       size: job.file_size || 0,
-      status: job.status,
-      percent: job.percent || 10,
+      status: job.status === 'running' ? (job.stage || 'parsing') : job.status,
+      percent: mappedPct,
       message: job.message || 'Przetwarzanie na serwerze...',
       epochs: job.epochs || 0,
       satellites: job.satellites || 0,
@@ -257,6 +397,31 @@
     if (progressSection) progressSection.style.display = 'block';
     if (successBox) successBox.style.display = 'none';
 
+    // Natychmiast zaktualizuj stan pasków postępu i metryk z danych zadania
+    if (activeFileNameEl) activeFileNameEl.innerText = job.filename;
+    if (activeFilePctEl) activeFilePctEl.innerText = `${mappedPct}%`;
+    if (activeFillEl) activeFillEl.style.width = `${mappedPct}%`;
+    if (overallPercentEl) overallPercentEl.innerText = `${mappedPct}%`;
+    if (overallFillEl) overallFillEl.style.width = `${mappedPct}%`;
+    if (metricFiles) metricFiles.innerText = '1 / 1';
+    if (metricSpeed) metricSpeed.innerText = `${job.speed_mb_s || '--'} MB/s`;
+    if (metricEpochs) metricEpochs.innerText = (job.epochs || 0).toLocaleString('pl-PL');
+    if (metricEta) metricEta.innerText = job.eta_str || '--:--';
+    if (metricDataLabel) metricDataLabel.innerText = 'Sparsowano:';
+    if (metricData) {
+      const curMB = ((job.processed_bytes || 0) / (1024 * 1024)).toFixed(1);
+      const totMB = ((job.file_size || 0) / (1024 * 1024)).toFixed(1);
+      metricData.innerText = `${curMB} / ${totMB} MB`;
+    }
+    if (currentStageEl) {
+      let stageDesc = 'Odczyt i parsowanie telemetrii GPS';
+      if (job.status === 'queued') stageDesc = 'Oczekiwanie w kolejce serwera';
+      else if (job.stage === 'matching') stageDesc = 'Dopasowywanie dróg OSRM';
+      else if (job.stage === 'saving') stageDesc = 'Zapis do bazy danych PostgreSQL';
+      currentStageEl.innerText = `Plik (1/1): ${job.filename} — ${stageDesc} (${srvPct}%, ETA: ~${job.eta_str || '--:--'})`;
+    }
+
+    updateMenuButtonRunningState(true, job);
     startTimer();
     pollActiveServerJob(job.job_id);
   }
@@ -359,6 +524,14 @@
     if (progressSection) progressSection.style.display = 'none';
     if (successBox) successBox.style.display = 'none';
     if (btnViewMap) btnViewMap.style.display = 'none';
+    if (dropzoneEl) dropzoneEl.style.display = 'block';
+    const profBox = document.getElementById('parser-profile-box');
+    if (profBox) profBox.style.display = 'block';
+    if (btnStart) {
+      btnStart.style.display = 'inline-flex';
+      btnStart.disabled = true;
+    }
+    updateMenuButtonRunningState(false);
   }
 
   function renderQueueUI() {
@@ -391,7 +564,16 @@
       let badgeClass = 'badge-queued';
       let badgeText = item.message || 'Oczekuje';
 
-      if (item.status === 'reading' || item.status === 'parsing') {
+      if (item.status === 'reading' || item.status === 'uploading') {
+        badgeClass = 'badge-uploading';
+        badgeText = 'Wysyłanie...';
+      } else if (item.status === 'writing') {
+        badgeClass = 'badge-writing';
+        badgeText = 'Zapis na dysku...';
+      } else if (item.status === 'queued') {
+        badgeClass = 'badge-queued';
+        badgeText = 'W kolejce';
+      } else if (item.status === 'parsing') {
         badgeClass = 'badge-running';
         badgeText = 'Parsowanie...';
       } else if (item.status === 'matching') {
@@ -402,18 +584,18 @@
         badgeText = 'Zapis DB...';
       } else if (item.status === 'done') {
         badgeClass = 'badge-done';
-        badgeText = `✓ ${item.epochs} pkt`;
+        badgeText = `${item.epochs} pkt`;
       } else if (item.status === 'error') {
         badgeClass = 'badge-error';
-        badgeText = '✕ Błąd';
+        badgeText = 'Błąd';
       } else if (item.prevParsed && item.status === 'queued') {
         badgeClass = 'badge-parsed';
-        badgeText = '⏱️ W bazie';
+        badgeText = 'W bazie';
       }
 
       row.innerHTML = `
         <div class="file-row-main">
-          <div class="file-icon">${item.status === 'done' ? '✅' : (item.status === 'error' ? '❌' : (item.prevParsed ? '🔁' : '📄'))}</div>
+          <div class="file-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
           <div class="file-info-block">
             <div class="file-name" title="${item.name}">${item.name}</div>
             <div class="file-meta">
@@ -446,7 +628,16 @@
       let badgeClass = 'badge-queued';
       let badgeText = item.message;
 
-      if (item.status === 'reading' || item.status === 'parsing') {
+      if (item.status === 'reading' || item.status === 'uploading') {
+        badgeClass = 'badge-uploading';
+        badgeText = 'Wysyłanie...';
+      } else if (item.status === 'writing') {
+        badgeClass = 'badge-writing';
+        badgeText = 'Zapis na dysku...';
+      } else if (item.status === 'queued') {
+        badgeClass = 'badge-queued';
+        badgeText = 'W kolejce';
+      } else if (item.status === 'parsing') {
         badgeClass = 'badge-running';
         badgeText = 'Parsowanie...';
       } else if (item.status === 'matching') {
@@ -457,13 +648,13 @@
         badgeText = 'Zapis DB...';
       } else if (item.status === 'done') {
         badgeClass = 'badge-done';
-        badgeText = `✓ ${item.epochs} pkt`;
+        badgeText = `${item.epochs} pkt`;
       } else if (item.status === 'error') {
         badgeClass = 'badge-error';
-        badgeText = '✕ Błąd';
+        badgeText = 'Błąd';
       } else if (item.prevParsed && item.status === 'queued') {
         badgeClass = 'badge-parsed';
-        badgeText = '⏱️ W bazie';
+        badgeText = 'W bazie';
       }
 
       badge.className = `file-badge ${badgeClass}`;
@@ -497,7 +688,7 @@
       const itemEl = document.createElement('div');
       itemEl.className = 'dup-item';
       itemEl.innerHTML = `
-        <span class="dup-item-name">📄 ${d.name} (${formatBytes(d.size)})</span>
+        <span class="dup-item-name">${d.name} (${formatBytes(d.size)})</span>
         <span class="dup-item-meta">Zapisano: ${parsedDate} • ${rec?.epochs || 0} pkt</span>
       `;
       dupListEl.appendChild(itemEl);
@@ -532,9 +723,29 @@
 
   function startTimer() {
     clearInterval(timerInterval);
+    let writingPulse = 0;
     timerInterval = setInterval(() => {
       const elapsedSec = Math.floor((Date.now() - startTime) / 1000);
       if (metricElapsed) metricElapsed.innerText = formatTime(elapsedSec);
+
+      // Płynne odliczanie sekunda po sekundzie (ETA)
+      if (liveRemainingSec > 0) {
+        liveRemainingSec--;
+        if (metricEta) metricEta.innerText = formatTime(liveRemainingSec);
+      }
+
+      // Wizualny heartbeat gdy serwer zapisuje przesłany plik na dysku i rejestruje zadanie
+      const currentItem = queue[processedFilesCount];
+      if (currentItem && currentItem.status === 'writing') {
+        writingPulse = (writingPulse + 1) % 4;
+        const dots = '.'.repeat(writingPulse);
+        if (currentStageEl) {
+          currentStageEl.innerText = `Plik (${processedFilesCount + 1}/${queue.length}): ${currentItem.name} — Zapisywanie na dysku serwera i kolejkowanie zadania${dots}`;
+        }
+        if (metricSpeed) {
+          metricSpeed.innerText = `Zapis na dysku${dots}`;
+        }
+      }
     }, 1000);
   }
 
@@ -555,6 +766,11 @@
     startTime = Date.now();
     startTimer();
 
+    const totalRemainingBytes = queue.filter(q => q.status !== 'done').reduce((acc, q) => acc + (q.size || q.file?.size || 0), 0);
+    const initialEtaSec = Math.max(1, Math.round((totalRemainingBytes / (1024 * 1024)) / estimatedParsingSpeedMBs));
+    if (metricEta) metricEta.innerText = formatTime(initialEtaSec);
+    if (metricSpeed) metricSpeed.innerText = '-- MB/s';
+
     if (btnStart) btnStart.style.display = 'none';
     if (btnAbort) btnAbort.style.display = 'inline-flex';
     if (btnCancel) btnCancel.disabled = true;
@@ -562,8 +778,11 @@
     if (btnViewMap) btnViewMap.style.display = 'none';
     if (successBox) successBox.style.display = 'none';
     if (progressSection) progressSection.style.display = 'block';
+    if (dropzoneEl) dropzoneEl.style.display = 'none';
+    const profBox = document.getElementById('parser-profile-box');
+    if (profBox) profBox.style.display = 'none';
 
-    const snap = optSnap ? optSnap.checked : true;
+    const snap = true; // Zawsze dociągaj do dróg OSM
 
     for (let i = 0; i < queue.length; i++) {
       if (!isProcessing) break;
@@ -606,9 +825,9 @@
       const xhr = new XMLHttpRequest();
       activeXhr = xhr;
 
-      queueItem.status = 'reading';
-      queueItem.percent = 2;
-      queueItem.message = 'Wysyłanie na serwer...';
+      queueItem.status = 'uploading';
+      queueItem.percent = 1;
+      queueItem.message = 'Wysyłanie na serwer (inicjalizacja transferu)...';
       updateFileRow(queueItem);
 
       let uploadStartTime = Date.now();
@@ -618,21 +837,61 @@
           const uploadPct = Math.min(100, Math.round((e.loaded / e.total) * 100));
           const elapsedUploadSec = Math.max(0.1, (Date.now() - uploadStartTime) / 1000);
           const uploadSpeed = e.loaded / elapsedUploadSec;
-          const remainingSec = Math.round((e.total - e.loaded) / Math.max(1, uploadSpeed));
 
-          queueItem.status = 'reading';
-          queueItem.message = `Wysyłanie: ${formatBytes(e.loaded)} / ${formatBytes(e.total)} (${uploadPct}%)`;
-          // Wysyłanie to pierwsze 20% postępu pliku
-          queueItem.percent = Math.max(2, Math.round(uploadPct * 0.2));
+          // Upload mapujemy proporcjonalnie na zakres 1% - 15% całkowitego postępu pliku
+          const mappedUploadPct = Math.max(1, Math.min(15, Math.round(uploadPct * 0.15)));
+
+          // Estymacja całkowitego ETA na bazie megabajtów danych (upload + parsowanie całej kolejki)
+          const totalRemainingSec = estimateQueueRemainingSeconds(
+            processedFilesCount,
+            'upload',
+            e.loaded,
+            e.total,
+            0,
+            uploadSpeed
+          );
+
+          if (uploadPct < 100) {
+            queueItem.status = 'uploading';
+            queueItem.percent = mappedUploadPct;
+            queueItem.message = `Wysyłanie na serwer: ${formatBytes(e.loaded)} / ${formatBytes(e.total)} (${uploadPct}%)`;
+          } else {
+            queueItem.status = 'writing';
+            queueItem.percent = 15;
+            queueItem.message = 'Transfer 100% zakończony. Zapisywanie na dysku serwera i kolejkowanie...';
+          }
           updateFileRow(queueItem);
 
           if (activeFilePctEl) activeFilePctEl.innerText = `${queueItem.percent}%`;
           if (activeFillEl) activeFillEl.style.width = `${queueItem.percent}%`;
-          if (metricSpeed) metricSpeed.innerText = `${(uploadSpeed / (1024 * 1024)).toFixed(1)} MB/s`;
-          if (metricEta) metricEta.innerText = formatTime(remainingSec);
+          if (metricSpeed) {
+            if (uploadPct < 100) {
+              const upMB = (uploadSpeed / (1024 * 1024)).toFixed(1);
+              metricSpeed.innerText = `${upMB} MB/s (upload)`;
+            } else {
+              metricSpeed.innerText = 'Zapis na dysku...';
+            }
+          }
+          liveRemainingSec = totalRemainingSec;
+          if (metricEta) metricEta.innerText = formatTime(liveRemainingSec);
+          if (metricDataLabel) {
+            metricDataLabel.innerText = uploadPct < 100 ? 'Wysyłanie:' : 'Zapis na dysku:';
+          }
+          if (metricData) {
+            const curMB = (e.loaded / (1024 * 1024)).toFixed(1);
+            const totMB = (e.total / (1024 * 1024)).toFixed(1);
+            metricData.innerText = `${curMB} / ${totMB} MB`;
+          }
 
           if (currentStageEl) {
-            currentStageEl.innerText = `Plik (${processedFilesCount + 1}/${queue.length}): ${queueItem.name} — Wysyłanie: ${uploadPct}% (ETA: ~${formatTime(remainingSec)})`;
+            const curMB = (e.loaded / (1024 * 1024)).toFixed(1);
+            const totMB = (e.total / (1024 * 1024)).toFixed(1);
+            if (uploadPct < 100) {
+              const upMB = (uploadSpeed / (1024 * 1024)).toFixed(1);
+              currentStageEl.innerText = `Plik (${processedFilesCount + 1}/${queue.length}): ${queueItem.name} — Wysyłanie: ${curMB}/${totMB} MB (${uploadPct}%, ${upMB} MB/s) — Szacowane ETA: ~${formatTime(totalRemainingSec)}`;
+            } else {
+              currentStageEl.innerText = `Plik (${processedFilesCount + 1}/${queue.length}): ${queueItem.name} — Transfer 100% zakończony. Zapisywanie na dysku serwera...`;
+            }
           }
           updateOverallProgress(queueItem.percent);
         }
@@ -645,9 +904,18 @@
             const resp = JSON.parse(xhr.responseText);
             activeServerJobId = resp.job_id;
 
-            queueItem.percent = 20;
-            queueItem.message = 'Plik na serwerze. Rozpoczynanie parsowania...';
+            queueItem.status = 'queued';
+            queueItem.percent = 18;
+            queueItem.message = 'Plik zapisany na serwerze. Uruchamianie parsowania w tle...';
             updateFileRow(queueItem);
+
+            if (activeFilePctEl) activeFilePctEl.innerText = `${queueItem.percent}%`;
+            if (activeFillEl) activeFillEl.style.width = `${queueItem.percent}%`;
+            if (metricSpeed) metricSpeed.innerText = 'Inicjalizacja...';
+            if (currentStageEl) {
+              currentStageEl.innerText = `Plik (${processedFilesCount + 1}/${queue.length}): ${queueItem.name} — Zadanie zarejestrowane. Rozpoczynanie parsowania w tle...`;
+            }
+            updateOverallProgress(queueItem.percent);
 
             // Przejdź do odpytywania stanu zadania serwera
             await pollServerJobUntilDone(resp.job_id, queueItem);
@@ -704,27 +972,64 @@
 
           if (!job) return;
 
-          // Aktualizacja metryk i pasków postępu
-          const srvPct = Math.min(100, Math.max(0, job.percent || 0));
-          // Postęp parsowania na serwerze zajmuje 20% - 100%
-          const mappedPct = Math.max(queueItem.percent, Math.round(20 + (srvPct * 0.8)));
+          // Aktualizacja wygładzonej średniej prędkości parsowania serwera (MB/s)
+          if (job.speed_mb_s && job.speed_mb_s > 0) {
+            estimatedParsingSpeedMBs = job.speed_mb_s;
+          }
 
-          queueItem.percent = (job.status === 'done') ? 100 : mappedPct;
+          // Rzeczywisty postęp parsowania danych z serwera (na bazie przetworzonych MB)
+          const srvPct = Math.min(100, Math.max(0, job.percent || 0));
+          // Parsowanie na serwerze mapujemy na zakres 18% - 99% (lub 100% gdy gotowe)
+          const actualPct = (job.status === 'done') ? 100 : Math.max(queueItem.percent, Math.min(99, Math.round(18 + (srvPct * 0.81))));
+
+          const fileTotalBytes = queueItem.size || queueItem.file?.size || job.file_size || 0;
+          const processedBytes = job.processed_bytes || Math.round(fileTotalBytes * (srvPct / 100));
+
+          // Szacowanie pozostałego czasu w sekundach
+          let serverSec = (job.eta_seconds !== undefined && job.eta_seconds > 0) ? job.eta_seconds : 0;
+          if (serverSec === 0 && fileTotalBytes > processedBytes && estimatedParsingSpeedMBs > 0) {
+            serverSec = Math.round((fileTotalBytes - processedBytes) / (estimatedParsingSpeedMBs * 1024 * 1024));
+          }
+
+          if (liveRemainingSec <= 0 || Math.abs(liveRemainingSec - serverSec) > 10) {
+            liveRemainingSec = serverSec;
+          } else {
+            liveRemainingSec = Math.round((liveRemainingSec * 0.3) + (serverSec * 0.7));
+          }
+
+          queueItem.percent = actualPct;
           queueItem.status = job.status === 'running' ? (job.stage || 'parsing') : job.status;
           queueItem.message = job.message || 'Przetwarzanie na serwerze...';
-          queueItem.epochs = job.epochs || queueItem.epochs;
-          queueItem.satellites = job.satellites || queueItem.satellites;
+          queueItem.epochs = job.epochs || queueItem.epochs || 0;
+          if (job.status === 'error') {
+            queueItem.error = job.error || job.message;
+          }
           updateFileRow(queueItem);
 
           if (activeFilePctEl) activeFilePctEl.innerText = `${queueItem.percent}%`;
           if (activeFillEl) activeFillEl.style.width = `${queueItem.percent}%`;
-          if (metricEta && job.eta_str) metricEta.innerText = job.eta_str;
-          if (metricSpeed && job.speed_mb_s !== undefined) metricSpeed.innerText = `${job.speed_mb_s} MB/s`;
+          if (metricEta) metricEta.innerText = formatTime(liveRemainingSec);
+          const displaySpeed = (job.speed_mb_s !== undefined && job.speed_mb_s > 0) ? job.speed_mb_s : estimatedParsingSpeedMBs;
+          if (metricSpeed) {
+            metricSpeed.innerText = `${displaySpeed} MB/s`;
+          }
           if (metricEpochs) metricEpochs.innerText = (totalEpochsAccumulator + (job.epochs || 0)).toLocaleString('pl-PL');
-          if (metricSats) metricSats.innerText = (totalSatsAccumulator + (job.satellites || 0)).toLocaleString('pl-PL');
+          if (metricDataLabel) metricDataLabel.innerText = (job.status === 'done') ? 'Przetworzono:' : 'Sparsowano:';
+          if (metricData) {
+            const curMB = (processedBytes / (1024 * 1024)).toFixed(1);
+            const totMB = (fileTotalBytes / (1024 * 1024)).toFixed(1);
+            metricData.innerText = `${curMB} / ${totMB} MB`;
+          }
 
           if (currentStageEl) {
-            currentStageEl.innerText = `Plik (${processedFilesCount + 1}/${queue.length}): ${queueItem.name} — ${job.message}`;
+            let stageDesc = 'Odczyt i parsowanie telemetrii GPS';
+            if (job.status === 'queued') stageDesc = 'Oczekiwanie w kolejce serwera';
+            else if (job.stage === 'matching') stageDesc = 'Dopasowywanie dróg OSRM';
+            else if (job.stage === 'saving') stageDesc = 'Zapis do bazy danych PostgreSQL';
+            else if (job.stage === 'done' || job.status === 'done') stageDesc = 'Zakończono pomyślnie';
+            const curMB = (processedBytes / (1024 * 1024)).toFixed(1);
+            const totMB = (fileTotalBytes / (1024 * 1024)).toFixed(1);
+            currentStageEl.innerText = `Plik (${processedFilesCount + 1}/${queue.length}): ${queueItem.name} — ${stageDesc} (${srvPct}%, ${curMB}/${totMB} MB, ${displaySpeed} MB/s, ETA: ~${formatTime(liveRemainingSec)})`;
           }
 
           updateOverallProgress(queueItem.percent);
@@ -732,11 +1037,14 @@
           if (job.status === 'done') {
             clearInterval(pollingInterval);
             totalEpochsAccumulator += (job.epochs || 0);
-            totalSatsAccumulator += (job.satellites || 0);
             saveLocalHistory(queueItem.name, queueItem.size, job.epochs || 0);
             resolve();
           } else if (job.status === 'error') {
             clearInterval(pollingInterval);
+            queueItem.status = 'error';
+            queueItem.error = job.error || job.message;
+            queueItem.message = `Błąd: ${job.error || job.message}`;
+            updateFileRow(queueItem);
             reject(new Error(job.error || job.message || 'Błąd zadania serwera'));
           }
         } catch (err) {
@@ -780,23 +1088,45 @@
     const successfulFiles = queue.filter(q => q.status === 'done').length;
     const failedFiles = queue.filter(q => q.status === 'error').length;
 
-    if (currentStageEl) currentStageEl.innerText = 'Wszystkie zadania zostały ukończone.';
+    if (currentStageEl) {
+      if (successfulFiles > 0 && failedFiles === 0) {
+        currentStageEl.innerText = 'Wszystkie zadania zostały ukończone sukcesem.';
+      } else if (successfulFiles === 0 && failedFiles > 0) {
+        currentStageEl.innerText = 'Wystąpił błąd podczas przetwarzania plików.';
+      } else {
+        currentStageEl.innerText = 'Przetwarzanie zakończone (część plików z błędami).';
+      }
+    }
     if (overallFillEl) overallFillEl.style.width = '100%';
     if (overallPercentEl) overallPercentEl.innerText = '100%';
     if (metricEta) metricEta.innerText = '00:00';
 
     if (successBox && successDetails) {
       successBox.style.display = 'block';
-      let summaryText = `Pomyślnie przetworzono <strong>${successfulFiles}</strong> z ${queue.length} plików.`;
-      summaryText += ` Zapisano łącznie <strong>${totalEpochsAccumulator.toLocaleString('pl-PL')}</strong> nowych punktów telemetrycznych GPS`;
-      if (totalSatsAccumulator > 0) {
-        summaryText += ` oraz <strong>${totalSatsAccumulator.toLocaleString('pl-PL')}</strong> rekordów satelitów`;
+      const iconEl = successBox.querySelector('.success-icon');
+      const titleEl = successBox.querySelector('.success-title');
+
+      if (successfulFiles === 0 && failedFiles > 0) {
+        if (iconEl) iconEl.innerText = '';
+        if (titleEl) {
+          titleEl.innerText = 'Błąd przetwarzania plików';
+          titleEl.style.color = '#ef4444';
+        }
+        const firstErr = queue.find(q => q.error)?.error || 'Szczegóły błędu w liście plików powyżej.';
+        successDetails.innerHTML = `<span style="color:#f87171;font-weight:600;">Nie udało się zaimportować żadnego pliku.</span><br><span style="font-size:12px;color:#cbd5e1;">Powód: ${firstErr}</span>`;
+      } else {
+        if (iconEl) iconEl.innerText = '';
+        if (titleEl) {
+          titleEl.innerText = failedFiles > 0 ? 'Zakończono z ostrzeżeniami' : 'Parsowanie zakończone sukcesem!';
+          titleEl.style.color = failedFiles > 0 ? '#f59e0b' : '';
+        }
+        let summaryText = `Pomyślnie przetworzono <strong>${successfulFiles}</strong> z ${queue.length} plików.`;
+        summaryText += ` Zapisano łącznie <strong>${totalEpochsAccumulator.toLocaleString('pl-PL')}</strong> nowych punktów telemetrycznych GPS.`;
+        if (failedFiles > 0) {
+          summaryText += ` <span style="color:#f87171;">(${failedFiles} z błędami)</span>.`;
+        }
+        successDetails.innerHTML = summaryText;
       }
-      summaryText += '.';
-      if (failedFiles > 0) {
-        summaryText += ` <span style="color:#f87171;">(${failedFiles} z błędami)</span>.`;
-      }
-      successDetails.innerHTML = summaryText;
     }
 
     if (btnViewMap) btnViewMap.style.display = 'inline-flex';
@@ -858,6 +1188,9 @@
     if (btnAbort) btnAbort.addEventListener('click', abortProcessing);
     if (btnStart) btnStart.addEventListener('click', checkForDuplicatesBeforeStart);
     if (btnClearQueue) btnClearQueue.addEventListener('click', clearQueue);
+
+    // Natychmiastowa synchronizacja z serwerem po odświeżeniu strony
+    syncWithServerJobs();
 
     if (btnViewMap) {
       btnViewMap.addEventListener('click', () => {

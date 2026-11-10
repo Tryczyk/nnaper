@@ -1,23 +1,32 @@
+# Dane lokalne, logi telemetryczne i uploady
+data/
 *.txt
+*.log
 *.pkl
-*.pyc
-*.pyo
-*.pyd
-__pycache__/
+
+# Binarki Go i pliki wykonywalne
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/nnaper-server
+/nnaper-server.exe
+/nnaper-parser
+/nnaper-parser.exe
+
+# Dane map i kafelki wektorowe
 *.pbf
-.env
-maps/runtime-config.local.js
 *.pmtiles
 *.gz
 *.zip
 osm_data/
-.agents
-data/uploads/
-*.exe
-nnaper-parser
-nnaper-parser.exe
-go-parser/nnaper-parser
-go-parser/nnaper-parser.exe
+
+# Środowisko i konfiguracje lokalne
+.env
+maps/runtime-config.local.js
+.agents/
+
+# Systemowe pliki tymczasowe
 .DS_Store
 Thumbs.db
-

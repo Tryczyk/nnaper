@@ -1,225 +1,163 @@
 <p align="center">
-  <img src="assets/header.svg" alt="Header" width="100%" />
+  <img src="assets/header.svg" alt="NNAPER Header" width="100%" />
 </p>
 
-Aplikacja do przetwarzania i analizy danych lokalizacyjnych GPS w formacie **NMEA**, bezpośredniego strumieniowania ich do bazy danych **PostgreSQL + PostGIS**, serwowania przez mikroserwis **FastAPI** oraz zaawansowanej wizualizacji na interaktywnej mapie opartej o kafelki wektorowe **PMTiles** (OpenStreetMap), dynamiczne kafelki **MVT** ze śladem telemetrycznym oraz silnik routingu **OSRM**.
+# NNAPER - Telemetryczna Platforma GPS w Go & PostGIS
 
-## Jak to działa?
+Wysokowydajna platforma do strumieniowego przetwarzania, dociągania do sieci dróg (**Map Matching OSRM**), analizy i interaktywnej wizualizacji danych telemetrycznych GPS (NMEA, GPX, CSV). 
 
-1. **Infrastruktura kontenerowa (Docker Compose):**
+Cały backend oraz silnik przetwarzania danych zostały zrealizowane w **Go 1.24**, współpracując z przestrzenną bazą danych **PostgreSQL 16 + PostGIS 3.4**, lokalnym silnikiem routingu **OSRM**, wektorowym podkładem **PMTiles** (OpenStreetMap) oraz dynamicznym generowaniem kafelków wektorowych **MVT** (`ST_AsMVT`) bezpośrednio w locie.
 
-   * **PostGIS (`db`)**: Relacyjna baza przestrzenna zainicjalizowana schematem z pliku `init_db.sql`.
+---
 
-   * **Backend API (`api`)**: Serwis FastAPI z asynchroniczną pulą połączeń `psycopg-pool`, serwujący kafelki wektorowe w locie (`ST_AsMVT`), telemetrię epok, strukturę dat oraz zoptymalizowany strumień danych odtwarzacza (`/api/playback-day`).
+## Główne możliwości platformy
 
-   * **Silnik routingu (`osrm`)**: Lokalna usługa OSRM na porcie `5000` wyznaczająca trasy drogowe na podstawie danych OpenStreetMap.
+### 1. Ultra-szybki silnik parsowania i Map Matchingu (Go)
+* **Wydajność 15–30 MB/s**: Przetwarzanie plików o rozmiarach od kilkunastu kilobajtów do gigabajtów (nawet 650 MB – 10 GB) ze znikomym zużyciem pamięci RAM (~25 MB).
+* **Obsługiwane formaty**:
+  * **NMEA 0183**: Pełna agregacja cykli `$GPRMC`, `$GPGGA`, `$GPGSV` (satelity) oraz `$GSENSORD` (trójosiowe przeciążenia akcelerometru $G_x$, $G_y$, $G_z$).
+  * **GPX**: Ślady rejestrowane przez zegarki i aplikacje sportowe (Garmin, Strava).
+  * **CSV**: Elastyczne dopasowywanie kolumn (szerokość, długość, czas, akceleracja).
+* **Map Matching OSRM**: Równoległe (16 wątków) dopasowywanie punktów do sieci ulic z natychmiastową interpolacją wektorową geometrii dróg (`LINESTRING`).
+* **Zadania w tle i trwałość**: Pełna asynchroniczność zadań na serwerze z zapisem stanu na dysku (`jobs_state.json`). Odświeżenie przeglądarki czy restart serwera nie gubi postępu ani importowanego pliku.
 
-   * **Kafelki podkładowe OpenStreetMap (`tiles-downloader` + `tiles-generator`)**: Automatycznie pobiera wyciąg OSM z serwisu Geofabrik i kompresuje go do pojedynczego archiwum wektorowego `.pmtiles` za pomocą narzędzia **Planetiler**.
+### 2. Dynamiczne kafelki wektorowe MVT (`/api/track/{z}/{x}/{y}.pbf`)
+* Generowanie kafelków wektorowych bezpośrednio z PostGIS w czasie poniżej 10 milisekund za pomocą `ST_AsMVT` i `ST_TileEnvelope`.
+* **Przełącznik Snap ON / OFF**: Natychmiastowe przełączanie między surowym śladem GPS a trasą dociągniętą do geometrii dróg bez ponownego pobierania danych.
+* Pamięć podręczna w RAM z automatycznym czyszczeniem po dodaniu lub usunięciu śladów.
 
-   * **Serwer WWW (`tiles-server`)**: Serwer HTTP **Caddy** generujący dynamiczną konfigurację runtime (`maps/runtime-config.local.js`) oraz serwujący interfejs mapy i kafelki PMTiles na porcie `8080`.
+### 3. Zintegrowany odtwarzacz trasy (Playback & HUD)
+* Płynna animacja rekonstrukcji przejazdu wzdłuż zarejestrowanego śladu GPS z kursem pojazdu.
+* **Wskaźniki HUD w czasie rzeczywistym**: prędkość chwilowa, wysokość n.p.m., przeciążenia 3D ($G_x$, $G_y$, $G_z$), dystans, czas i satelity.
+* **Interaktywny panel wykresów**:
+  * **Profil wysokości**: Wykres przewyższeń z interaktywnym suwakiem przewijania trasy.
+  * **Diagram G-G (G-Force)**: Wizualizacja sił odśrodkowych w zakrętach oraz przyspieszania / hamowania.
+* **Wizualizacja satelitów**: Lokalny skyplot (nieboskłon) oraz sferyczny model orbity MEO (~20 200 km).
 
-   * **Wskaźnik gotowości (`open-browser`)**: Pomocniczy kontener oczekujący na uruchomienie serwera WWW i wypisujący gotowy link do mapy w logach kontenera.
+### 4. Planer trasy i integracja z Google Maps
+* Wyznaczanie optymalnej trasy drogowej przez silnik OSRM z dowolną liczbą punktów pośrednich i zmianą kolejności.
+* Dwukierunkowa integracja: wczytywanie gotowych tras ze schowka (z linku Google Maps) oraz eksport jednym kliknięciem do Google Maps.
 
-2. **Parsowanie i strumieniowanie NMEA (`data/raw.txt`):**
+### 5. Zaawansowany eksport danych
+* Eksport tras z dowolnego zakresu (dzień, miesiąc, rok, widok mapy, wszystko):
+  * **HTML**: Samodzielna interaktywna mapa offline ze śladem i profilem trasy.
+  * **PNG / SVG**: Render grafiki wektorowej/rastrowej z gradientem prędkości i legendą.
+  * **GIF**: Płynna animacja przejazdu samochodu.
+  * **GPX / CSV / GeoJSON / KML**: Standardowe formaty do analizy w arkuszach lub importu do Garmin, Strava i Google Earth.
 
-   * Skrypt `src/parser.py` odczytuje surowe logi NMEA linia po linii, grupując komunikaty (`$GPRMC`, `$GPGGA`, `$GPGSV`, `$GSENSORD`) w spójne epoki pomiarowe.
+---
 
-   * Dokonuje walidacji jakości fixa GPS i współczynnika HDOP oraz zapisuje dane partiami za pomocą protokołu `COPY` do bufora ze stagingiem i klauzulą `ON CONFLICT (profile_id, timestamp) DO NOTHING`.
-
-   * **Map Matching i obsługa Offroad:** Podczas parsowania partii punktów skrypt opcjonalnie dociąga trajektorię do sieci drogowej OSM za pośrednictwem OSRM Match API (`/match/v1/driving`). Jeśli punkt mieści się w progu odległości (`SNAP_THRESHOLD_METERS`, domyślnie 30 m), zapisywany jest w `geom_snapped`. Jeśli przekracza próg (zjazd w teren, parking, las), zapisywany jest w `geom_offroad`, a `geom_snapped` pozostaje `NULL`. Zawsze zachowywana jest też pełna surowa geometria GPS w `geom`.
-
-   * Plik `data/state.txt` oraz unikalne ograniczenie na poziomie bazy danych gwarantują brak duplikatów przy minimalnym zużyciu pamięci RAM.
-
-3. **Interfejs mapy i narzędzia wizualizacji (`maps/map.html`):**
-
-   * **Sterowanie warstwami podkładu (lewy panel):** Dynamiczne drzewo warstw z możliwością edycji kolorów, grubości linii, linii przerywanych, obwódek oraz widoczności elementów, zarządzane przez `maps/layer-manager.js` z persystencją w `localStorage`.
-
-   * **Panel tras i nawigacji (prawy panel):** Szybki dostęp do replayu trasy, planera, niezależnych przełączników widoku 3D (ukształtowanie terenu oraz trójwymiarowe bryły budynków) oraz **przełącznika snapowania do dróg (Snap do dróg ON/OFF)** z natychmiastowym przeładowaniem kafelków MVT.
-
-   * **Hierarchiczny filtr czasu:** Selektywny wybór lat, miesięcy i poszczególnych dni z dynamicznym przełączaniem warstw MVT bez konieczności ponownego ładowania danych pozostałych miesięcy.
-
-   * **Inspekcja punktów telemetrycznych:** Kliknięcie w dowolny punkt śladu GPS otwiera panel szczegółów epoki: dokładny timestamp, prędkość, wysokość, przeciążenia 3D z akcelerometru (Gx, Gy, Gz) oraz bieżący układ satelitów.
-
-   * **Wizualizacja satelitów:** Wizualizacja pozycji i promieni satelitów w dwóch trybach: lokalnym (nieboskłon / skyplot) lub globalnym sferycznym (orbita MEO \~20 200 km).
-
-   * **Wyszukiwarka i geokodowanie:** Zintegrowana wyszukiwarka miejsc i adresów bazująca na API Photon (Komoot).
-
-   * **Planer trasy drogowej (OSRM + Google Maps):** Wyznaczanie optymalnej trasy drogowej z obsługą wielu punktów pośrednich, zamiany kolejności (góra/dół), obsługi z menu kontekstowego mapy (PPM), kalkulacji czasu i dystansu przez OSRM, a także importowania trasy ze schowka (z linku Google Maps) oraz eksportu i otwierania trasy w Google Maps.
-
-4. **Zintegrowany odtwarzacz trasy (Playback & HUD):**
-
-   * Odtwarzacz trasy GPS jest w pełni zintegrowany z główną mapą (`maps/map.html`, uruchamiany przyciskiem *Replay trasy* lub parametrem `?mode=playback`).
-
-   * Symulacja przejazdu samochodem wzdłuż zarejestrowanego śladu GPS z automatycznym obrotem pojazdu zgodnie z kursem.
-
-   * Panel HUD w czasie rzeczywistym: godzina pomiaru, prędkość chwilowa, wysokość n.p.m., przeciążenia akcelerometru 3D (Gx, Gy, Gz), dystans dnia, średnia prędkość oraz liczba satelitów.
-
-   * Suwak osi czasu, regulacja tempa odtwarzania (1x–60x), automatyczne śledzenie pojazdu kamerą oraz synchronizowana wizualizacja promieni satelitów.
-
-5. **Wykresy analityczne (`src/plots.py`):**
-
-   * Skrypt generuje samodzielne, interaktywne wykresy HTML w bibliotece Plotly (m.in. trójwymiarowy rozkład przeciążeń akcelerometru 3D, biegunowy skyplot satelitów, histogramy prędkości i kursów, analiza parametrów DOP).
-
-6. **Zaawansowany eksport tras (`maps/export-manager.js`):**
-
-   * Eksport z dowolnego zakresu czasowego: wybrany dzień, miesiąc, rok, aktywne filtry lub cała baza danych ("wszystko").
-   * Obsługa wielu formatów:
-     * **HTML**: Samodzielna interaktywna mapa offline ze śladem, profilem wysokości i prędkości oraz mini-odtwarzaczem.
-     * **PNG**: Wyrenderowany obraz HD ze śladem pokolorowanym prędkością, statystykami trasy i legendą.
-     * **SVG**: Czysty wektor o nieskończonej rozdzielczości z gradientem i profilem trasy.
-     * **GIF**: Płynna animacja rekonstrukcji przejazdu pojazdu z licznikiem parametrów w czasie rzeczywistym.
-     * **GPX / CSV / GeoJSON / KML**: Standardowe formaty do analizy w arkuszach lub importu do Garmin, Strava i Google Earth.
-
-## Struktura projektu
+## Architektura i struktura projektu
 
 ```
 nnaper/
-├── data/
-│   ├── raw.txt             # Surowe logi NMEA z urządzenia GPS (nieśledzone w Git)
-│   └── state.txt           # Numer ostatnio przetworzonej linii z raw.txt
-├── osm_data/               # Dane przestrzenne, wyciągi i kafelki:
-│   ├── *.osm.pbf           # Pobrany wyciąg OSM (np. pomorskie.osm.pbf, ignorowany w Git)
-│   └── *.pmtiles           # Wygenerowane kafelki wektorowe PMTiles (ignorowane w Git)
-├── maps/
-│   ├── app.js              # Główna logika interfejsu mapy, filtr czasu i inspekcja epok
-│   ├── layer-manager.js    # Zarządzanie stylami warstw, persystencja w localStorage i synchronizacja
-│   ├── layers.js           # Konfiguracja stylu MapLibre i definicje warstw PMTiles
-│   ├── playback-inline.js  # Zintegrowany moduł odtwarzacza trasy GPS (HUD + animacja samochodu)
-│   ├── route-inline.js     # Moduł planowania trasy OSRM, obsługa Google Maps i menu kontekstowego
-│   ├── runtime-config.js   # Domyślna konfiguracja runtime URL-i API, OSRM i kafelków
-│   ├── styles.css          # Style CSS paneli, HUD-a, planera i wyszukiwarki
-│   └── map.html            # Główny interfejs mapy z panelami bocznymi i odtwarzaczem
-├── src/
-│   ├── constants.py        # Stałe konfiguracyjne i ścieżki projektu
-│   ├── parser.py           # Parsowanie NMEA i zapis epok do PostgreSQL/PostGIS (COPY)
-│   ├── server.py           # Backend FastAPI (dynamiczne MVT, telemetria epok, playback, pula połączeń)
-│   └── utils.py            # Narzędzia pomocnicze (dekodowanie współrzędnych i czasu NMEA)
-├── .env.example            # Wzór zmiennych środowiskowych
-├── docker-compose.yml      # PostGIS, FastAPI, OSRM, Planetiler, Caddy i pomocniczy launcher
-├── init_db.sql             # Schemat bazy danych, relacje, indeksy GiST i unikalne ograniczenia
-├── pyproject.toml          # Konfiguracja środowiska i zależności (uv)
-└── README.md
+├── assets/                  # Ikony, logotypy i grafiki wektorowe SVG
+├── cmd/                     # Punkty wejściowe aplikacji wykonywalnych:
+│   └── nnaper-parser/       # Samodzielne narzędzie CLI parsera (nnaper-parser.exe)
+├── data/                    # Dane lokalne, logi telemetryczne, stan (ignorowane w Git)
+├── internal/                # Pakiety domenowe serwera Go:
+│   ├── auth/                # Rejestracja, logowanie, tokeny i profile użytkowników
+│   ├── config/              # Konfiguracja środowiska (.env)
+│   ├── dates/               # Hierarchiczne drzewo lat, miesięcy i dni
+│   ├── db/                  # Pula połączeń pgxpool PostgreSQL/PostGIS
+│   ├── epochs/              # Punkty telemetryczne, usuwanie, odtwarzanie (playback-day)
+│   ├── export/              # Pobieranie i generowanie eksportu danych
+│   ├── jobs/                # Menedżer asynchronicznych zadań w tle i recovery
+│   ├── parser/              # Silnik strumieniowego parsowania NMEA/GPX/CSV i OSRM
+│   └── tiles/               # Dynamiczne kafelki wektorowe MVT (ST_AsMVT) i cache
+├── maps/                    # Statyczne pliki frontendu (HTML, CSS, JS):
+│   ├── app.js               # Główna logika interfejsu mapy i filtr czasu
+│   ├── auth-manager.js      # Panel logowania, rejestracji i profili
+│   ├── export-manager.js    # Eksport tras (HTML, PNG, SVG, GIF, GPX, CSV, KML)
+│   ├── layer-manager.js     # Dynamiczny edytor stylów warstw mapy
+│   ├── layers.js            # Definicje stylów MapLibre i kafelków PMTiles
+│   ├── map.html             # Główny widok aplikacji
+│   ├── parser-manager.js    # Modal importu, upload i monitoring zadań z ETA
+│   ├── playback-inline.js   # Odtwarzacz trasy (HUD, G-G diagram, profil wysokości)
+│   ├── route-inline.js      # Planer tras OSRM i integracja z Google Maps
+│   ├── runtime-config.js    # Konfiguracja endpointów API i OSRM
+│   └── styles.css           # Stylizacja interfejsu
+├── osm_data/                # Pobrane wyciągi OSM (.osm.pbf) i podkład (.pmtiles)
+├── osrm/                    # Profile routingu OSRM (car.lua)
+├── .env.example             # Wzór zmiennych środowiskowych
+├── docker-compose.yml       # Orkiestracja: PostGIS, Go API, OSRM, Planetiler, Caddy
+├── Dockerfile               # Wielostopniowy build kontenera produkcyjnego Go
+├── go.mod                   # Definicja modułu Go i zależności
+├── go.sum                   # Sumy kontrolne zależności Go
+├── init_db.sql              # Inicjalizacja schematu bazy PostGIS i indeksów GiST
+├── main.go                  # Główny punkt wejścia serwera Go (Chi router, port 8000)
+└── README.md                # Dokumentacja techniczna platformy
 ```
 
-## Stos technologiczny
+---
 
-* **Środowisko i język:** Python 3.14, menedżer pakietów [uv](https://docs.astral.sh/uv/)
+## Wymagania systemowe
 
-* **Baza danych przestrzennych:** PostgreSQL 16 + PostGIS 3.4
+* **Zainstalowane Go 1.24+** (przy uruchamianiu natywnym)
+* **Docker Desktop / Docker Compose** (przy uruchamianiu kontenerowym)
+* **Baza PostgreSQL 16 z rozszerzeniem PostGIS 3.4**
 
-* **Backend API:** FastAPI, Uvicorn, sterownik `psycopg` (binary z obsługą `COPY`), pula połączeń `psycopg-pool`
+---
 
-* **Silnik routingu:** OSRM Backend (MLD)
+## Uruchomienie aplikacji
 
-* **Generowanie kafelków:** [Planetiler](https://github.com/onthegomap/planetiler) (Docker)
+### Wariant 1: Uruchomienie natywne (Windows / Linux)
 
-* **Format kafelków:** PMTiles (OpenMapTiles schema) oraz dynamiczne Mapbox Vector Tiles (MVT) generowane w locie przez `ST_AsMVT`
+1. **Uruchomienie bazy danych i OSRM**:
+   ```powershell
+   docker compose up -d db osrm
+   ```
 
-* **Frontend / Wizualizacja:** MapLibre GL JS, PMTiles Protocol, Caddy Server
+2. **Kompilacja i start serwera Go**:
+   ```powershell
+   # Windows:
+   go build -o nnaper-server.exe .
+   .\nnaper-server.exe
 
-* **Formaty danych:** NMEA 0183 ($GPRMC, $GPGGA, $GPGSV, $GSENSORD), PBF (OpenStreetMap), GeoJSON
+   # Linux / macOS:
+   go build -o nnaper-server .
+   ./nnaper-server
+   ```
+   Serwer wystartuje na porcie `8000`, serwując zarówno API, jak i interfejs mapy (`http://localhost:8000/maps/map.html`).
 
-## Wymagania wstępne
+---
 
-* Zainstalowany **Python 3.14+**
+### Wariant 2: Uruchomienie pełnego środowiska w Dockerze
 
-* Zainstalowane narzędzie [**uv**](https://docs.astral.sh/uv/)
+Wszystkie usługi (PostGIS, Serwer Go, OSRM, Planetiler, Caddy) uruchamiane są jednym poleceniem:
 
-* Zainstalowany **Docker Desktop** (wraz z obsługą Docker Compose)
-
-## Konfiguracja i uruchomienie
-
-### 1. Przygotowanie repozytorium
-
-```
-git clone https://github.com/Tryczyk/nnaper.git
-cd nnaper
-```
-
-### 2. Konfiguracja zmiennych środowiskowych
-
-Skopiuj wzorzec pliku konfiguracyjnego:
-
-```
-cp .env.example .env
+```bash
+docker compose up -d --build
 ```
 
-W pliku `.env` wskaż parametry połączenia z bazą oraz nazwę wyciągu OSM (domyślnie `pomorskie.osm.pbf`):
+Usługi będą dostępne pod adresami:
+* **Interfejs mapy i podkład wektorowy (Caddy)**: <http://localhost:8080/maps/map.html>
+* **Backend API (Go)**: <http://localhost:8000>
+* **Silnik nawigacji drogowej (OSRM)**: <http://localhost:5000>
 
-```
-DB_URL=postgresql://nnaper:nnaper@localhost:5432/nnaper_db
-OSM_FILE_NAME=pomorskie.osm.pbf
-PMTILES_FILE=pomorskie.pmtiles
-API_PORT=8000
-OSRM_PORT=5000
-TILES_PORT=8080
-API_PUBLIC_URL=http://localhost:8000
-TILES_PUBLIC_URL=http://localhost:8080
-OSRM_PUBLIC_URL=http://localhost:5000
-```
+---
 
-Pozostale ustawienia, miedzy innymi dane dostepowe Postgresa, CORS, Photon, sciezki parsera oraz progi walidacji GPS, sa opisane w pliku `.env.example`.
+## Samodzielne narzędzie CLI do importu danych (`nnaper-parser`)
 
-> **Uwaga:** Pliki `.pbf`, `.pmtiles`, dane bazy danych oraz duże pliki `data/raw.txt` są wykluczone z repozytorium Git przez `.gitignore`.
+Jeśli chcesz przetworzyć potężny plik danych GPS bezpośrednio z wiersza poleceń bez otwierania przeglądarki:
 
-### 3. Uruchomienie infrastruktury (Docker Compose)
+```powershell
+# Kompilacja narzędzia CLI:
+go build -o nnaper-parser.exe ./cmd/nnaper-parser
 
-Uruchom całe środowisko w tle:
-
-```
-docker compose up -d
+# Uruchomienie parsowania:
+.\nnaper-parser.exe -file "C:\dane\raw.txt" -profile-id "UUID-PROFILU" -snap=true
 ```
 
-> Kontenery automatycznie:
->
-> 1. Zainicjalizują bazę danych PostGIS i schemat z `init_db.sql`.
->
-> 2. Uruchomią backend FastAPI na porcie `8000`.
->
-> 3. Sprawdzą obecność kafelków `.pmtiles` i wyciągu `.osm.pbf` (w razie potrzeby pobiorą plik z Geofabrik i wygenerują kafelki).
->
-> 4. Przygotują graf OSRM i uruchomią silnik routingu na porcie `5000`.
->
-> 5. Uruchomią serwer WWW Caddy serwujący mapę na porcie `8080`.
->
-> 6. Wypiszą bezpośredni link do mapy w logach kontenera pomocniczego `nnaper_browser_launcher`.
+Flagi CLI:
+* `-file` — Ścieżka do pliku `.txt`, `.log`, `.nmea`, `.gpx` lub `.csv`
+* `-profile-id` — Identyfikator profilu docelowego w bazie danych
+* `-snap` — Dociąganie do sieci dróg OSRM (domyślnie `true`)
+* `-concurrency` — Liczba równoległych workerów OSRM (domyślnie `16`)
+* `-chunk-size` — Rozmiar partii punktów wysyłanych do OSRM `/match` (domyślnie `100`)
 
-### 4. Przetwarzanie danych lokalizacyjnych (Python)
+---
 
-Umieść surowy plik z logami GPS w katalogu `data/raw.txt`, a następnie uruchom proces parsowania:
+## Licencja
 
-```
-uv run src/parser.py
-```
-
-*Skrypt strumieniuje odczytane epoki bezpośrednio do bazy PostgreSQL/PostGIS, logując postęp przetwarzania w konsoli i aktualizując znacznik w `data/state.txt`.*
-
-### 5. Dostęp do aplikacji
-
-* **Główna mapa, nawigacja i planer trasy:**
-
-  <http://localhost:8080/maps/map.html>
-
-* **Zintegrowany odtwarzacz trasy GPS (Playback & HUD):**
-
-  <http://localhost:8080/maps/map.html?mode=playback>
-
-## Przy pracy nad bazą lub parserem
-
-W trakcie modyfikowania struktury SQL (`init_db.sql`) lub reguł kwalifikacji w parserze (`src/parser.py`), najszybszym sposobem na zresetowanie środowiska, wyczyszczenie wolumenu i załadowanie danych od nowa jest sekwencja:
-
-### Pełny reset bazy i ponowne sparsowanie logów
-
-```
-# 1. Zatrzymanie kontenerów i usunięcie starego wolumenu bazy
-docker compose down -v
-
-# 2. Uruchomienie infrastruktury na czysto (z załadowaniem aktualnego init_db.sql)
-docker compose up -d
-
-# 3. Zresetowanie wskaźnika przetworzonych linii do zera
-Set-Content -Path "data/state.txt" -Value "0"
-
-# 4. Ponowne uruchomienie parsera
-uv run src/parser.py
-```
+Projekt objęty licencją MIT.

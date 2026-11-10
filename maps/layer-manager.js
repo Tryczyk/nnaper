@@ -1313,7 +1313,7 @@
     if (fromMapClick) {
       const hint = document.getElementById('studio-pipette-hint');
       if (hint) {
-        hint.innerHTML = `🎯 Wskazano z mapy: <strong style="color:#38bdf8;">${layerId}</strong>. Dopasuj styl poniżej.`;
+        hint.innerHTML = `Wskazano z mapy: <strong style="color:#38bdf8;">${layerId}</strong>. Dopasuj styl poniżej.`;
       }
       const metaCard = document.querySelector('.studio-layer-meta-card');
       if (metaCard) {

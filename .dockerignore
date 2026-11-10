@@ -1,0 +1,10 @@
+osm_data/
+data/
+*.pbf
+*.pmtiles
+*.exe
+.git/
+.idea/
+.vscode/
+plots/
+

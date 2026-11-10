@@ -19,7 +19,10 @@ services:
     restart: unless-stopped
 
   api:
-    image: python:3.14-slim
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: nnaper-api:go
     container_name: nnaper_api
     working_dir: /app
     volumes:
@@ -30,10 +33,9 @@ services:
       - DB_URL=postgresql://${POSTGRES_USER:-nnaper}:${POSTGRES_PASSWORD:-nnaper}@db:5432/${POSTGRES_DB:-nnaper_db}
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
       - OSRM_URL=http://osrm:5000
-      - PYTHONPATH=/app
+      - PORT=8000
     command: >
-      sh -c "pip install --no-cache-dir fastapi uvicorn 'psycopg[binary]' psycopg-pool python-dotenv &&
-             uvicorn server:app --app-dir src --host 0.0.0.0 --port 8000 --reload"
+      sh -c "chmod +x /app/nnaper-server && exec /app/nnaper-server"
     depends_on:
       db:
         condition: service_healthy
@@ -135,7 +137,20 @@ services:
         \"  PHOTON_SEARCH_LIMIT: $${PHOTON_SEARCH_LIMIT},\" \\
         \"  PMTILES_FILE: '$${PMTILES_FILE}'\" \\
         \"});\" > /usr/share/caddy/maps/runtime-config.local.js && \\
-        caddy file-server --root /usr/share/caddy --listen :8080 --access-log"
+        printf '%s\\n' \\
+        \":8080 {\" \\
+        \"  root * /usr/share/caddy\" \\
+        \"  file_server\" \\
+        \"  header {\" \\
+        \"    Access-Control-Allow-Origin *\" \\
+        \"    Access-Control-Expose-Headers Content-Range, Accept-Ranges, Content-Length, ETag\" \\
+        \"  }\" \\
+        \"  @pmtiles path *.pmtiles\" \\
+        \"  header @pmtiles {\" \\
+        \"    Cache-Control no-store, no-cache, must-revalidate\" \\
+        \"  }\" \\
+        \"}\" > /etc/caddy/Caddyfile && \\
+        exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile"
     restart: unless-stopped
 
   open-browser:
