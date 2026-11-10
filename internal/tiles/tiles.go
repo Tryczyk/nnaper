@@ -166,6 +166,10 @@ func (s *Service) HandleGetTrackTile(w http.ResponseWriter, r *http.Request) {
 		activeGeom = "e.geom_line"
 		whereClauses = append(whereClauses,
 			"e.geom_line IS NOT NULL",
+			"e.geom_snapped IS NOT NULL",
+			"COALESCE(e.speed_kmh, 10) >= 3.5",
+			"ST_Distance(e.geom, e.geom_snapped) <= 0.00018",
+			"ST_Length(e.geom_line) BETWEEN 0.000015 AND 0.00042",
 			"e.geom_line && ST_Transform(ST_TileEnvelope($1, $2, $3), 4326)",
 		)
 		latLonFields = "NULL::numeric AS latitude, NULL::numeric AS longitude,"
@@ -236,7 +240,11 @@ func (s *Service) HandleGetTrackTile(w http.ResponseWriter, r *http.Request) {
 	whereSQL := strings.Join(whereClauses, " AND ")
 
 	var sqlQuery string
-	if mode == "osm" && z < 15 {
+	if mode == "osm" {
+		snapGrid := "0.00001"
+		if z >= 15 {
+			snapGrid = "0.00002"
+		}
 		sqlQuery = fmt.Sprintf(`
 			WITH bounds AS (
 				SELECT ST_TileEnvelope($1, $2, $3) AS geom
@@ -251,7 +259,7 @@ func (s *Service) HandleGetTrackTile(w http.ResponseWriter, r *http.Request) {
 					min(COALESCE(to_char(e.timestamp, 'YYYY-MM-DD"T"HH24:MI:SS'), 'None')) AS s,
 					NULL::numeric AS latitude,
 					NULL::numeric AS longitude,
-					ST_LineMerge(ST_SnapToGrid(ST_Collect(e.geom_line), 0.00001)) AS continuous_geom
+					ST_LineMerge(ST_SnapToGrid(ST_Collect(e.geom_line), %s)) AS continuous_geom
 				FROM epochs e
 				WHERE %s
 				GROUP BY
@@ -276,7 +284,7 @@ func (s *Service) HandleGetTrackTile(w http.ResponseWriter, r *http.Request) {
 			SELECT COALESCE(ST_AsMVT(tile_features, 'gps-track', 4096, 'geom'), ''::bytea)
 			FROM tile_features
 			WHERE geom IS NOT NULL;
-		`, whereSQL)
+		`, snapGrid, whereSQL)
 	} else {
 		sqlQuery = fmt.Sprintf(`
 			WITH bounds AS (

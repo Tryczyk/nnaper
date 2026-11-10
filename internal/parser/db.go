@@ -187,29 +187,52 @@ func (db *DBClient) SaveBatch(ctx context.Context, epochs []*Epoch) error {
 	}
 
 	_, err = tx.Exec(ctx, `
+		UPDATE epochs e
+		SET
+			geom_snapped = COALESCE(
+				CASE WHEN s.geom_snapped IS NOT NULL AND s.geom_snapped != '' THEN ST_GeomFromEWKT(s.geom_snapped) ELSE NULL END,
+				e.geom_snapped
+			),
+			geom_line = COALESCE(
+				CASE WHEN s.geom_line IS NOT NULL AND s.geom_line != '' THEN ST_GeomFromEWKT(s.geom_line) ELSE NULL END,
+				e.geom_line
+			)
+		FROM staging_epochs s
+		WHERE s.timestamp IS NOT NULL
+		  AND e.profile_id = s.profile_id
+		  AND e.timestamp = s.timestamp
+		  AND ((s.geom_snapped IS NOT NULL AND s.geom_snapped != '') OR (s.geom_line IS NOT NULL AND s.geom_line != ''));
+	`)
+	if err != nil {
+		return fmt.Errorf("błąd UPDATE epochs z staging_epochs: %w", err)
+	}
+
+	_, err = tx.Exec(ctx, `
 		INSERT INTO epochs (
 			epoch_id, profile_id, timestamp, geom, speed_kmh, g_x, g_y, g_z, geom_snapped, geom_line
 		)
-		SELECT DISTINCT ON (profile_id, timestamp)
-			epoch_id,
-			profile_id,
-			timestamp,
-			ST_GeomFromEWKT(geom),
-			speed_kmh,
-			g_x,
-			g_y,
-			g_z,
-			CASE WHEN geom_snapped IS NOT NULL AND geom_snapped != '' THEN ST_GeomFromEWKT(geom_snapped) ELSE NULL END,
-			CASE WHEN geom_line IS NOT NULL AND geom_line != '' THEN ST_GeomFromEWKT(geom_line) ELSE NULL END
-		FROM staging_epochs
-		WHERE timestamp IS NOT NULL
-		ORDER BY profile_id, timestamp, (geom_snapped IS NOT NULL AND geom_snapped != '') DESC, epoch_id
-		ON CONFLICT (profile_id, timestamp) DO UPDATE SET
-			geom_snapped = COALESCE(EXCLUDED.geom_snapped, epochs.geom_snapped),
-			geom_line = COALESCE(EXCLUDED.geom_line, epochs.geom_line);
+		SELECT DISTINCT ON (s.profile_id, s.timestamp)
+			s.epoch_id,
+			s.profile_id,
+			s.timestamp,
+			ST_GeomFromEWKT(s.geom),
+			s.speed_kmh,
+			s.g_x,
+			s.g_y,
+			s.g_z,
+			CASE WHEN s.geom_snapped IS NOT NULL AND s.geom_snapped != '' THEN ST_GeomFromEWKT(s.geom_snapped) ELSE NULL END,
+			CASE WHEN s.geom_line IS NOT NULL AND s.geom_line != '' THEN ST_GeomFromEWKT(s.geom_line) ELSE NULL END
+		FROM staging_epochs s
+		WHERE s.timestamp IS NOT NULL
+		  AND NOT EXISTS (
+			SELECT 1 FROM epochs e
+			WHERE e.profile_id = s.profile_id AND e.timestamp = s.timestamp
+		  )
+		ORDER BY s.profile_id, s.timestamp, (s.geom_snapped IS NOT NULL AND s.geom_snapped != '') DESC, s.epoch_id
+		ON CONFLICT (epoch_id) DO NOTHING;
 	`)
 	if err != nil {
-		return fmt.Errorf("błąd INSERT INTO epochs ON CONFLICT: %w", err)
+		return fmt.Errorf("błąd INSERT INTO epochs: %w", err)
 	}
 
 	if len(satelliteRows) > 0 {

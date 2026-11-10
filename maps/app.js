@@ -52,12 +52,13 @@ const protocol = new pmtiles.Protocol();
 maplibregl.addProtocol("pmtiles", protocol.tile);
 
 const apiBaseUrl = (window.NNAPER_CONFIG?.API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '');
-const photonUrl = (window.NNAPER_CONFIG?.PHOTON_URL || 'https://photon.komoot.io').replace(/\/$/, '');
+const photonUrl = (window.NNAPER_CONFIG?.PHOTON_URL || `${apiBaseUrl}/api/geocode`).replace(/\/$/, '');
 const photonBbox = window.NNAPER_CONFIG?.PHOTON_BBOX || '14.1,53.9,19.9,55.9';
 const photonSearchLimit = window.NNAPER_CONFIG?.PHOTON_SEARCH_LIMIT || 50;
 const TRACK_TILES_URL = `${apiBaseUrl}/api/track/{z}/{x}/{y}.pbf`;
 const trackMonthLayers = new Map();
 const trackLayerIds = new Set(['GPS / Ślad trasy']);
+window.trackMonthLayers = trackMonthLayers;
 
 const map = new maplibregl.Map({
   container: 'map',
@@ -74,6 +75,10 @@ const map = new maplibregl.Map({
 });
 window.mapInstance = map;
 window.map = map;
+
+if (typeof window.registerInfrastructureMapIcons === 'function') {
+  window.registerInfrastructureMapIcons(map);
+}
 
 const navControl = new maplibregl.NavigationControl({ showCompass: true });
 map.addControl(navControl, 'bottom-right');
@@ -98,6 +103,8 @@ let gpsMasterDesiredState = null;
 let allGpsDayCheckboxes = [];
 let allGpsYearCheckboxes = [];
 const dayNodesRegistry = new Map();
+window.dayNodesRegistry = dayNodesRegistry;
+window.allGpsYearCheckboxes = allGpsYearCheckboxes;
 
 function syncGpsMasterCheckbox() {
   if (!gpsMasterCheckbox) return;
@@ -243,9 +250,14 @@ function updateTrackFilters() {
           map.setLayoutProperty(lineLayerId, 'visibility', 'visible');
           map.setFilter(lineLayerId, activeFilter);
           map.setPaintProperty(lineLayerId, 'line-color', trackBaseColor);
-          const curWidth = map.getPaintProperty(lineLayerId, 'line-width') || 4.5;
-          map.setPaintProperty(lineLayerId, 'line-width', curWidth);
-          map.setPaintProperty(lineLayerId, 'line-opacity', 0.95);
+          map.setPaintProperty(lineLayerId, 'line-width', [
+            'interpolate', ['linear'], ['zoom'],
+            8, 1.8,
+            12, 2.5,
+            15, 3.2,
+            18, 4.0
+          ]);
+          map.setPaintProperty(lineLayerId, 'line-opacity', 0.92);
         }
         if (hasCircle) {
           map.setLayoutProperty(layerId, 'visibility', 'none');
@@ -296,6 +308,8 @@ function applyTrackDateFilter(dayCheckboxes, isEverythingActive) {
   }
   updateTrackFilters();
 }
+window.updateTrackFilters = updateTrackFilters;
+window.syncGpsMasterCheckbox = syncGpsMasterCheckbox;
 
 // Jednorazowe zresetowanie konfiguracji kolorów do wartości domyślnych
 if (localStorage.getItem('nnaper_reset_colors_v2') !== 'true') {
@@ -553,8 +567,14 @@ function addTrackMonthLayers(months) {
       },
       paint: {
         'line-color': trackBaseColor,
-        'line-width': 4.5,
-        'line-opacity': 0.95
+        'line-width': [
+          'interpolate', ['linear'], ['zoom'],
+          8, 1.8,
+          12, 2.5,
+          15, 3.2,
+          18, 4.0
+        ],
+        'line-opacity': 0.92
       }
     });
 
@@ -1079,6 +1099,7 @@ function autoBuildTree() {
       setupSnapButtons();
     }
   }
+  window.autoBuildTree = autoBuildTree;
 
   window.addEventListener('nnaper_auth_changed', () => {
     try {
@@ -1539,6 +1560,47 @@ function autoBuildTree() {
         </div>
       </div>
 
+      <div class="section-box" style="margin-top: 8px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <h4 style="margin:0;">Manualna edycja punktu</h4>
+          <button type="button" id="btn-drag-epoch-map" class="route-action-btn" style="padding:3px 8px; font-size:11px; background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.4); color:#38bdf8;">Przeciągnij na mapie</button>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; font-size:11.5px;">
+          <label style="display:flex; flex-direction:column; gap:2px; color:#94a3b8;">
+            Szerokość (Lat)
+            <input type="number" id="edit-epoch-lat" step="0.000001" value="${Number(e.latitude).toFixed(6)}" style="background:#0f172a; color:#f8fafc; border:1px solid #334155; border-radius:4px; padding:4px 6px; font-size:12px;" />
+          </label>
+          <label style="display:flex; flex-direction:column; gap:2px; color:#94a3b8;">
+            Długość (Lon)
+            <input type="number" id="edit-epoch-lon" step="0.000001" value="${Number(e.longitude).toFixed(6)}" style="background:#0f172a; color:#f8fafc; border:1px solid #334155; border-radius:4px; padding:4px 6px; font-size:12px;" />
+          </label>
+          <label style="display:flex; flex-direction:column; gap:2px; color:#94a3b8;">
+            Prędkość (km/h)
+            <input type="number" id="edit-epoch-speed" step="0.1" value="${e.speed_kmh !== null && e.speed_kmh !== undefined ? Number(e.speed_kmh).toFixed(1) : '0.0'}" style="background:#0f172a; color:#f8fafc; border:1px solid #334155; border-radius:4px; padding:4px 6px; font-size:12px;" />
+          </label>
+          <label style="display:flex; flex-direction:column; gap:2px; color:#94a3b8;">
+            Czas pomiaru
+            <input type="text" id="edit-epoch-ts" value="${e.timestamp || ''}" style="background:#0f172a; color:#f8fafc; border:1px solid #334155; border-radius:4px; padding:4px 6px; font-size:12px;" />
+          </label>
+          <label style="display:flex; flex-direction:column; gap:2px; color:#94a3b8;">
+            G-X
+            <input type="number" id="edit-epoch-gx" step="0.01" value="${e.g_x !== null && e.g_x !== undefined ? Number(e.g_x).toFixed(3) : ''}" style="background:#0f172a; color:#f8fafc; border:1px solid #334155; border-radius:4px; padding:4px 6px; font-size:12px;" />
+          </label>
+          <label style="display:flex; flex-direction:column; gap:2px; color:#94a3b8;">
+            G-Y / G-Z
+            <div style="display:flex; gap:4px;">
+              <input type="number" id="edit-epoch-gy" step="0.01" value="${e.g_y !== null && e.g_y !== undefined ? Number(e.g_y).toFixed(3) : ''}" style="width:50%; background:#0f172a; color:#f8fafc; border:1px solid #334155; border-radius:4px; padding:4px;" />
+              <input type="number" id="edit-epoch-gz" step="0.01" value="${e.g_z !== null && e.g_z !== undefined ? Number(e.g_z).toFixed(3) : ''}" style="width:50%; background:#0f172a; color:#f8fafc; border:1px solid #334155; border-radius:4px; padding:4px;" />
+            </div>
+          </label>
+        </div>
+        <div style="display:flex; gap:6px; margin-top:8px;">
+          <button type="button" id="btn-save-epoch-edit" class="route-action-btn" style="flex:1; background:#0284c7; color:#fff; border:none; padding:6px 10px; border-radius:6px; font-weight:600; cursor:pointer;">Zapisz zmiany punktu</button>
+          <button type="button" id="btn-clone-new-epoch" class="route-action-btn" style="background:rgba(16,185,129,0.16); color:#34d399; border:1px solid rgba(16,185,129,0.4); padding:6px 10px; border-radius:6px; font-weight:600; cursor:pointer;" title="Utwórz nowy punkt obok bieżącego">+ Dodaj nowy</button>
+        </div>
+        <div id="edit-epoch-feedback" style="font-size:11px; margin-top:4px; color:#38bdf8;"></div>
+      </div>
+
       <div class="point-actions-box">
         <button type="button" class="btn-delete-epoch" id="btn-delete-epoch" data-epoch-id="${e.epoch_id}">
           Trwale usuń ten punkt z bazy
@@ -1550,6 +1612,10 @@ function autoBuildTree() {
     `;
 
       if (content) content.innerHTML = html;
+
+      if (typeof window.bindManualEpochEditor === 'function') {
+        window.bindManualEpochEditor(e);
+      }
 
       const btnDelEpoch = document.getElementById('btn-delete-epoch');
       if (btnDelEpoch) {
