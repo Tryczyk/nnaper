@@ -298,6 +298,162 @@
       card.appendChild(profilesContainer);
       this.populateProfilesUI(profilesContainer, token);
 
+      // 2.6. Statystyki konta (Max prędkość, Przejechane km, Unikalne km, Min/Max Lat/Lon + 4 punkty skrajne N/S/E/W)
+      const statsBox = document.createElement('div');
+      statsBox.id = 'account-stats-box';
+      statsBox.className = 'auth-account-stats-box';
+      statsBox.style.cssText = 'width: 100%; margin-top: 8px; padding: 8px 10px; background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(56, 189, 248, 0.22); border-radius: 8px; box-sizing: border-box; font-size: 11.5px; color: #e2e8f0;';
+      statsBox.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:4px;">
+          <span style="font-weight:700; color:#38bdf8; font-size:11px; text-transform:uppercase; letter-spacing:0.04em;">Statystyki konta</span>
+          <button type="button" id="btn-refresh-account-stats" title="Odśwież statystyki" style="background:none; border:none; color:#94a3b8; cursor:pointer; font-size:11px; padding:0 2px;">Odśwież</button>
+        </div>
+        <div id="account-stats-content" style="display:flex; flex-direction:column; gap:4px;">
+          <div style="display:flex; justify-content:space-between;"><span style="color:#94a3b8;">Max prędkość:</span><strong id="stat-max-speed">-- km/h</strong></div>
+          <div style="display:flex; justify-content:space-between;"><span style="color:#94a3b8;">Przejechane km:</span><strong id="stat-total-km">-- km</strong></div>
+          <div style="display:flex; justify-content:space-between;"><span style="color:#94a3b8;">Unikalne km:</span><strong id="stat-unique-km" style="color:#10b981;">-- km</strong></div>
+          <div style="display:flex; justify-content:space-between; font-size:10.5px;"><span style="color:#94a3b8;">Min / Max Lat:</span><span id="stat-lat-range" style="font-family:monospace;">-- / --</span></div>
+          <div style="display:flex; justify-content:space-between; font-size:10.5px;"><span style="color:#94a3b8;">Min / Max Lon:</span><span id="stat-lon-range" style="font-family:monospace;">-- / --</span></div>
+          <div style="margin-top:4px; padding-top:5px; border-top:1px dashed rgba(255,255,255,0.1); display:flex; flex-direction:column; gap:4px;">
+            <label style="display:flex; align-items:center; justify-content:space-between; font-size:10.5px; color:#cbd5e1; cursor:pointer;">
+              <span>Skrajne punkty na mapie (N/S/E/W):</span>
+              <input type="checkbox" id="chk-show-extreme-points" checked style="accent-color:#38bdf8; cursor:pointer;" />
+            </label>
+            <div id="extreme-points-Grid" style="display:grid; grid-template-columns:1fr 1fr; gap:4px;">
+              <button type="button" data-dir="north" class="extreme-pt-btn" style="padding:3px 5px; font-size:10px; background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.35); color:#38bdf8; border-radius:4px; cursor:pointer; text-align:left;">N: --</button>
+              <button type="button" data-dir="south" class="extreme-pt-btn" style="padding:3px 5px; font-size:10px; background:rgba(244,63,94,0.12); border:1px solid rgba(244,63,94,0.35); color:#fb7185; border-radius:4px; cursor:pointer; text-align:left;">S: --</button>
+              <button type="button" data-dir="east" class="extreme-pt-btn" style="padding:3px 5px; font-size:10px; background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.35); color:#34d399; border-radius:4px; cursor:pointer; text-align:left;">E: --</button>
+              <button type="button" data-dir="west" class="extreme-pt-btn" style="padding:3px 5px; font-size:10px; background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.35); color:#fbbf24; border-radius:4px; cursor:pointer; text-align:left;">W: --</button>
+            </div>
+          </div>
+        </div>
+      `;
+      card.appendChild(statsBox);
+
+      const renderExtremePointsOnMap = (st) => {
+        const map = window.mapInstance || window.map;
+        if (!map) return;
+
+        if (Array.isArray(window._extremePointMarkers)) {
+          window._extremePointMarkers.forEach(m => { try { m.remove(); } catch (e) {} });
+        }
+        window._extremePointMarkers = [];
+
+        const chk = statsBox.querySelector('#chk-show-extreme-points');
+        const show = chk ? chk.checked : true;
+        if (!show || !st) return;
+
+        const defs = [
+          { key: 'north_point', dir: 'north', code: 'N', title: 'Najbardziej na Północ (N)', color: '#38bdf8' },
+          { key: 'south_point', dir: 'south', code: 'S', title: 'Najbardziej na Południe (S)', color: '#f43f5e' },
+          { key: 'east_point',  dir: 'east',  code: 'E', title: 'Najbardziej na Wschód (E)',  color: '#10b981' },
+          { key: 'west_point',  dir: 'west',  code: 'W', title: 'Najbardziej na Zachód (W)',  color: '#f59e0b' }
+        ];
+
+        defs.forEach(d => {
+          const pt = st[d.key];
+          if (!pt || typeof pt.lat !== 'number' || typeof pt.lon !== 'number') return;
+
+          const el = document.createElement('div');
+          el.className = `extreme-point-marker extreme-point-${d.dir}`;
+          el.style.cssText = 'display:flex; flex-direction:column; align-items:center; pointer-events:auto; cursor:pointer; z-index:25;';
+          el.title = `${d.title}: ${pt.lat.toFixed(5)}°, ${pt.lon.toFixed(5)}°`;
+          el.innerHTML = `
+            <div style="padding:2px 6px; border-radius:999px; background:rgba(15,23,42,0.94); border:1.5px solid ${d.color}; color:${d.color}; font-size:10px; font-weight:800; white-space:nowrap; box-shadow:0 2px 8px rgba(0,0,0,0.65); margin-bottom:2px;">
+              ${d.title}
+            </div>
+            <div style="width:12px; height:12px; border-radius:50%; background:${d.color}; border:2px solid #ffffff; box-shadow:0 0 10px ${d.color};"></div>
+          `;
+          el.onclick = (ev) => {
+            ev.stopPropagation();
+            map.flyTo({ center: [pt.lon, pt.lat], zoom: Math.max(map.getZoom(), 14), duration: 750 });
+          };
+
+          if (window.maplibregl && window.maplibregl.Marker) {
+            const marker = new window.maplibregl.Marker({ element: el, anchor: 'bottom' })
+              .setLngLat([pt.lon, pt.lat])
+              .addTo(map);
+            window._extremePointMarkers.push(marker);
+          }
+        });
+      };
+
+      let lastStatsData = null;
+
+      const loadStats = async () => {
+        try {
+          const profId = (typeof window.getActiveProfileId === 'function') ? window.getActiveProfileId() : '';
+          const url = `${getApiBaseUrl()}/api/stats?token=${encodeURIComponent(token)}${profId ? '&profile_id=' + encodeURIComponent(profId) : ''}`;
+          const res = await fetch(url);
+          if (!res.ok) return;
+          const st = await res.json();
+          lastStatsData = st;
+          const elMaxSpd = statsBox.querySelector('#stat-max-speed');
+          const elTotKm = statsBox.querySelector('#stat-total-km');
+          const elUniqKm = statsBox.querySelector('#stat-unique-km');
+          const elLat = statsBox.querySelector('#stat-lat-range');
+          const elLon = statsBox.querySelector('#stat-lon-range');
+          if (elMaxSpd) elMaxSpd.innerText = `${Number(st.max_speed_kmh || 0).toFixed(1)} km/h`;
+          if (elTotKm) elTotKm.innerText = `${Number(st.total_km || 0).toFixed(2)} km`;
+          if (elUniqKm) elUniqKm.innerText = `${Number(st.unique_km || 0).toFixed(2)} km`;
+          if (elLat) {
+            elLat.innerText = (st.min_lat !== null && st.max_lat !== null && st.min_lat !== undefined)
+              ? `${Number(st.min_lat).toFixed(4)}° / ${Number(st.max_lat).toFixed(4)}°`
+              : 'Brak danych';
+          }
+          if (elLon) {
+            elLon.innerText = (st.min_lon !== null && st.max_lon !== null && st.min_lon !== undefined)
+              ? `${Number(st.min_lon).toFixed(4)}° / ${Number(st.max_lon).toFixed(4)}°`
+              : 'Brak danych';
+          }
+
+          const dirMap = {
+            north: { pt: st.north_point, label: 'N', val: st.north_point ? `${st.north_point.lat.toFixed(4)}°N` : '--' },
+            south: { pt: st.south_point, label: 'S', val: st.south_point ? `${st.south_point.lat.toFixed(4)}°N` : '--' },
+            east:  { pt: st.east_point,  label: 'E', val: st.east_point  ? `${st.east_point.lon.toFixed(4)}°E`  : '--' },
+            west:  { pt: st.west_point,  label: 'W', val: st.west_point  ? `${st.west_point.lon.toFixed(4)}°E`  : '--' }
+          };
+          statsBox.querySelectorAll('.extreme-pt-btn').forEach(btn => {
+            const dir = btn.getAttribute('data-dir');
+            const info = dirMap[dir];
+            if (!info) return;
+            btn.innerText = `${info.label}: ${info.val}`;
+            btn.onclick = () => {
+              const map = window.mapInstance || window.map;
+              if (map && info.pt && typeof info.pt.lat === 'number' && typeof info.pt.lon === 'number') {
+                map.flyTo({ center: [info.pt.lon, info.pt.lat], zoom: 14, duration: 750 });
+              }
+            };
+          });
+
+          renderExtremePointsOnMap(st);
+        } catch (e) {}
+      };
+      window.refreshAccountStats = loadStats;
+      setTimeout(loadStats, 80);
+
+      const chkExtreme = statsBox.querySelector('#chk-show-extreme-points');
+      if (chkExtreme) {
+        chkExtreme.onchange = () => renderExtremePointsOnMap(lastStatsData);
+      }
+
+      const refreshBtn = statsBox.querySelector('#btn-refresh-account-stats');
+      if (refreshBtn) refreshBtn.onclick = loadStats;
+
+      // 2.7. Przycisk otwierający Panel Ustawień Konta i Interfejsu
+      const settingsBtn = document.createElement('button');
+      settingsBtn.type = 'button';
+      settingsBtn.id = 'btn-open-account-settings';
+      settingsBtn.className = 'menu-action-btn';
+      settingsBtn.style.cssText = 'width: 100%; margin-top: 8px; padding: 7px 10px; font-size: 12px; font-weight: 600; background: rgba(56, 189, 248, 0.14); border: 1px solid rgba(56, 189, 248, 0.35); color: #38bdf8; border-radius: 6px; cursor: pointer;';
+      settingsBtn.innerText = 'Ustawienia konta i interfejsu';
+      settingsBtn.onclick = () => {
+        if (typeof window.openSettingsModal === 'function') {
+          window.openSettingsModal();
+        }
+      };
+      card.appendChild(settingsBtn);
+
       // 3. Przycisk wylogowania
       const logoutBtn = document.createElement('button');
       logoutBtn.type = 'button';
@@ -856,6 +1012,29 @@
     setCachedProfiles(null);
     return await res.json();
   };
+
+  window.updateSessionUser = function (updatedUser) {
+    const s = getStoredSession();
+    if (s && updatedUser) {
+      s.user = Object.assign({}, s.user, updatedUser);
+      saveStoredSession(s);
+      if (window.AuthManager) {
+        window.AuthManager.render();
+      }
+    }
+  };
+
+  window.addEventListener('nnaper_profile_changed', () => {
+    if (typeof window.refreshAccountStats === 'function') {
+      window.refreshAccountStats();
+    }
+  });
+
+  window.addEventListener('nnaper_epochs_deleted', () => {
+    if (typeof window.refreshAccountStats === 'function') {
+      window.refreshAccountStats();
+    }
+  });
 
   window.AuthManager = new AuthManager();
 

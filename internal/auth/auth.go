@@ -160,6 +160,26 @@ func (s *Service) HandleDeleteProfile(w http.ResponseWriter, r *http.Request) {
 	DeleteProfileHandler(s.pool, nil)(w, r)
 }
 
+func (s *Service) HandleUpdateSettings(w http.ResponseWriter, r *http.Request) {
+	UpdateSettingsHandler(s.pool)(w, r)
+}
+
+func (s *Service) HandleGetStats(w http.ResponseWriter, r *http.Request) {
+	GetAccountStatsHandler(s.pool)(w, r)
+}
+
+func (s *Service) HandleListPresets(w http.ResponseWriter, r *http.Request) {
+	ListPresetsHandler(s.pool)(w, r)
+}
+
+func (s *Service) HandleSavePreset(w http.ResponseWriter, r *http.Request) {
+	SavePresetHandler(s.pool)(w, r)
+}
+
+func (s *Service) HandleDeletePreset(w http.ResponseWriter, r *http.Request) {
+	DeletePresetHandler(s.pool)(w, r)
+}
+
 // Handlery HTTP
 
 func RegisterHandler(pool *pgxpool.Pool) http.HandlerFunc {
@@ -515,4 +535,389 @@ func DeleteProfileHandler(pool *pgxpool.Pool, onDeleted func()) http.HandlerFunc
 		})
 	}
 }
+
+// UpdateSettingsHandler obsługuje panel ustawień konta:
+// - zmianę Nicku (username)
+// - zmianę adresu e-mail (email)
+// - zmianę hasła (new_password)
+// - zapis ustawień widoczności przełączników/sliderów (ui_settings)
+func UpdateSettingsHandler(pool *pgxpool.Pool) http.HandlerFunc {
+	type reqBody struct {
+		Username        *string                `json:"username"`
+		Email           *string                `json:"email"`
+		CurrentPassword *string                `json:"current_password"`
+		NewPassword     *string                `json:"new_password"`
+		UISettings      map[string]interface{} `json:"ui_settings"`
+	}
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		token := ExtractToken(r)
+		user, err := GetUserFromToken(r.Context(), pool, token)
+		if err != nil || user == nil {
+			http.Error(w, `{"detail":"Wymagane logowanie."}`, http.StatusUnauthorized)
+			return
+		}
+
+		ctx := r.Context()
+
+		if r.Method == http.MethodGet {
+			var uiRaw []byte
+			_ = pool.QueryRow(ctx, `SELECT COALESCE(ui_settings, '{}'::jsonb) FROM users WHERE user_id = $1::uuid`, user.UserID).Scan(&uiRaw)
+			var uiSettings map[string]interface{}
+			_ = json.Unmarshal(uiRaw, &uiSettings)
+			if uiSettings == nil {
+				uiSettings = map[string]interface{}{}
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"status":      "ok",
+				"user":        user,
+				"ui_settings": uiSettings,
+			})
+			return
+		}
+
+		var req reqBody
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"detail":"Nieprawidłowy format JSON"}`, http.StatusBadRequest)
+			return
+		}
+
+		// 1. Zmiana Nicku
+		if req.Username != nil {
+			newNick := strings.TrimSpace(*req.Username)
+			if len(newNick) < 3 || len(newNick) > 64 {
+				http.Error(w, `{"detail":"Nick musi mieć od 3 do 64 znaków."}`, http.StatusBadRequest)
+				return
+			}
+			if !strings.EqualFold(newNick, user.Username) {
+				var existingID string
+				errDup := pool.QueryRow(ctx, `SELECT user_id FROM users WHERE LOWER(username) = LOWER($1) AND user_id != $2::uuid`, newNick, user.UserID).Scan(&existingID)
+				if errDup == nil {
+					http.Error(w, `{"detail":"Użytkownik o takim nicku już istnieje."}`, http.StatusBadRequest)
+					return
+				}
+			}
+			_, err = pool.Exec(ctx, `UPDATE users SET username = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2::uuid`, newNick, user.UserID)
+			if err != nil {
+				http.Error(w, `{"detail":"Błąd aktualizacji nicku"}`, http.StatusInternalServerError)
+				return
+			}
+			user.Username = newNick
+		}
+
+		// 2. Zmiana Emaila
+		if req.Email != nil {
+			newEmail := strings.TrimSpace(*req.Email)
+			if newEmail == "" {
+				_, _ = pool.Exec(ctx, `UPDATE users SET email = NULL, updated_at = CURRENT_TIMESTAMP WHERE user_id = $1::uuid`, user.UserID)
+				user.Email = nil
+			} else {
+				var existingID string
+				errDup := pool.QueryRow(ctx, `SELECT user_id FROM users WHERE LOWER(email) = LOWER($1) AND user_id != $2::uuid`, newEmail, user.UserID).Scan(&existingID)
+				if errDup == nil {
+					http.Error(w, `{"detail":"Ten adres e-mail jest już przypisany do innego konta."}`, http.StatusBadRequest)
+					return
+				}
+				_, err = pool.Exec(ctx, `UPDATE users SET email = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2::uuid`, newEmail, user.UserID)
+				if err != nil {
+					http.Error(w, `{"detail":"Błąd aktualizacji adresu e-mail"}`, http.StatusInternalServerError)
+					return
+				}
+				user.Email = &newEmail
+			}
+		}
+
+		// 3. Zmiana Hasła
+		if req.NewPassword != nil && strings.TrimSpace(*req.NewPassword) != "" {
+			newPass := strings.TrimSpace(*req.NewPassword)
+			if len(newPass) < 4 {
+				http.Error(w, `{"detail":"Nowe hasło musi mieć co najmniej 4 znaki."}`, http.StatusBadRequest)
+				return
+			}
+			if req.CurrentPassword != nil && strings.TrimSpace(*req.CurrentPassword) != "" {
+				var curHash string
+				if err := pool.QueryRow(ctx, `SELECT password_hash FROM users WHERE user_id = $1::uuid`, user.UserID).Scan(&curHash); err == nil {
+					if curHash != "placeholder_hash" && !VerifyPassword(strings.TrimSpace(*req.CurrentPassword), curHash) {
+						http.Error(w, `{"detail":"Aktualne hasło jest nieprawidłowe."}`, http.StatusBadRequest)
+						return
+					}
+				}
+			}
+			newHash := HashPassword(newPass)
+			_, err = pool.Exec(ctx, `UPDATE users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2::uuid`, newHash, user.UserID)
+			if err != nil {
+				http.Error(w, `{"detail":"Błąd aktualizacji hasła"}`, http.StatusInternalServerError)
+				return
+			}
+		}
+
+		// 4. Ustawienia widoczności UI (przełączniki, slidery)
+		var savedUISettings map[string]interface{}
+		if req.UISettings != nil {
+			uiBytes, _ := json.Marshal(req.UISettings)
+			_, _ = pool.Exec(ctx, `UPDATE users SET ui_settings = $1::jsonb, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2::uuid`, string(uiBytes), user.UserID)
+			savedUISettings = req.UISettings
+		} else {
+			var uiRaw []byte
+			_ = pool.QueryRow(ctx, `SELECT COALESCE(ui_settings, '{}'::jsonb) FROM users WHERE user_id = $1::uuid`, user.UserID).Scan(&uiRaw)
+			_ = json.Unmarshal(uiRaw, &savedUISettings)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":      "ok",
+			"message":     "Ustawienia konta zostały zapisane.",
+			"user":        user,
+			"ui_settings": savedUISettings,
+		})
+	}
+}
+
+// GetAccountStatsHandler oblicza statystyki konta:
+// - Max prędkość (max_speed_kmh)
+// - Przejechane kilometry (total_km)
+// - Przejechane unikalne kilometry wyłącznie ze zsnapowanych geometrii dróg geom_line (unique_km)
+// - Min / Max Lat / Lon (min_lat, max_lat, min_lon, max_lon)
+func GetAccountStatsHandler(pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		token := ExtractToken(r)
+		user, err := GetUserFromToken(r.Context(), pool, token)
+		if err != nil || user == nil {
+			http.Error(w, `{"detail":"Wymagane logowanie."}`, http.StatusUnauthorized)
+			return
+		}
+
+		ctx := r.Context()
+		profileID := strings.TrimSpace(r.URL.Query().Get("profile_id"))
+
+		var whereProfile string
+		var args []interface{}
+		if profileID != "" && profileID != "all" && profileID != "__all__" && len(profileID) == 36 {
+			whereProfile = "e.profile_id = $1::uuid AND e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = $2::uuid)"
+			args = []interface{}{profileID, user.UserID}
+		} else {
+			whereProfile = "e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = $1::uuid)"
+			args = []interface{}{user.UserID}
+		}
+
+		query := fmt.Sprintf(`
+			WITH filtered AS (
+				SELECT
+					e.timestamp,
+					COALESCE(e.geom_snapped, e.geom) AS pt,
+					e.geom_snapped,
+					e.geom_line,
+					LEAST(COALESCE(e.speed_kmh, 0), 300.0) AS speed_kmh
+				FROM epochs e
+				WHERE %s
+			)
+			SELECT
+				count(*) AS epochs_count,
+				count(DISTINCT timestamp::date) AS days_count,
+				COALESCE(round(max(speed_kmh)::numeric, 2), 0) AS max_speed_kmh,
+				COALESCE(round((sum(ST_Length(geom_line) * 85.0))::numeric, 2), 0) AS snapped_total_km,
+				COALESCE(round((count(DISTINCT CASE WHEN geom_snapped IS NOT NULL THEN ((floor(ST_X(geom_snapped) * 4000.0)::bigint << 32) | (floor(ST_Y(geom_snapped) * 4000.0)::bigint & 4294967295)) END) * 0.0235)::numeric, 2), 0) AS unique_km,
+				round(min(ST_Y(pt))::numeric, 6) AS min_lat,
+				round(max(ST_Y(pt))::numeric, 6) AS max_lat,
+				round(min(ST_X(pt))::numeric, 6) AS min_lon,
+				round(max(ST_X(pt))::numeric, 6) AS max_lon,
+				max(ARRAY[ST_Y(pt), ST_X(pt)]) AS north_pt,
+				min(ARRAY[ST_Y(pt), ST_X(pt)]) AS south_pt,
+				max(ARRAY[ST_X(pt), ST_Y(pt)]) AS east_pt,
+				min(ARRAY[ST_X(pt), ST_Y(pt)]) AS west_pt
+			FROM filtered;
+		`, whereProfile)
+
+		var epochsCount, daysCount int64
+		var maxSpeed, totalKM, uniqueKM float64
+		var minLat, maxLat, minLon, maxLon *float64
+		var northPt, southPt, eastPt, westPt []float64
+
+		err = pool.QueryRow(ctx, query, args...).Scan(
+			&epochsCount,
+			&daysCount,
+			&maxSpeed,
+			&totalKM,
+			&uniqueKM,
+			&minLat,
+			&maxLat,
+			&minLon,
+			&maxLon,
+			&northPt,
+			&southPt,
+			&eastPt,
+			&westPt,
+		)
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"detail":"Błąd obliczania statystyk: %v"}`, err), http.StatusInternalServerError)
+			return
+		}
+
+		// Jeśli w bazie są punkty bez geom_line (zaimportowane bez snapa), doliczamy ich dystans całkowity
+		if totalKM == 0 && epochsCount > 1 {
+			fallbackDistQuery := fmt.Sprintf(`
+				WITH ordered AS (
+					SELECT
+						COALESCE(e.geom_snapped, e.geom) AS pt,
+						LAG(COALESCE(e.geom_snapped, e.geom)) OVER (PARTITION BY e.profile_id, e.timestamp::date ORDER BY e.timestamp ASC) AS prev_pt
+					FROM epochs e
+					WHERE %s
+				)
+				SELECT COALESCE(round((sum(ST_Distance(pt::geography, prev_pt::geography)) / 1000.0)::numeric, 2), 0)
+				FROM ordered
+				WHERE prev_pt IS NOT NULL AND ST_Distance(pt::geography, prev_pt::geography) < 2000;
+			`, whereProfile)
+			_ = pool.QueryRow(ctx, fallbackDistQuery, args...).Scan(&totalKM)
+		}
+
+		if uniqueKM > totalKM && totalKM > 0 {
+			totalKM = uniqueKM
+		}
+
+		resp := map[string]interface{}{
+			"epochs_count":  epochsCount,
+			"days_count":    daysCount,
+			"max_speed_kmh": maxSpeed,
+			"total_km":      totalKM,
+			"unique_km":     uniqueKM,
+			"min_lat":       minLat,
+			"max_lat":       maxLat,
+			"min_lon":       minLon,
+			"max_lon":       maxLon,
+		}
+		if len(northPt) == 2 {
+			resp["north_point"] = map[string]float64{"lat": northPt[0], "lon": northPt[1]}
+		}
+		if len(southPt) == 2 {
+			resp["south_point"] = map[string]float64{"lat": southPt[0], "lon": southPt[1]}
+		}
+		if len(eastPt) == 2 {
+			resp["east_point"] = map[string]float64{"lat": eastPt[1], "lon": eastPt[0]}
+		}
+		if len(westPt) == 2 {
+			resp["west_point"] = map[string]float64{"lat": westPt[1], "lon": westPt[0]}
+		}
+
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(resp)
+	}
+}
+
+type LayerPreset struct {
+	PresetID  string                 `json:"preset_id"`
+	Name      string                 `json:"name"`
+	IsDefault bool                   `json:"is_default"`
+	Config    map[string]interface{} `json:"config"`
+	CreatedAt string                 `json:"created_at"`
+}
+
+func ListPresetsHandler(pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		token := ExtractToken(r)
+		user, _ := GetUserFromToken(r.Context(), pool, token)
+
+		var list []LayerPreset
+		if user != nil {
+			rows, err := pool.Query(r.Context(), `
+				SELECT preset_id::text, name, config, created_at
+				FROM layer_presets
+				WHERE user_id = $1::uuid
+				ORDER BY created_at ASC
+			`, user.UserID)
+			if err == nil {
+				defer rows.Close()
+				for rows.Next() {
+					var p LayerPreset
+					var cfgRaw []byte
+					var t time.Time
+					if err := rows.Scan(&p.PresetID, &p.Name, &cfgRaw, &t); err == nil {
+						_ = json.Unmarshal(cfgRaw, &p.Config)
+						p.CreatedAt = t.Format(time.RFC3339)
+						list = append(list, p)
+					}
+				}
+			}
+		}
+		if list == nil {
+			list = []LayerPreset{}
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"presets": list,
+		})
+	}
+}
+
+func SavePresetHandler(pool *pgxpool.Pool) http.HandlerFunc {
+	type reqBody struct {
+		Name   string                 `json:"name"`
+		Config map[string]interface{} `json:"config"`
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		token := ExtractToken(r)
+		user, err := GetUserFromToken(r.Context(), pool, token)
+		if err != nil || user == nil {
+			http.Error(w, `{"detail":"Wymagane logowanie."}`, http.StatusUnauthorized)
+			return
+		}
+
+		var req reqBody
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"detail":"Nieprawidłowy JSON"}`, http.StatusBadRequest)
+			return
+		}
+		name := strings.TrimSpace(req.Name)
+		if len(name) < 1 || len(name) > 120 {
+			http.Error(w, `{"detail":"Nazwa presetu musi mieć od 1 do 120 znaków."}`, http.StatusBadRequest)
+			return
+		}
+
+		cfgBytes, _ := json.Marshal(req.Config)
+		var presetID string
+		var createdAt time.Time
+		err = pool.QueryRow(r.Context(), `
+			INSERT INTO layer_presets (user_id, name, config)
+			VALUES ($1::uuid, $2, $3::jsonb)
+			ON CONFLICT (user_id, name) DO UPDATE
+			SET config = EXCLUDED.config
+			RETURNING preset_id::text, created_at
+		`, user.UserID, name, string(cfgBytes)).Scan(&presetID, &createdAt)
+		if err != nil {
+			http.Error(w, `{"detail":"Błąd zapisu presetu"}`, http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"status": "ok",
+			"preset": LayerPreset{
+				PresetID:  presetID,
+				Name:      name,
+				Config:    req.Config,
+				CreatedAt: createdAt.Format(time.RFC3339),
+			},
+		})
+	}
+}
+
+func DeletePresetHandler(pool *pgxpool.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		token := ExtractToken(r)
+		user, err := GetUserFromToken(r.Context(), pool, token)
+		if err != nil || user == nil {
+			http.Error(w, `{"detail":"Wymagane logowanie."}`, http.StatusUnauthorized)
+			return
+		}
+		presetID := chi.URLParam(r, "preset_id")
+		_, err = pool.Exec(r.Context(), `DELETE FROM layer_presets WHERE preset_id = $1::uuid AND user_id = $2::uuid`, presetID, user.UserID)
+		if err != nil {
+			http.Error(w, `{"detail":"Błąd usuwania presetu"}`, http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}
+}
+
 
