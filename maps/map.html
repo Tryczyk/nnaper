@@ -11,7 +11,7 @@
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
   <script src="https://unpkg.com/pmtiles@3.0.7/dist/pmtiles.js"></script>
-  <link rel="stylesheet" href="styles.css?v=20261109_v44_bottom_gap_removed" />
+  <link rel="stylesheet" href="styles.css?v=20261110_v52_all_fixes" />
 </head>
 
 <body>
@@ -254,36 +254,80 @@
                                       <!-- Sekcja profilu i logowania użytkownika -->
                                       <div id="auth-panel-container"></div>
 
-                                      <div class="menu-section-divider"></div>
+                                      <div class="right-panel-group">
+                                        <div class="right-panel-group-title">Nawigacja i analiza</div>
+                                        <div class="right-tools-grid">
+                                          <button id="btn-open-planner-menu" class="menu-action-btn">
+                                            Planowanie trasy
+                                          </button>
+                                          <button id="btn-locate-user" class="menu-action-btn"
+                                            title="Pokaż Twoją aktualną pozycję GPS na mapie">
+                                            Moja lokalizacja
+                                          </button>
+                                          <button id="btn-open-playback" class="menu-action-btn">
+                                            Replay trasy
+                                          </button>
+                                          <button id="btn-open-timelapse" class="menu-action-btn"
+                                            title="Uruchom timelapse chronologicznego zapełniania się mapy">
+                                            Timelapse
+                                          </button>
+                                        </div>
+                                      </div>
 
-                                      <button id="btn-open-playback" class="menu-action-btn">
-                                        Replay trasy
-                                      </button>
-                                      <button id="btn-open-planner-menu" class="menu-action-btn">
-                                        Planowanie trasy
-                                      </button>
-                                      <button id="btn-open-export" class="menu-action-btn"
-                                        title="Otwórz panel eksportu trasy (HTML, PNG, SVG, GIF, GPX, CSV, GeoJSON, KML)">
-                                        Eksport trasy
-                                      </button>
-                                      <button id="btn-open-parser" class="menu-action-btn"
-                                        title="Otwórz panel importu i parsowania plików GPS">
-                                        Parsowanie plików
-                                      </button>
+                                      <div class="right-panel-group">
+                                        <div class="right-panel-group-title">Narzędzia i dane</div>
+                                        <div class="right-tools-grid">
+                                          <button id="btn-toggle-batch-edit" class="menu-action-btn"
+                                            title="Zaznaczaj punkty ramką jak na pulpicie, przesuwaj o wektor lub usuwaj">
+                                            Edycja punktów
+                                          </button>
+                                          <button id="btn-open-drawing" class="menu-action-btn"
+                                            title="Rysuj wielokąty i ścieżki na mapie z pomiarem pola powierzchni, obwodu i długości">
+                                            Rysowanie
+                                          </button>
+                                          <button id="btn-open-export" class="menu-action-btn"
+                                            title="Otwórz panel eksportu trasy">
+                                            Eksport trasy
+                                          </button>
+                                          <button id="btn-open-parser" class="menu-action-btn"
+                                            title="Otwórz panel importu i parsowania plików GPS">
+                                            Parsowanie plików
+                                          </button>
+                                        </div>
+                                        <button id="btn-open-settings" class="menu-action-btn right-settings-btn"
+                                          title="Ustawienia konta, presety mapy i widoczność przełączników">
+                                          Panel ustawień
+                                        </button>
+                                      </div>
 
-                                      <div class="menu-section-divider"></div>
-
-                                      <button id="btn-toggle-3d-map" class="menu-toggle-btn" type="button"
-                                        aria-pressed="false"
-                                        title="Włącz lub wyłącz widok 3D (ukształtowanie terenu i perspektywa 3D)">
-                                        <span class="menu-toggle-label">Mapa 3D</span>
-                                        <span class="toggle-switch"></span>
-                                      </button>
-                                      <button id="btn-toggle-3d-buildings" class="menu-toggle-btn" type="button"
-                                        aria-pressed="false" title="Włącz lub wyłącz trójwymiarowe bryły budynków">
-                                        <span class="menu-toggle-label">Budynki 3D</span>
-                                        <span class="toggle-switch"></span>
-                                      </button>
+                                      <div class="right-panel-group">
+                                        <div class="right-panel-group-title">Widok i nakładki</div>
+                                        <div class="right-toggles-grid">
+                                          <button id="btn-toggle-heatmap" class="menu-toggle-btn" type="button"
+                                            aria-pressed="false"
+                                            title="Włącz kafelkową heatmapę zagęszczenia punktów GPS">
+                                            <span class="menu-toggle-label">Heatmapa</span>
+                                            <span class="toggle-switch"></span>
+                                          </button>
+                                          <button id="btn-toggle-fog" class="menu-toggle-btn" type="button"
+                                            aria-pressed="false"
+                                            title="Włącz mechanikę odkrywania mapy">
+                                            <span class="menu-toggle-label">Odkrywanie mapy</span>
+                                            <span class="toggle-switch"></span>
+                                          </button>
+                                          <button id="btn-toggle-3d-map" class="menu-toggle-btn" type="button"
+                                            aria-pressed="false"
+                                            title="Włącz lub wyłącz widok 3D">
+                                            <span class="menu-toggle-label">Mapa 3D</span>
+                                            <span class="toggle-switch"></span>
+                                          </button>
+                                          <button id="btn-toggle-3d-buildings" class="menu-toggle-btn" type="button"
+                                            aria-pressed="false" title="Włącz lub wyłącz trójwymiarowe bryły budynków">
+                                            <span class="menu-toggle-label">Budynki 3D</span>
+                                            <span class="toggle-switch"></span>
+                                          </button>
+                                        </div>
+                                      </div>
                                     </div>
                                   </div>
 
@@ -454,6 +498,14 @@
                                 </div>
 
                                 <div id="route-planner-panel" class="route-planner-panel" aria-hidden="true">
+                                  <button id="btn-toggle-route-planner" class="menu-toggle-handle route-planner-toggle-handle"
+                                    type="button" title="Zwiń panel planowania trasy" aria-label="Zwiń panel planowania trasy">
+                                    <svg class="toggle-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                      stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                      <polyline points="15 18 9 12 15 6"></polyline>
+                                    </svg>
+                                  </button>
+                                  <div class="route-planner-scroll-body">
                                   <div class="route-planner-header">
                                     <h3>Planowanie trasy</h3>
                                     <div style="display: flex; gap: 4px;">
@@ -497,8 +549,13 @@
                                   <div id="route-planner-stats"></div>
                                   <div class="route-planner-actions">
                                     <button class="route-action-btn" id="btn-route-google-maps" type="button"
-                                      title="Otwórz trasę w Google Maps w nowej karcie">
+                                      title="Otwórz trasę (do 10 znaczników) w Google Maps w nowej karcie">
                                       Otwórz w Google
+                                    </button>
+                                    <button class="route-action-btn" id="btn-route-download-gpx" type="button"
+                                      style="background:#0f766e; border-color:#14b8a6;"
+                                      title="Pobierz dokładny ślad GPX 1:1 dla aplikacji nawigacyjnych (OsmAnd, Organic Maps, Garmin)">
+                                      Pobierz GPX (1:1)
                                     </button>
                                   </div>
                                   <div id="route-google-output" class="route-google-output" style="display: none;">
@@ -513,6 +570,7 @@
                                         rel="noopener noreferrer" title="Otwórz w Google Maps w nowej karcie">Otwórz</a>
                                     </div>
                                     <div id="route-google-feedback" class="route-google-feedback"></div>
+                                  </div>
                                   </div>
                                 </div>
 
@@ -1033,14 +1091,15 @@
 
   <script src="runtime-config.js"></script>
   <script src="runtime-config.local.js"></script>
-  <script src="auth-manager.js?v=20261108_v37_fix_syntax_ok"></script>
-  <script src="layers.js?v=20261109_v45_fix_pmtiles_cache"></script>
-  <script src="layer-manager.js?v=20261108_v38_real_progress"></script>
-  <script src="app.js?v=20261109_v45_fix_pmtiles_cache"></script>
-  <script src="playback-inline.js?v=20261110_v46_replay_dates_fixed"></script>
-  <script src="route-inline.js?v=20261108_v38_real_progress"></script>
-  <script src="export-manager.js?v=20261109_v42_export_day"></script>
-  <script src="parser-manager.js?v=20261109_v41_sync_persistent"></script>
+  <script src="auth-manager.js?v=20261110_v52_all_fixes"></script>
+  <script src="layers.js?v=20261110_v52_all_fixes"></script>
+  <script src="layer-manager.js?v=20261110_v52_all_fixes"></script>
+  <script src="app.js?v=20261110_v52_all_fixes"></script>
+  <script src="playback-inline.js?v=20261110_v52_all_fixes"></script>
+  <script src="route-inline.js?v=20261110_v52_all_fixes"></script>
+  <script src="export-manager.js?v=20261110_v52_all_fixes"></script>
+  <script src="parser-manager.js?v=20261110_v52_all_fixes"></script>
+  <script src="features-manager.js?v=20261110_v52_all_fixes"></script>
 </body>
 
 </html>

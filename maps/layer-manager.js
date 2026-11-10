@@ -11,6 +11,279 @@
   'use strict';
 
   const STORAGE_KEY = 'nnaper_layer_customizations';
+  const PRESETS_STORAGE_KEY = 'nnaper_custom_layer_presets';
+
+  const DEFAULT_LAYER_PRESETS = [
+    {
+      preset_id: 'default_standard',
+      name: 'Domyślny',
+      is_default: true,
+      config: {
+        version: 1,
+        layers: {},
+        categories: {
+          'Przyroda': true,
+          'Woda': true,
+          'Drogi': true,
+          'Ruch alternatywny': true,
+          'Punkty POI': true,
+          'Infrastruktura drogowa': true,
+          'Granice i Etykiety': true
+        },
+        settings3D: { map3D: false, buildings3D: false }
+      }
+    },
+    {
+      preset_id: 'default_road_safety',
+      name: 'Bezpieczeństwo i Fotoradary',
+      is_default: true,
+      config: {
+        version: 1,
+        layers: {
+          'Przyroda/Lasy': { visibility: 'none' },
+          'Przyroda/Parki': { visibility: 'none' },
+          'Przyroda/Trawy': { visibility: 'none' },
+          'Przyroda/Wydmy i plaże': { visibility: 'none' },
+          'Punkty POI/Miejsca kultu': { visibility: 'none' },
+          'Punkty POI/Gastronomia': { visibility: 'none' },
+          'Punkty POI/Sklepy i usługi': { visibility: 'none' },
+          'Infrastruktura drogowa/Fotoradary': { visibility: 'visible', circleRadius: 7.5 },
+          'Infrastruktura drogowa/Odcinkowe pomiary prędkości': { visibility: 'visible', lineWidth: 3.5 },
+          'Infrastruktura drogowa/Sygnalizacja drogowa': { visibility: 'visible', circleRadius: 5.5 },
+          'Infrastruktura drogowa/Progi zwalniające': { visibility: 'visible', circleRadius: 5.5 },
+          'Infrastruktura drogowa/Przejścia dla pieszych': { visibility: 'visible', circleRadius: 4.5 }
+        },
+        categories: {
+          'Przyroda': false,
+          'Woda': true,
+          'Drogi': true,
+          'Ruch alternatywny': false,
+          'Punkty POI': false,
+          'Infrastruktura drogowa': true,
+          'Granice i Etykiety': true
+        },
+        settings3D: { map3D: false, buildings3D: false }
+      }
+    },
+    {
+      preset_id: 'default_minimal_gps',
+      name: 'Minimalistyczny',
+      is_default: true,
+      config: {
+        version: 1,
+        layers: {
+          'Przyroda/Lasy': { visibility: 'none' },
+          'Przyroda/Parki': { visibility: 'none' },
+          'Przyroda/Trawy': { visibility: 'none' },
+          'Przyroda/Wydmy i plaże': { visibility: 'none' },
+          'Ruch alternatywny/Drogi rowerowe': { visibility: 'none' },
+          'Ruch alternatywny/Chodniki i deptaki': { visibility: 'none' },
+          'Punkty POI/Miejsca kultu': { visibility: 'none' },
+          'Punkty POI/Gastronomia': { visibility: 'none' },
+          'Punkty POI/Opieka zdrowotna': { visibility: 'none' },
+          'Punkty POI/Sklepy i usługi': { visibility: 'none' },
+          'Infrastruktura drogowa/Przejścia dla pieszych': { visibility: 'none' },
+          'Infrastruktura drogowa/Progi zwalniające': { visibility: 'none' },
+          'Infrastruktura drogowa/Sygnalizacja drogowa': { visibility: 'none' },
+          'Drogi/Autostrady i ekspresówki': { color: '#334155', lineWidth: 2.2 },
+          'Drogi/Drogi główne': { color: '#1e293b', lineWidth: 1.6 },
+          'Drogi/Ulice osiedlowe': { color: '#1e293b', lineWidth: 1.0 }
+        },
+        categories: {
+          'Przyroda': false,
+          'Woda': true,
+          'Drogi': true,
+          'Ruch alternatywny': false,
+          'Punkty POI': false,
+          'Infrastruktura drogowa': false,
+          'Granice i Etykiety': true
+        },
+        settings3D: { map3D: false, buildings3D: false }
+      }
+    },
+    {
+      preset_id: 'default_city_poi_3d',
+      name: 'Eksploracja Miasta',
+      is_default: true,
+      config: {
+        version: 1,
+        layers: {
+          'Punkty POI/Miejsca kultu': { visibility: 'visible', circleRadius: 5.5 },
+          'Punkty POI/Gastronomia': { visibility: 'visible', circleRadius: 5.5 },
+          'Punkty POI/Opieka zdrowotna': { visibility: 'visible', circleRadius: 5.5 },
+          'Punkty POI/Sklepy i usługi': { visibility: 'visible', circleRadius: 5.5 }
+        },
+        categories: {
+          'Przyroda': true,
+          'Woda': true,
+          'Drogi': true,
+          'Ruch alternatywny': true,
+          'Punkty POI': true,
+          'Infrastruktura drogowa': true,
+          'Granice i Etykiety': true
+        },
+        settings3D: { map3D: false, buildings3D: true }
+      }
+    }
+  ];
+
+  function getCustomPresets() {
+    try {
+      const raw = localStorage.getItem(PRESETS_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) {}
+    return [];
+  }
+
+  function saveCustomPresetsLocal(list) {
+    try {
+      localStorage.setItem(PRESETS_STORAGE_KEY, JSON.stringify(list || []));
+    } catch (e) {}
+  }
+
+  function getAllPresets() {
+    return [...DEFAULT_LAYER_PRESETS, ...getCustomPresets()];
+  }
+
+  async function syncPresetsFromServer() {
+    const token = (typeof window.getAuthToken === 'function') ? window.getAuthToken() : '';
+    if (!token) return getAllPresets();
+    const apiBase = (window.NNAPER_CONFIG?.API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '');
+    try {
+      const res = await fetch(`${apiBase}/api/presets?token=${encodeURIComponent(token)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.presets)) {
+          saveCustomPresetsLocal(data.presets);
+        }
+      }
+    } catch (e) {}
+    return getAllPresets();
+  }
+
+  async function createCustomPreset(name, mapInstance) {
+    const cleanName = String(name || '').trim();
+    if (!cleanName) return null;
+    const currentCfg = JSON.parse(JSON.stringify(getStoredConfig()));
+    const presetObj = {
+      preset_id: 'custom_' + Date.now(),
+      name: cleanName,
+      is_default: false,
+      config: currentCfg,
+      created_at: new Date().toISOString()
+    };
+
+    const token = (typeof window.getAuthToken === 'function') ? window.getAuthToken() : '';
+    const apiBase = (window.NNAPER_CONFIG?.API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '');
+    if (token) {
+      try {
+        const res = await fetch(`${apiBase}/api/presets?token=${encodeURIComponent(token)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ name: cleanName, config: currentCfg })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.preset) {
+            presetObj.preset_id = data.preset.preset_id;
+          }
+        }
+      } catch (e) {}
+    }
+
+    const list = getCustomPresets().filter(p => p.name.toLowerCase() !== cleanName.toLowerCase());
+    list.push(presetObj);
+    saveCustomPresetsLocal(list);
+    window.dispatchEvent(new CustomEvent('nnaper_presets_updated'));
+    return presetObj;
+  }
+
+  async function deleteCustomPreset(presetId) {
+    if (!presetId || String(presetId).startsWith('default_')) return false;
+    const token = (typeof window.getAuthToken === 'function') ? window.getAuthToken() : '';
+    const apiBase = (window.NNAPER_CONFIG?.API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '');
+    if (token && !String(presetId).startsWith('custom_')) {
+      try {
+        await fetch(`${apiBase}/api/presets/${encodeURIComponent(presetId)}?token=${encodeURIComponent(token)}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+      } catch (e) {}
+    }
+    const list = getCustomPresets().filter(p => p.preset_id !== presetId);
+    saveCustomPresetsLocal(list);
+    window.dispatchEvent(new CustomEvent('nnaper_presets_updated'));
+    return true;
+  }
+
+  function applyPresetById(map, presetId) {
+    const preset = getAllPresets().find(p => p.preset_id === presetId);
+    if (!preset || !preset.config) return false;
+
+    try {
+      localStorage.setItem('nnaper_active_preset_id', presetId);
+    } catch (e) {}
+
+    const styleLayers = (window.MAP_STYLE && Array.isArray(window.MAP_STYLE.layers))
+      ? window.MAP_STYLE.layers
+      : ((map && map.getStyle && map.getStyle().layers) ? map.getStyle().layers : []);
+
+    // Najpierw przywracamy bazowe definicje warstw z MAP_STYLE (w tym obrysy i linie przerywane)
+    if (map && styleLayers.length > 0) {
+      styleLayers.forEach(raw => {
+        if (!map.getLayer(raw.id)) return;
+        const baseVis = (raw.layout && raw.layout.visibility) ? raw.layout.visibility : 'visible';
+        try { map.setLayoutProperty(raw.id, 'visibility', baseVis); } catch (e) {}
+        if (raw.paint) {
+          Object.keys(raw.paint).forEach(k => {
+            try { map.setPaintProperty(raw.id, k, raw.paint[k]); } catch (e) {}
+          });
+        }
+        if (raw.type === 'line' && (!raw.paint || !raw.paint['line-dasharray'])) {
+          try { map.setPaintProperty(raw.id, 'line-dasharray', null); } catch (e) {}
+        }
+        const outlineId = `${raw.id}-outline-line`;
+        if (map.getLayer(outlineId)) {
+          try {
+            map.setPaintProperty(outlineId, 'line-width', 0.0);
+            map.setPaintProperty(outlineId, 'line-opacity', 0.0);
+          } catch (e) {}
+        }
+      });
+    }
+
+    const newCfg = JSON.parse(JSON.stringify(preset.config));
+    if (!newCfg.layers) newCfg.layers = {};
+    if (!newCfg.categories) newCfg.categories = {};
+    if (!newCfg.settings3D) newCfg.settings3D = { map3D: false, buildings3D: false };
+
+    // Zastosowanie widoczności całych kategorii oraz poszczególnych warstw z presetu
+    styleLayers.forEach(raw => {
+      if (!raw || !raw.id || raw.id === 'bg' || raw.id.startsWith('GPS') || raw.id.startsWith('Budynki')) return;
+      const parts = raw.id.split('/').map(p => p.trim());
+      const cat = parts.length > 1 ? parts[0] : 'Inne';
+      const catVis = (newCfg.categories[cat] !== undefined) ? !!newCfg.categories[cat] : true;
+
+      if (!newCfg.layers[raw.id]) {
+        newCfg.layers[raw.id] = {};
+      }
+      if (newCfg.layers[raw.id].visibility === undefined) {
+        newCfg.layers[raw.id].visibility = catVis ? 'visible' : 'none';
+      }
+    });
+
+    saveStoredConfig(newCfg);
+    if (map) {
+      applyCustomizationsToMap(map);
+      syncTreeUI(map);
+      sync3DButtonsUI();
+    }
+    notifyConfigChanged();
+    return true;
+  }
 
   function getStoredConfig() {
     try {
@@ -266,6 +539,9 @@
         if (map.getLayer(outlineId)) {
           map.setLayoutProperty(outlineId, 'visibility', saved.visibility);
         }
+        if (layerId === 'Infrastruktura drogowa/Odcinkowe pomiary prędkości' && map.getLayer('Infrastruktura drogowa/Odcinkowe pomiary prędkości - znaki')) {
+          map.setLayoutProperty('Infrastruktura drogowa/Odcinkowe pomiary prędkości - znaki', 'visibility', saved.visibility);
+        }
       }
 
       // Kolor główny
@@ -511,27 +787,118 @@
     btnOpenStudio.onclick = () => {
       openStyleStudio();
     };
-
-    const btnReset = document.createElement('button');
-    btnReset.type = 'button';
-    btnReset.innerText = '↺ Przywróć domyślne kolory i warstwy';
-    btnReset.title = 'Resetuje wszystkie własne kolory, grubości i widoczności warstw do wartości początkowych';
-    btnReset.style.cssText = 'width: 100%; padding: 5px 10px; font-size: 10.5px; font-weight: 500; background: rgba(239, 68, 68, 0.10); border: 1px solid rgba(239, 68, 68, 0.25); color: #fca5a5; border-radius: 6px; cursor: pointer; transition: all 0.2s ease;';
-    btnReset.onmouseover = () => { btnReset.style.background = 'rgba(239, 68, 68, 0.20)'; };
-    btnReset.onmouseout = () => { btnReset.style.background = 'rgba(239, 68, 68, 0.10)'; };
-    btnReset.onclick = () => {
-      if (confirm('Czy na pewno chcesz przywrócić domyślne kolory i ustawienia warstw?')) {
-        if (typeof window.resetAllCustomizations === 'function') {
-          window.resetAllCustomizations();
-        } else {
-          localStorage.removeItem(STORAGE_KEY);
-          localStorage.removeItem('nnaper_track_color');
-          window.location.reload();
-        }
-      }
-    };
     actionBar.appendChild(btnOpenStudio);
-    actionBar.appendChild(btnReset);
+
+    // Sekcja Presetów Warstw (domyślne + własne)
+    const presetBox = document.createElement('div');
+    presetBox.className = 'layer-presets-box';
+    presetBox.style.cssText = 'margin-top: 4px; padding-top: 6px; border-top: 1px dashed rgba(255,255,255,0.1); display: flex; flex-direction: column; gap: 6px; width: 100%; box-sizing: border-box;';
+
+    const presetHeaderRow = document.createElement('div');
+    presetHeaderRow.style.cssText = 'display: flex; justify-content: space-between; align-items: center; gap: 4px; width: 100%;';
+
+    const presetLabel = document.createElement('label');
+    presetLabel.htmlFor = 'layer-preset-select';
+    presetLabel.innerText = 'PRESETY WARSTW:';
+    presetLabel.style.cssText = 'font-size: 10px; font-weight: 700; color: #94a3b8; letter-spacing: 0.05em;';
+
+    const presetBtnsWrap = document.createElement('div');
+    presetBtnsWrap.style.cssText = 'display: flex; gap: 4px; align-items: center;';
+
+    const btnSavePreset = document.createElement('button');
+    btnSavePreset.type = 'button';
+    btnSavePreset.innerText = '+ Zapisz obecny';
+    btnSavePreset.title = 'Zapisz obecny układ i kolory warstw jako własny preset';
+    btnSavePreset.style.cssText = 'padding: 3px 8px; font-size: 10px; font-weight: 600; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #34d399; border-radius: 5px; cursor: pointer; white-space: nowrap;';
+
+    const btnDelPreset = document.createElement('button');
+    btnDelPreset.type = 'button';
+    btnDelPreset.innerText = 'Usuń';
+    btnDelPreset.title = 'Usuń wybrany własny preset';
+    btnDelPreset.style.cssText = 'padding: 3px 7px; font-size: 10px; background: rgba(239, 68, 68, 0.14); border: 1px solid rgba(239, 68, 68, 0.35); color: #f87171; border-radius: 5px; cursor: pointer; display: none; white-space: nowrap;';
+
+    presetBtnsWrap.appendChild(btnSavePreset);
+    presetBtnsWrap.appendChild(btnDelPreset);
+    presetHeaderRow.appendChild(presetLabel);
+    presetHeaderRow.appendChild(presetBtnsWrap);
+
+    const presetSelect = document.createElement('select');
+    presetSelect.id = 'layer-preset-select';
+    presetSelect.style.cssText = 'width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; font-size: 11.5px; padding: 5px 8px; background: #1e293b; color: #f8fafc; border: 1px solid #334155; border-radius: 6px; outline: none; cursor: pointer; text-overflow: ellipsis;';
+
+    function populatePresetOptions() {
+      const savedActiveId = localStorage.getItem('nnaper_active_preset_id') || '';
+      const currentVal = presetSelect.value || savedActiveId;
+      presetSelect.innerHTML = '<option value="">-- Wybierz preset warstw --</option>';
+      const all = getAllPresets();
+      all.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.preset_id;
+        opt.innerText = String(p.name || '').replace(/\s*\([^)]*\)/g, '');
+        presetSelect.appendChild(opt);
+      });
+      if (currentVal && all.some(p => p.preset_id === currentVal)) {
+        presetSelect.value = currentVal;
+      }
+      btnDelPreset.style.display = (presetSelect.value && !presetSelect.value.startsWith('default_')) ? 'inline-block' : 'none';
+    }
+
+    populatePresetOptions();
+    syncPresetsFromServer().then(populatePresetOptions);
+    window.addEventListener('nnaper_presets_updated', populatePresetOptions);
+
+    presetSelect.addEventListener('mousedown', () => {
+      if (presetSelect.value) {
+        presetSelect.dataset.lastVal = presetSelect.value;
+        presetSelect.selectedIndex = -1;
+      }
+    });
+
+    presetSelect.addEventListener('blur', () => {
+      if (!presetSelect.value && presetSelect.dataset.lastVal) {
+        presetSelect.value = presetSelect.dataset.lastVal;
+      }
+    });
+
+    presetSelect.addEventListener('change', (e) => {
+      e.stopPropagation();
+      const val = presetSelect.value || presetSelect.dataset.lastVal || '';
+      if (val) {
+        presetSelect.value = val;
+        presetSelect.dataset.lastVal = val;
+        applyPresetById(map, val);
+      }
+      btnDelPreset.style.display = (val && !val.startsWith('default_')) ? 'inline-block' : 'none';
+    });
+
+    btnSavePreset.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const name = window.prompt('Podaj nazwę nowego presetu warstw:', 'Mój własny preset');
+      if (!name || !name.trim()) return;
+      const created = await createCustomPreset(name.trim(), map);
+      if (created) {
+        localStorage.setItem('nnaper_active_preset_id', created.preset_id);
+        populatePresetOptions();
+        presetSelect.value = created.preset_id;
+        btnDelPreset.style.display = 'inline-block';
+      }
+    });
+
+    btnDelPreset.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const val = presetSelect.value;
+      if (!val || val.startsWith('default_')) return;
+      if (!window.confirm('Czy na pewno usunąć ten własny preset warstw?')) return;
+      await deleteCustomPreset(val);
+      localStorage.removeItem('nnaper_active_preset_id');
+      presetSelect.value = '';
+      populatePresetOptions();
+    });
+
+    presetBox.appendChild(presetHeaderRow);
+    presetBox.appendChild(presetSelect);
+    actionBar.appendChild(presetBox);
+
     container.appendChild(actionBar);
 
     const cfg = getStoredConfig();
@@ -542,6 +909,7 @@
       if (
         layer.id === 'bg' ||
         layer.id.endsWith('-outline-line') ||
+        layer.id === 'Infrastruktura drogowa/Odcinkowe pomiary prędkości - znaki' ||
         layer.id.startsWith('sat-') ||
         layer.id.startsWith('playback-sat-') ||
         layer.id.startsWith('GPS / Ślad trasy / ') ||
@@ -728,6 +1096,10 @@
             const vis = cCheckbox.checked ? 'visible' : 'none';
             if (map.getLayer(child.id)) map.setLayoutProperty(child.id, 'visibility', vis);
             if (map.getLayer(`${child.id}-outline-line`)) map.setLayoutProperty(`${child.id}-outline-line`, 'visibility', vis);
+            if (child.id === 'Infrastruktura drogowa/Odcinkowe pomiary prędkości' && map.getLayer('Infrastruktura drogowa/Odcinkowe pomiary prędkości - znaki')) {
+              map.setLayoutProperty('Infrastruktura drogowa/Odcinkowe pomiary prędkości - znaki', 'visibility', vis);
+              updateLayerProperty('Infrastruktura drogowa/Odcinkowe pomiary prędkości - znaki', { visibility: vis });
+            }
             updateLayerProperty(child.id, { visibility: vis });
 
             if (pCheckbox) {
@@ -766,6 +1138,10 @@
             const vis = isChecked ? 'visible' : 'none';
             if (map.getLayer(targetId)) map.setLayoutProperty(targetId, 'visibility', vis);
             if (map.getLayer(`${targetId}-outline-line`)) map.setLayoutProperty(`${targetId}-outline-line`, 'visibility', vis);
+            if (targetId === 'Infrastruktura drogowa/Odcinkowe pomiary prędkości' && map.getLayer('Infrastruktura drogowa/Odcinkowe pomiary prędkości - znaki')) {
+              map.setLayoutProperty('Infrastruktura drogowa/Odcinkowe pomiary prędkości - znaki', 'visibility', vis);
+              updateLayerProperty('Infrastruktura drogowa/Odcinkowe pomiary prędkości - znaki', { visibility: vis });
+            }
             updateLayerProperty(targetId, { visibility: vis });
           });
         });
@@ -796,6 +1172,10 @@
         if (cb) {
           if (saved.visibility !== undefined) {
             cb.checked = (saved.visibility === 'visible');
+          } else if (gName && cfg.categories && cfg.categories[gName] !== undefined) {
+            cb.checked = !!cfg.categories[gName];
+          } else if (map && map.getLayer(layerId)) {
+            cb.checked = (map.getLayoutProperty(layerId, 'visibility') !== 'none');
           }
           childCbs.push(cb);
         }
@@ -1423,7 +1803,7 @@
 
     const hint = document.getElementById('studio-pipette-hint');
     if (hint) {
-      hint.innerHTML = `↺ Przywrócono domyślny styl dla <strong style="color:#10b981;">${layerId}</strong>.`;
+      hint.innerHTML = `Przywrócono domyślny styl dla <strong style="color:#10b981;">${layerId}</strong>.`;
     }
   }
 
@@ -1678,7 +2058,13 @@
     isStyleStudioOpen,
     selectLayerInStudio,
     setPipetteMode,
-    resetCurrentLayer
+    resetCurrentLayer,
+    getAllPresets,
+    getCustomPresets,
+    createCustomPreset,
+    deleteCustomPreset,
+    applyPresetById,
+    syncPresetsFromServer
   };
 
 })(window);
