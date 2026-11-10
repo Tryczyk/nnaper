@@ -1090,7 +1090,7 @@
     <circle r="12" fill="rgba(245, 158, 11, 0.2)"/>
     <circle r="6" fill="#f59e0b" stroke="#ffffff" stroke-width="1.5"/>
     <rect x="${badgeX}" y="${badgeY - 14}" width="95" height="18" rx="4" fill="rgba(15, 23, 42, 0.92)" stroke="#f59e0b" stroke-width="1"/>
-    <text x="${badgeX + 6}" y="${badgeY - 1}" fill="#f59e0b" font-size="9.5" font-weight="bold" font-family="ui-monospace, monospace">🎯 MAX ${maxGMag.toFixed(2)}G</text>
+    <text x="${badgeX + 6}" y="${badgeY - 1}" fill="#f59e0b" font-size="9.5" font-weight="bold" font-family="ui-monospace, monospace">MAX ${maxGMag.toFixed(2)}G</text>
   </g>`;
     }
 
@@ -1652,7 +1652,7 @@
   function generateHtml(points, segments, stats, titleText, scopeName, options = {}) {
     const isSingleDay = (scopeName === 'day' || scopeName === 'active');
     const hasAltitude = points.some(p => p.altitude !== null && p.altitude !== undefined && !isNaN(Number(p.altitude)));
-    const includeElevation = isSingleDay && (options.includeChart !== false) && hasAltitude;
+    const includeElevation = false; // Usunięto profil wysokości z replaya (zgodnie z życzeniem użytkownika)
     const colorMode = options.colorMode || 'speed';
     const singleColor = options.singleColor || '#06b6d4';
     const speedOverlap = options.speedOverlap || 'max';
@@ -1660,7 +1660,7 @@
     const includeGForce = isSingleDay && (options.includeGForce !== false);
 
     const hasGForceData = includeGForce && points.some(p => p.g_x !== null && p.g_x !== undefined && !isNaN(Number(p.g_x)));
-    const showBottomPanel = isSingleDay && (includeElevation || hasGForceData);
+    const showBottomPanel = false; // Całkowicie usunięto dolny panel; Diagram G-G znajduje się w prawym HUD-zie
 
     // Kompaktowa reprezentacja punktów w HTML (bez zbędnych pól i bez duplikacji w segments)
     const compactPoints = points.map(p => {
@@ -1690,7 +1690,7 @@
 <head>
   <meta charset="utf-8" />
   <title>Trasa NNAPER - ${titleText}</title>
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%20100%20100%27%3E%3Cdefs%3E%3ClinearGradient%20id%3D%27b%27%20x1%3D%2725%25%27%20y1%3D%270%25%27%20x2%3D%2775%25%27%20y2%3D%27100%25%27%3E%3Cstop%20offset%3D%270%25%27%20stop-color%3D%27%23FF383D%27%2F%3E%3Cstop%20offset%3D%2745%25%27%20stop-color%3D%27%23E31E24%27%2F%3E%3Cstop%20offset%3D%27100%25%27%20stop-color%3D%27%23A80F14%27%2F%3E%3C%2FlinearGradient%3E%3ClinearGradient%20id%3D%27g%27%20x1%3D%270%25%27%20y1%3D%270%25%27%20x2%3D%270%25%27%20y2%3D%27100%25%27%3E%3Cstop%20offset%3D%270%25%27%20stop-color%3D%27%23FFFFFF%27%20stop-opacity%3D%270.45%27%2F%3E%3Cstop%20offset%3D%27100%25%27%20stop-color%3D%27%23FFFFFF%27%20stop-opacity%3D%270%27%2F%3E%3C%2FlinearGradient%3E%3C%2Fdefs%3E%3Cpath%20fill%3D%27url(%23b)%27%20stroke%3D%27%23800D11%27%20stroke-width%3D%271.2%27%20stroke-linejoin%3D%27round%27%20fill-rule%3D%27evenodd%27%20d%3D%27M%2050%2094%20C%2045.5%2081%2C%2020%2054.5%2C%2020%2036.5%20A%2030%2030%200%201%201%2080%2036.5%20C%2080%2054.5%2C%2054.5%2081%2C%2050%2094%20Z%20M%2050%2025%20A%2011.5%2011.5%200%201%200%2050%2048%20A%2011.5%2011.5%200%201%200%2050%2025%20Z%27%2F%3E%3Ccircle%20cx%3D%2750%27%20cy%3D%2736.5%27%20r%3D%2711.5%27%20fill%3D%27none%27%20stroke%3D%27%23FFFFFF%27%20stroke-width%3D%271%27%20stroke-opacity%3D%270.45%27%2F%3E%3Cpath%20fill%3D%27url(%23g)%27%20d%3D%27M%2026%2034%20A%2024%2024%200%200%201%2074%2034%20C%2070%2020%2C%2060%2014%2C%2050%2014%20C%2040%2014%2C%2030%2020%2C%2026%2034%20Z%27%2F%3E%3C%2Fsvg%3E" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIiB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIj4KICA8IS0tIEJpYcWCZSBrb8WCbyAtLT4KICA8Y2lyY2xlIGN4PSIyNTYiIGN5PSIyNTYiIHI9IjI1MCIgZmlsbD0iI0ZGRkZGRiIgLz4KCiAgPCEtLSBJa29uYSBhdXRhIHplIHpuYWN6bmlraWVtIEdQUyAtLT4KICA8ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgtOTg0LjIzMywgNzM1LjE4Mykgc2NhbGUoMC4xNTUwMDAsLTAuMTU1MDAwKSIgc3Ryb2tlPSJub25lIj4KICAgIDwhLS0gWm5hY3puaWsgbG9rYWxpemFjamkgKFBpbikgLS0+CiAgICA8cGF0aCBmaWxsPSIjRTMxRTI0IiBkPSJNNzM5NSA0MDUzIGMtMTc4IC0yNCAtMzQ2IC0xNDEgLTQyNyAtMjk4IC05MCAtMTc3IC04MyAtMzI0IDI4IC01NjQKICAgIDU4IC0xMjYgMjkzIC00OTAgMzE3IC00OTEgNCAwIDcgMTggNyA0MSAwIDU3IDQyIDk5IDEwMCA5OSAzOCAwIDQ3IDYgMTA1IDY1CiAgICAzNSAzNSA4OSA4MCAxMTkgMTAwIDMwIDE5IDU4IDM5IDYxIDQ1IDEwIDE3IDc2IDQ2IDEzMyA2MCA1MCAxMiA1NCAxNSA4MSA2OQogICAgMTA5IDIxNiAxMjEgMzg1IDQyIDU1NiAtMTAxIDIxNSAtMzM3IDM0OCAtNTY2IDMxOHogbTE3NyAtMzc5IGMxMjUgLTg4IDExMwogICAgLTI2OSAtMjIgLTM0MiAtOTMgLTUwIC0yMTcgLTkgLTI2NiA4OCAtNTQgMTA1IC01IDIzMyAxMDYgMjc5IDE0IDYgNTEgOSA4MyA4CiAgICA0NCAtMyA2NyAtMTAgOTkgLTMzeiIgLz4KCiAgICA8IS0tIFNhbW9jaMOzZCAtLT4KICAgIDxwYXRoIGZpbGw9IiMwRjJGNjQiIGQ9Ik04MDQ1IDMwODkgYy0xNDQgLTE3IC0yNDYgLTQxIC0yNzggLTY1IC0xOCAtMTMgLTQ1IC0zMiAtNjEgLTQxIC02NAogICAgLTQwIC0xMjggLTk3IC0xNzggLTE1OSAtMzUgLTQ0IC01NCAtNjEgLTU2IC01MCAtNiAyOCAtODcgMTYgLTk1IC0xNCAtNiAtMjMKICAgIDMgLTM2IDMyIC00NSAxOSAtNiAyMSAtOSAxMCAtMTkgLTggLTcgLTM0IC0yMSAtNTkgLTMxIC02MiAtMjYgLTk5IC02MiAtMTA2CiAgICAtMTA0IC0zIC0yMCAtMTUgLTU0IC0yNSAtNzcgLTQwIC04NiAtMTcgLTE5NSA1MSAtMjQxIDU3IC00MCAxNjcgLTI1IDIwMyAyNwogICAgMTEgMTYgMjIgMjEgMzkgMTcgMTMgLTMgNzIgLTEzIDEzMiAtMjIgNjEgLTkgMTE3IC0yMCAxMjYgLTI1IDggLTQgMjEgLTI4IDI3CiAgICAtNTIgMjAgLTc0IDQxIC04OCAxMzMgLTg4IDg4IDAgMTExIDEzIDEzMiA3MCA4IDI1IDE4IDMxIDgwIDQ1IDc1IDE3IDEzNSAyMgogICAgMzc1IDMwIGwxNTMgNSAxNCAtMzMgYzIzIC01NyA1OSAtNzcgMTM2IC03NyA3NyAwIDExMyAyMCAxMzYgNzcgMTEgMjUgMjcgMzkKICAgIDY3IDU3IDcyIDMyIDkyIDY4IDkxIDE2NiAtMiAxMDMgLTIxIDI0NyAtNDAgMjk1IC0zOCA5NyAtMTk4IDMwNSAtMjM1IDMwNQogICAgLTExIDAgLTQyIDEyIC03MCAyNyBsLTUxIDI2IC0xMzYgLTEzIGMtMjcwIC0yNCAtMzI0IC0yNSAtMzYyIC0xIC0zOCAyMiAtNjgKICAgIDI0IC0xODUgMTB6IG0xMjUgLTI0IGMwIC0xMSAtMTIgLTE1IC00NCAtMTUgLTI0IDAgLTU4IC0zIC03NSAtNiAtMjQgLTUgLTMxCiAgICAtMyAtMzEgOSAwIDE2IDI1IDIxIDExMyAyNSAyNyAyIDM3IC0yIDM3IC0xM3ogbTU2NSAtNSBjOCAtMTMgLTg1IC0xMyAtMTA1IDAKICAgIC0xMSA3IDEgMTAgNDIgMTAgMzEgMCA2MCAtNCA2MyAtMTB6IG0tNzQ3IC0xMiBjLTMgLTcgLTQzIC0xOCAtOTQgLTI1IC00OSAtNwogICAgLTk1IC0xNSAtMTAxIC0xOCAtMjAgLTcgLTE1IDEyIDUgMjAgMjQgMTEgMTMyIDMzIDE2NSAzNCAxOCAxIDI3IC0zIDI1IC0xMXoKICAgIG04ODUgLTQ0IGMzOSAtMjIgMTc0IC0yMjUgMTYyIC0yNDMgLTcgLTEyIC03NjAgLTE2IC03ODkgLTUgLTExIDQgLTE2IDE5IC0xNgogICAgNDQgMCA2MiAyMSAxOTQgMzMgMjA5IDkgMTEgNjYgMTIgMzAyIDkgMTczIC0yIDI5NyAtOCAzMDggLTE0eiBtLTcwNiAtMjEgYy0zCiAgICAtMTAgLTEzIC01OSAtMjMgLTExMCAtMjEgLTEwNiAtMTAgLTk5IC0xNjEgLTEwOSBsLTEwMyAtNyAyOSA4NCBjNTUgMTU5IDQ4CiAgICAxNDggOTQgMTUyIDIzIDIgNzAgNCAxMDUgNSA1NiAyIDYzIDAgNTkgLTE1eiBtLTIzNyAwIGMwIC0xMSAtODEgLTIxNyAtODgKICAgIC0yMjUgLTQgLTMgLTQyIC05IC04NiAtMTMgbC03OCAtOCA3IDI0IGM0IDEzIDI2IDY1IDUwIDExNSBsNDMgOTIgNjMgMTAgYzg2CiAgICAxMyA4OSAxMyA4OSA1eiBtLTI0NSAtMTM1IGwtNTQgLTExMyAtNjEgLTggYy0zNCAtNSAtNjQgLTYgLTY3IC0zIC0yNiAyNSA5NgogICAgMTY5IDE4MCAyMTAgMjggMTQgNTIgMjYgNTMgMjYgMiAwIC0yMSAtNTEgLTUxIC0xMTJ6IG0xMzk1IC0xNTQgYzYgLTE0IDEwCiAgICAtNTcgMTAgLTk1IDAgLTY2IC0xIC02OSAtMjQgLTY5IC0yMSAwIC0yNCAtNCAtMjMgLTM1IDEgLTE5IC00IC00MCAtMTAgLTQ2CiAgICAtMTQgLTE0IC02MTUgLTMyIC02NDcgLTE5IC0xNSA1IC0yOSAyMyAtMzYgNDQgLTYgMTkgLTE2IDM3IC0yMyAzOSAtNyAzIC00MgogICAgMiAtNzggLTEgLTM3IC0yIC03OSAtMiAtOTMgMiBsLTI3IDcgMyA5MiAzIDkyIDgwIDMgYzQ0IDEgODYgLTIgOTMgLTYgMTYgLTExCiAgICAzMSAtNzIgMzIgLTEzMCAwIC0yOCA5IC01NiAyNiAtODQgbDI2IC00MSAzMDIgNiBjMjY3IDYgMzAyIDkgMzE0IDI0IDcgMTEgMTIKICAgIDUxIDEyIDExMiAwIDc0IDQgOTggMTcgMTEzIDIyIDI0IDMyIDIzIDQzIC04eiBtLTE3MTEgLTI5MiBjMjMgLTg5IDIzIC05MyA2CiAgICAtMTEyIC00NiAtNTEgLTEyMyAtOCAtMTMyIDc0IC0xMCA4MyAyMyAxNDAgNzUgMTM0IDI1IC0zIDI5IC0xMCA1MSAtOTZ6IG01MzMKICAgIDQxIGM1OCAtNjUgNDMgLTI2NCAtMjAgLTI4MCAtMTggLTQgLTI5IC0xIC0zOSAxMyAtMjMgMzIgLTM1IDk2IC0zMCAxNTkgOAogICAgMTA0IDQ5IDE1MyA4OSAxMDh6IiAvPgogIDwvZz4KPC9zdmc+Cgo=" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -1865,12 +1865,16 @@
       ${hasGForceData ? `
       <div id="hud-gg-box">
         <div class="hud-gg-title">Diagram G-G</div>
-        <canvas id="hud-gg-canvas" width="80" height="80"></canvas>
+        <canvas id="hud-gg-canvas" width="84" height="84"></canvas>
+        <div style="display:flex; justify-content:space-between; width:100%; font-size:10.5px; margin-top:4px;">
+          <span style="color:#94a3b8;">Gx: <b id="val-hud-gx" style="color:#38bdf8; font-family:ui-monospace, monospace;">0.00G</b></span>
+          <span style="color:#94a3b8;">Gy: <b id="val-hud-gy" style="color:#f59e0b; font-family:ui-monospace, monospace;">0.00G</b></span>
+        </div>
       </div>` : ''}
     </div>
 
     <div class="ctrl-bar">
-      <button id="btn-play" class="ctrl-btn" type="button" title="Odtwórz / Wstrzymaj animację">▶ Odtwórz</button>
+      <button id="btn-play" class="ctrl-btn" type="button" title="Odtwórz / Wstrzymaj animację">Odtwórz</button>
       <input type="range" id="timeline-slider" min="0" max="${Math.max(0, points.length - 1)}" value="0" />
       <span id="lbl-prog" style="font-size:11px; color:#94a3b8; font-family:monospace; min-width:65px;">1 / ${points.length}</span>
       <div class="ctrl-sep"></div>
@@ -1907,8 +1911,8 @@
     <div id="chart-panel">
       <div class="chart-header">
         <div class="chart-tabs">
-          ${includeElevation ? '<button class="chart-tab-btn active" id="tab-btn-alt" type="button">🏔️ Profil wysokości</button>' : ''}
-          ${hasGForceData ? '<button class="chart-tab-btn ' + (!includeElevation ? 'active' : '') + '" id="tab-btn-gg" type="button">🎯 Diagram G-G</button>' : ''}
+          ${includeElevation ? '<button class="chart-tab-btn active" id="tab-btn-alt" type="button">Profil wysokości</button>' : ''}
+          ${hasGForceData ? '<button class="chart-tab-btn ' + (!includeElevation ? 'active' : '') + '" id="tab-btn-gg" type="button">Diagram G-G</button>' : ''}
         </div>
 
         <div class="chart-legend-box" id="chart-legend-alt" style="display: ${includeElevation ? 'flex' : 'none'};">
@@ -2242,10 +2246,10 @@
       }
 
       const carIcon = L.divIcon({
-        html: '<div style="font-size:22px; line-height:1; filter:drop-shadow(0 2px 4px rgba(0,0,0,0.8));">🚗</div>',
+        html: '<div style="width:14px; height:14px; background:#38bdf8; border:2px solid #ffffff; border-radius:50%; box-shadow:0 0 8px rgba(56,189,248,0.8);"></div>',
         className: 'car-icon',
-        iconSize: [22, 22],
-        iconAnchor: [11, 11]
+        iconSize: [14, 14],
+        iconAnchor: [7, 7]
       });
       const carMarker = L.marker([points[0].lat, points[0].lon], { icon: carIcon }).addTo(map);
 
@@ -2400,6 +2404,11 @@
           ctx.beginPath();
           ctx.arc(dotX, dotY, 2.5, 0, Math.PI * 2);
           ctx.fill();
+
+          const valHudGx = document.getElementById('val-hud-gx');
+          const valHudGy = document.getElementById('val-hud-gy');
+          if (valHudGx) valHudGx.innerText = (Number(pt.g_x) >= 0 ? '+' : '') + Number(pt.g_x).toFixed(2) + 'G';
+          if (valHudGy) valHudGy.innerText = (Number(pt.g_y) >= 0 ? '+' : '') + Number(pt.g_y).toFixed(2) + 'G';
         }
       }
 
@@ -2751,7 +2760,7 @@
           cancelAnimationFrame(animFrameId);
           animFrameId = null;
         }
-        btnPlay.innerText = '▶ Odtwórz';
+        btnPlay.innerText = 'Odtwórz';
       }
 
       function startPlayback() {
@@ -2763,7 +2772,7 @@
           renderCarAt(0);
         }
         isPlaying = true;
-        btnPlay.innerText = '⏸ Pauza';
+        btnPlay.innerText = 'Pauza';
         lastWallClock = performance.now();
         if (hasTimestamps && !isNaN(timestamps[currentIndex])) {
           virtualTime = timestamps[currentIndex];
@@ -3128,19 +3137,57 @@ ${placemarks}
   };
 
   async function loadDatesTree(forceRefresh = false) {
-    if (cachedDatesTree && !forceRefresh) return cachedDatesTree;
+    if (cachedDatesTree && !forceRefresh && Object.keys(cachedDatesTree).length > 0) {
+      return cachedDatesTree;
+    }
     try {
       const token = window.getAuthToken?.() || '';
-      if (!token) {
-        cachedDatesTree = {};
-        return {};
+      const profileId = (typeof window.getActiveProfileId === 'function') ? window.getActiveProfileId() : '';
+      let url = `${apiBaseUrl}/api/dates-tree`;
+      const qParams = [];
+      if (token) qParams.push(`token=${encodeURIComponent(token)}`);
+      if (profileId && profileId !== 'undefined' && profileId !== 'null') {
+        qParams.push(`profile_id=${encodeURIComponent(profileId)}`);
       }
-      const res = await fetch(`${apiBaseUrl}/api/dates-tree?token=${encodeURIComponent(token)}`, { credentials: 'include', cache: 'no-store' });
+      if (qParams.length > 0) {
+        url += '?' + qParams.join('&');
+      }
+      const fetchCtrl = new AbortController();
+      const fetchTimeout = setTimeout(() => fetchCtrl.abort(), 15000);
+      let res;
+      try {
+        res = await fetch(url, { credentials: 'include', cache: 'no-store', signal: fetchCtrl.signal });
+      } finally {
+        clearTimeout(fetchTimeout);
+      }
       if (res.ok) {
-        cachedDatesTree = await res.json();
+        const raw = await res.json();
+        const clean = {};
+        if (raw && typeof raw === 'object') {
+          Object.keys(raw).forEach(y => {
+            if (/^\d{4}$/.test(y) && raw[y] && typeof raw[y] === 'object') {
+              clean[y] = {};
+              Object.keys(raw[y]).forEach(m => {
+                const mPadded = String(m).padStart(2, '0');
+                if (/^\d{2}$/.test(mPadded) && Array.isArray(raw[y][m])) {
+                  const daysClean = raw[y][m]
+                    .map(d => String(d).padStart(2, '0'))
+                    .filter(d => /^\d{2}$/.test(d));
+                  if (daysClean.length > 0) {
+                    clean[y][mPadded] = Array.from(new Set(daysClean)).sort().reverse();
+                  }
+                }
+              });
+              if (Object.keys(clean[y]).length === 0) {
+                delete clean[y];
+              }
+            }
+          });
+        }
+        cachedDatesTree = clean;
       }
     } catch (e) {
-      console.error('Błąd pobierania drzewa dat dla eksportu:', e);
+      console.error('Blad pobierania drzewa dat dla eksportu:', e);
     }
     return cachedDatesTree || {};
   }
@@ -3149,8 +3196,8 @@ ${placemarks}
     const y = selDayYear ? selDayYear.value : '';
     const m = selDayMonth ? selDayMonth.value : '';
     const d = selDayDay ? selDayDay.value : '';
-    if (!y || !m || !d) return '';
-    return `${y}-${m}-${d}`;
+    if (!y || !m || !d || y === 'None' || m === 'None' || d === 'None') return '';
+    return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
   }
 
   function updateDayDays(preselectDay = null) {
@@ -3171,7 +3218,13 @@ ${placemarks}
 
     if (preselectDay) {
       const dPad = String(preselectDay).padStart(2, '0');
-      if (days.includes(dPad)) selDayDay.value = dPad;
+      if (days.includes(dPad)) {
+        selDayDay.value = dPad;
+      } else if (days.length > 0) {
+        selDayDay.value = days[0];
+      }
+    } else if (days.length > 0) {
+      selDayDay.value = days[0];
     }
   }
 
@@ -3180,7 +3233,7 @@ ${placemarks}
     const y = selDayYear.value;
     const months = y && cachedDatesTree[y] ? Object.keys(cachedDatesTree[y]).sort().reverse() : [];
 
-    selDayMonth.innerHTML = months.length ? '' : '<option value="">Brak miesięcy</option>';
+    selDayMonth.innerHTML = months.length ? '' : '<option value="">Brak miesiecy</option>';
     months.forEach(m => {
       const opt = document.createElement('option');
       opt.value = m;
@@ -3190,7 +3243,13 @@ ${placemarks}
 
     if (preselectMonth) {
       const mPad = String(preselectMonth).padStart(2, '0');
-      if (months.includes(mPad)) selDayMonth.value = mPad;
+      if (months.includes(mPad)) {
+        selDayMonth.value = mPad;
+      } else if (months.length > 0) {
+        selDayMonth.value = months[0];
+      }
+    } else if (months.length > 0) {
+      selDayMonth.value = months[0];
     }
 
     updateDayDays(preselectDay);
@@ -3204,10 +3263,15 @@ ${placemarks}
   }
 
   async function populateScopeControls(preselect = {}) {
-    const tree = await loadDatesTree();
+    let tree = {};
+    try {
+      tree = await loadDatesTree();
+    } catch (e) {
+      console.error('Błąd ładowania drzewa dat do eksportu:', e);
+    }
     const years = Object.keys(tree).sort().reverse();
 
-    // 1. Kontrolki wyboru dnia (osobno Rok, Miesiąc, Dzień)
+    // 1. Kontrolki wyboru dnia (osobno Rok, Miesiac, Dzien)
     let preDayYear = null;
     let preDayMonth = null;
     let preDayDay = null;
@@ -3216,8 +3280,18 @@ ${placemarks}
       const parts = String(preselect.day).split('-');
       if (parts.length === 3) {
         preDayYear = parts[0];
-        preDayMonth = parts[1];
-        preDayDay = parts[2];
+        preDayMonth = parts[1].padStart(2, '0');
+        preDayDay = parts[2].padStart(2, '0');
+      }
+    } else if (typeof window.getSelectedPlaybackDay === 'function') {
+      const activePlaybackDay = window.getSelectedPlaybackDay();
+      if (activePlaybackDay && activePlaybackDay !== 'None') {
+        const parts = String(activePlaybackDay).split('-');
+        if (parts.length === 3 && tree[parts[0]] && tree[parts[0]][parts[1].padStart(2, '0')]) {
+          preDayYear = parts[0];
+          preDayMonth = parts[1].padStart(2, '0');
+          preDayDay = parts[2].padStart(2, '0');
+        }
       }
     }
 
@@ -3231,6 +3305,8 @@ ${placemarks}
       });
       if (preDayYear && years.includes(String(preDayYear))) {
         selDayYear.value = String(preDayYear);
+      } else if (years.length > 0) {
+        selDayYear.value = years[0];
       }
     }
 
@@ -3247,10 +3323,12 @@ ${placemarks}
       });
       if (preselect.year && years.includes(String(preselect.year))) {
         selYear.value = String(preselect.year);
+      } else if (years.length > 0) {
+        selYear.value = years[0];
       }
     }
 
-    // 3. Kontrolki wyboru miesiąca
+    // 3. Kontrolki wyboru miesiaca
     if (selYearM) {
       selYearM.innerHTML = years.length ? '' : '<option value="">Brak lat</option>';
       years.forEach(y => {
@@ -3261,6 +3339,8 @@ ${placemarks}
       });
       if (preselect.year && years.includes(String(preselect.year))) {
         selYearM.value = String(preselect.year);
+      } else if (years.length > 0) {
+        selYearM.value = years[0];
       }
     }
 
@@ -3272,7 +3352,7 @@ ${placemarks}
     const y = selYearM.value;
     const months = y && cachedDatesTree[y] ? Object.keys(cachedDatesTree[y]).sort().reverse() : [];
 
-    selMonth.innerHTML = months.length ? '' : '<option value="">Brak miesięcy</option>';
+    selMonth.innerHTML = months.length ? '' : '<option value="">Brak miesiecy</option>';
     months.forEach(m => {
       const opt = document.createElement('option');
       opt.value = m;
@@ -3282,7 +3362,13 @@ ${placemarks}
 
     if (preselectMonth) {
       const mPad = String(preselectMonth).padStart(2, '0');
-      if (months.includes(mPad)) selMonth.value = mPad;
+      if (months.includes(mPad)) {
+        selMonth.value = mPad;
+      } else if (months.length > 0) {
+        selMonth.value = months[0];
+      }
+    } else if (months.length > 0) {
+      selMonth.value = months[0];
     }
   }
 
@@ -3297,12 +3383,12 @@ ${placemarks}
     if (planned && planned.points && planned.points.length >= 2) {
       const stopsStr = (planned.stops && planned.stops.length)
         ? planned.stops.map((s, idx) => {
-            const role = idx === 0 ? '🟢 Start' : (idx === planned.stops.length - 1 ? '🏁 Cel' : `📍 Punkt ${idx}`);
+            const role = idx === 0 ? 'Start' : (idx === planned.stops.length - 1 ? 'Cel' : `Punkt ${idx}`);
             return `<b>${role}:</b> ${s.name || 'Współrzędne'}`;
           }).join('<br/>')
         : 'Trasa zaplanowana';
       infoEl.innerHTML = `
-        <div style="font-weight: 600; color: #38bdf8; margin-bottom: 6px;">🎯 Aktywna trasa z planera:</div>
+        <div style="font-weight: 600; color: #38bdf8; margin-bottom: 6px;">Aktywna trasa z planera:</div>
         <div style="font-size: 12px; color: #f1f5f9; line-height: 1.6; margin-bottom: 8px; background: rgba(15, 23, 42, 0.6); padding: 8px 10px; border-radius: 6px; border: 1px solid #1e293b;">
           ${stopsStr}
         </div>
@@ -3314,9 +3400,9 @@ ${placemarks}
       `;
     } else {
       infoEl.innerHTML = `
-        <div style="color: #f59e0b; font-weight: 600; margin-bottom: 6px;">⚠️ Brak wyznaczonej trasy w planerze</div>
+        <div style="color: #f59e0b; font-weight: 600; margin-bottom: 6px;">Brak wyznaczonej trasy w planerze</div>
         <div style="font-size: 12px; color: #94a3b8; line-height: 1.5;">
-          Otwórz panel <b>Planowanie trasy</b> na mapie, dodaj punkty A i B, aby wyznaczyć trasę, a następnie wróć tutaj lub kliknij przycisk <b>„📥 Eksportuj trasę”</b> bezpośrednio w panelu planera.
+          Otwórz panel <b>Planowanie trasy</b> na mapie, dodaj punkty A i B, aby wyznaczyć trasę, a następnie wróć tutaj lub kliknij przycisk <b>„Eksportuj trasę”</b> bezpośrednio w panelu planera.
         </div>
       `;
     }
@@ -3581,12 +3667,17 @@ ${placemarks}
     try {
       const token = window.getAuthToken?.() || '';
       if (!token && activeScope !== 'planned') {
-        throw new Error('Musisz być zalogowany, aby wyeksportować swoje trasy.');
+        throw new Error('Musisz byc zalogowany, aby wyeksportowac swoje trasy.');
       }
-      let queryUrl = `${apiBaseUrl}/api/export-data?scope=${activeScope}`;
-      if (token) {
-        queryUrl += `&token=${encodeURIComponent(token)}`;
+      const profileId = (typeof window.getActiveProfileId === 'function') ? window.getActiveProfileId() : '';
+
+      const queryParams = new URLSearchParams();
+      queryParams.set('scope', activeScope === 'active' ? 'days' : activeScope);
+      if (token) queryParams.set('token', token);
+      if (profileId && profileId !== 'undefined' && profileId !== 'null') {
+        queryParams.set('profile_id', profileId);
       }
+
       let title = 'Trasa';
       let scopeFilename = 'trasa';
       let rawPoints = null;
@@ -3594,7 +3685,7 @@ ${placemarks}
       if (activeScope === 'planned') {
         const planned = window.getPlannedRouteData?.();
         if (!planned || !planned.points || planned.points.length < 2) {
-          throw new Error('Brak wyznaczonej trasy w planerze. Otwórz panel „Planowanie trasy” i wyznacz trasę między co najmniej dwoma punktami.');
+          throw new Error('Brak wyznaczonej trasy w planerze. Otworz panel planowania trasy i wyznacz trase miedzy co najmniej dwoma punktami.');
         }
         rawPoints = planned.points;
         options.stops = planned.stops;
@@ -3605,20 +3696,21 @@ ${placemarks}
       } else if (activeScope === 'day') {
         const d = getSelectedDay();
         if (!d) throw new Error('Nie wybrano dnia do eksportu.');
-        queryUrl += `&day=${encodeURIComponent(d)}`;
-        title = `Dzień: ${d}`;
+        queryParams.set('day', d);
+        title = `Dzien: ${d}`;
         scopeFilename = d;
       } else if (activeScope === 'month') {
         const y = selYearM ? selYearM.value : '';
         const m = selMonth ? selMonth.value : '';
-        if (!y || !m) throw new Error('Nie wybrano roku lub miesiąca.');
-        queryUrl += `&year=${y}&month=${m}`;
-        title = `Miesiąc: ${MONTH_NAMES[m] || m} ${y}`;
+        if (!y || !m) throw new Error('Nie wybrano roku lub miesiaca.');
+        queryParams.set('year', y);
+        queryParams.set('month', m);
+        title = `Miesiac: ${MONTH_NAMES[m] || m} ${y}`;
         scopeFilename = `${y}-${m}`;
       } else if (activeScope === 'year') {
         const y = selYear ? selYear.value : '';
         if (!y) throw new Error('Nie wybrano roku.');
-        queryUrl += `&year=${y}`;
+        queryParams.set('year', y);
         title = `Rok: ${y}`;
         scopeFilename = `${y}`;
       } else if (activeScope === 'active') {
@@ -3628,7 +3720,7 @@ ${placemarks}
         if (!activeDays.length) {
           throw new Error('Brak aktywnych dni w filtrze mapy. Zaznacz dni w lewym panelu.');
         }
-        queryUrl = `${apiBaseUrl}/api/export-data?scope=days&days=${encodeURIComponent(activeDays.join(','))}`;
+        queryParams.set('days', activeDays.join(','));
         title = `Aktywne filtry (${activeDays.length} dni)`;
         scopeFilename = `aktywne_${activeDays.length}_dni`;
       } else if (activeScope === 'all') {
@@ -3641,12 +3733,13 @@ ${placemarks}
       if (!rawPoints) {
         const isSnapped = localStorage.getItem('nnaper_snap_roads') === 'true';
         if (isSnapped) {
-          queryUrl += (queryUrl.includes('?') ? '&' : '?') + 'snapped=true';
+          queryParams.set('snapped', 'true');
         }
+        const queryUrl = `${apiBaseUrl}/api/export-data?${queryParams.toString()}`;
         const res = await fetch(queryUrl);
         if (!res.ok) {
           const errJson = await res.json().catch(() => ({}));
-          throw new Error(errJson.detail || `Błąd serwera (HTTP ${res.status})`);
+          throw new Error(errJson.detail || `Blad serwera (HTTP ${res.status})`);
         }
         rawPoints = await res.json();
       }
@@ -3757,6 +3850,10 @@ ${placemarks}
   }
 
   window.addEventListener('nnaper_auth_changed', () => {
+    cachedDatesTree = null;
+  });
+
+  window.addEventListener('nnaper_profile_changed', () => {
     cachedDatesTree = null;
   });
 

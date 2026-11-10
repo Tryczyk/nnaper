@@ -11,7 +11,7 @@
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
   <script src="https://unpkg.com/pmtiles@3.0.7/dist/pmtiles.js"></script>
-  <link rel="stylesheet" href="styles.css?v=20261108_v37_fix_syntax_ok" />
+  <link rel="stylesheet" href="styles.css?v=20261109_v44_bottom_gap_removed" />
 </head>
 
 <body>
@@ -31,7 +31,7 @@
       </div>
       <div class="panel-actions">
         <button class="action-btn" id="btn-back-location" title="Wróć do poprzedniego widoku">←</button>
-        <button class="action-btn" id="btn-close-location" title="Zamknij lokalizację">✕</button>
+        <button class="action-btn" id="btn-close-location" title="Zamknij lokalizację">&times;</button>
       </div>
     </div>
 
@@ -218,13 +218,13 @@
           <div class="studio-footer-left">
             <button type="button" id="btn-studio-reset-layer" class="studio-btn-text"
               title="Przywraca fabryczny styl dla aktualnie wybranej warstwy">
-              ↺ Resetuj tę warstwę
+              Resetuj tę warstwę
             </button>
           </div>
           <div class="studio-footer-right">
             <button type="button" id="btn-studio-done" class="studio-btn-primary"
               title="Zapisz zmiany stylu i zamknij panel">
-              ✓ Zapisz i zamknij
+              Zapisz i zamknij
             </button>
           </div>
         </div>
@@ -264,16 +264,12 @@
                                       </button>
                                       <button id="btn-open-export" class="menu-action-btn"
                                         title="Otwórz panel eksportu trasy (HTML, PNG, SVG, GIF, GPX, CSV, GeoJSON, KML)">
-                                        📥 Eksport trasy
+                                        Eksport trasy
                                       </button>
                                       <button id="btn-open-parser" class="menu-action-btn"
-                                        title="Otwórz panel importu i parsowania plików GPS / NMEA / LOG (z automatyczną ochroną przed duplikatami)">
-                                        ⚙️ Parsowanie plików
+                                        title="Otwórz panel importu i parsowania plików GPS">
+                                        Parsowanie plików
                                       </button>
-                                      <div class="menu-btn-subinfo"
-                                        title="System automatycznie weryfikuje historię Twojego konta i zapobiega duplikatom plików oraz epok">
-                                        🛡️ Ochrona przed duplikatami aktywna
-                                      </div>
 
                                       <div class="menu-section-divider"></div>
 
@@ -323,6 +319,17 @@
                                         style="font-size: 13px; font-weight: 600; color: #38bdf8;"></select>
                                     </div>
 
+                                    <button id="btn-playback-export-day" type="button" class="playback-top-btn"
+                                      title="Eksportuj trasę z wybranego dnia"
+                                      style="margin-left: 6px; padding: 4px 10px; font-size: 12px; font-weight: 600; color: #38bdf8; background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;">
+                                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                        <polyline points="7 10 12 15 17 10"></polyline>
+                                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                                      </svg>
+                                      Eksportuj
+                                    </button>
+
                                     <div style="display: inline-flex; align-items: center; gap: 5px; margin-left: 6px;">
                                       <label for="playback-sat-view"
                                         style="font-size: 12.5px; color: #94a3b8;">Satelity:</label>
@@ -351,14 +358,10 @@
                                           m</span></div>
                                       <div class="hud-g-meter-container">
                                         <div class="g-circle-wrapper" id="g-circle-wrapper"
-                                          title="2D G-Meter (przeciążenia boczne i wzdłużne)">
-                                          <div class="g-circle-target">
-                                            <div class="g-circle-ring ring-1"></div>
-                                            <div class="g-circle-cross-h"></div>
-                                            <div class="g-circle-cross-v"></div>
-                                            <div class="g-circle-dot" id="g-circle-dot"></div>
-                                          </div>
-                                          <span class="g-circle-sub">G-METER</span>
+                                          title="Diagram G-G (przeciążenia boczne i wzdłużne 2D)">
+                                          <canvas id="playback-hud-gg-canvas" width="120" height="120"
+                                            style="width: 60px; height: 60px; border-radius: 50%; background: #090d16; border: 1px solid #334155; display: block; box-shadow: inset 0 0 8px rgba(0, 0, 0, 0.7); cursor: default;"></canvas>
+                                          <span class="g-circle-sub">DIAGRAM G-G</span>
                                         </div>
                                         <div class="g-bars-wrapper">
                                           <div class="g-bar-row">
@@ -411,12 +414,9 @@
                                     <input type="range" id="playback-timeline-slider" min="0" max="100" value="0" />
                                     <div class="ctrl-row">
                                       <div class="ctrl-left">
-                                        <button id="btn-playback-play" class="btn-ctrl" type="button">▶
-                                          Odtwarzaj</button>
+                                        <button id="btn-playback-play" class="btn-ctrl" type="button">Odtwarzaj</button>
                                         <span id="playback-hud-progress-info" style="font-size: 12px; color: #94a3b8;">0
                                           / 0 epok</span>
-                                        <button id="btn-playback-delete-point" class="btn-playback-del-pt" type="button"
-                                          title="Trwale usuń bieżący punkt z bazy danych">🗑️ Usuń punkt</button>
                                       </div>
                                       <div class="ctrl-right">
                                         <span style="font-size: 12px; color: #94a3b8;">Tempo:</span>
@@ -425,7 +425,7 @@
                                           <input type="number" id="playback-speed-multiplier" min="0.1" max="10000"
                                             step="any" value="60"
                                             style="background:transparent; color:#38bdf8; border:none; width:48px; text-align:center; font-size:12px; font-weight:bold; outline:none;"
-                                            title="Wpisz dowolnÄ… prÄ™dkoÅ›Ä‡ odtwarzania z rÄ™ki (np. 1, 15, 60, 100)" />
+                                            title="Wpisz dowolną prędkość odtwarzania z ręki (np. 1, 15, 60, 100)" />
                                           <span style="font-size:11px; color:#94a3b8; font-weight:bold;">x</span>
                                         </div>
                                       </div>
@@ -436,57 +436,16 @@
                                       </label>
                                     </div>
                                   </div>
-                                </div>
-
-                                <!-- Dolny interaktywny panel wykresów dla trybu Playback (Wysokość, Diagram G-G) -->
-                                <div id="playback-chart-panel" style="display: none;">
-                                  <div class="playback-chart-header">
-                                    <div class="playback-chart-tabs">
-                                      <button class="playback-chart-tab-btn active" id="playback-tab-btn-alt"
-                                        type="button">🏔️ Profil
-                                        wysokości</button>
-                                      <button class="playback-chart-tab-btn" id="playback-tab-btn-gg" type="button">🎯
-                                        Diagram G-G</button>
-                                    </div>
-
-                                    <div class="playback-chart-legend-box" id="playback-chart-legend-alt">
-                                      <span style="color:#38bdf8;">Wysokość: <b id="playback-val-alt">-- m</b></span>
-                                      <span style="color:#64748b;" id="playback-alt-minmax-info">(Min: --m, Max:
-                                        --m)</span>
-                                    </div>
-
-                                    <div class="playback-chart-legend-box" id="playback-chart-legend-gg"
-                                      style="display: none;">
-                                      <span style="color:#94a3b8;">
-                                        Bieżące: <b id="playback-val-gg-curr" style="color:#38bdf8;">--</b>
-                                        <span style="color:#475569; margin: 0 4px;">│</span>
-                                        Max skręt: <b id="playback-val-gg-max-lat" style="color:#f59e0b;">--</b>
-                                        <span style="color:#475569; margin: 0 4px;">│</span>
-                                        Max wzdłużne: <b id="playback-val-gg-max-lon" style="color:#38bdf8;">--</b>
-                                      </span>
-                                    </div>
-
-                                    <div class="playback-chart-actions">
-                                      <span class="playback-chart-hint">Kliknij/przeciągnij, aby przewinąć trasę</span>
-                                      <button class="playback-chart-min-btn" id="btn-toggle-playback-chart"
-                                        type="button" title="Zwiń / Rozwiń wykres">▾</button>
-                                    </div>
-                                  </div>
-
-                                  <div class="playback-chart-canvas-wrap">
-                                    <canvas id="playback-chart-canvas"></canvas>
-                                  </div>
-                                </div>
 
                                 <!-- Panel inspekcji i trwałego usuwania pojedynczego punktu GPS (epoki) -->
                                 <div id="point-panel">
                                   <div class="point-header">
                                     <div style="display: flex; align-items: center; gap: 8px;">
-                                      <span style="font-size: 16px;">📍</span>
+                                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
                                       <h3 style="margin: 0;">Szczegóły punktu GPS</h3>
                                     </div>
                                     <button class="action-btn" id="btn-close-point"
-                                      title="Zamknij podgląd punktu">✕</button>
+                                      title="Zamknij podgląd punktu">&times;</button>
                                   </div>
                                   <div class="point-body" id="pp-content">
                                     <div style="color:#94a3b8;">Kliknij punkt na trasie, aby wyświetlić szczegóły
@@ -503,7 +462,7 @@
                                         aria-label="Wróć do pierwotnej lokalizacji">←</button>
                                       <button class="route-action-btn route-planner-close" id="btn-route-close"
                                         title="Zamknij planowanie trasy"
-                                        aria-label="Zamknij planowanie trasy">✕</button>
+                                        aria-label="Zamknij planowanie trasy">&times;</button>
                                     </div>
                                   </div>
                                   <div id="inline-route-context-menu" class="inline-route-context-menu">
@@ -551,8 +510,7 @@
                                         title="Kopiuj link do schowka">Kopiuj</button>
                                       <a id="btn-open-google-url"
                                         class="route-action-btn route-google-action-btn route-open-btn" target="_blank"
-                                        rel="noopener noreferrer" title="Otwórz w Google Maps w nowej karcie">Otwórz
-                                        ↗</a>
+                                        rel="noopener noreferrer" title="Otwórz w Google Maps w nowej karcie">Otwórz</a>
                                     </div>
                                     <div id="route-google-feedback" class="route-google-feedback"></div>
                                   </div>
@@ -576,7 +534,7 @@
                                         </div>
                                       </div>
                                       <button id="btn-close-export" class="export-close-btn" type="button"
-                                        title="Zamknij">✕</button>
+                                        title="Zamknij">&times;</button>
                                     </div>
 
                                     <div class="export-body">
@@ -645,53 +603,53 @@
                                         <label class="export-section-title">2. Format wyjściowy:</label>
                                         <div class="export-formats-grid">
                                           <div class="format-card active" data-format="html">
-                                            <div class="format-card-icon">🌐</div>
+                                            <div class="format-card-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg></div>
                                             <div class="format-card-name">HTML</div>
                                             <div class="format-card-desc">Interaktywna mapa offline z odtwarzaczem</div>
                                             <span class="format-badge format-badge-rec">Polecane</span>
                                           </div>
                                           <div class="format-card" data-format="png">
-                                            <div class="format-card-icon">🖼️</div>
+                                            <div class="format-card-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg></div>
                                             <div class="format-card-name">PNG</div>
                                             <div class="format-card-desc">Wysokiej rozdzielczości obraz trasy z
                                               metrykami HUD</div>
                                             <span class="format-badge">Obraz HD</span>
                                           </div>
                                           <div class="format-card" data-format="svg">
-                                            <div class="format-card-icon">📐</div>
+                                            <div class="format-card-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 22 22 12"></polyline></svg></div>
                                             <div class="format-card-name">SVG</div>
                                             <div class="format-card-desc">Skalowalna grafika wektorowa bezstratna</div>
                                             <span class="format-badge">Wektor</span>
                                           </div>
                                           <div class="format-card" data-format="gif">
-                                            <div class="format-card-icon">🎬</div>
+                                            <div class="format-card-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polygon points="10 8 16 12 10 16 10 8"></polygon></svg></div>
                                             <div class="format-card-name">GIF</div>
                                             <div class="format-card-desc">Animowany GIF z płynną rekonstrukcją przejazdu
                                               i trasą</div>
                                             <span class="format-badge format-badge-anim">Animacja</span>
                                           </div>
                                           <div class="format-card" data-format="gpx">
-                                            <div class="format-card-icon">🗺️</div>
+                                            <div class="format-card-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="3 11 22 2 13 21 11 13 3 11"></polygon></svg></div>
                                             <div class="format-card-name">GPX</div>
                                             <div class="format-card-desc">Standardowy plik wymiany GPS dla Garmin,
                                               Strava itp.</div>
                                             <span class="format-badge">GPS</span>
                                           </div>
                                           <div class="format-card" data-format="csv">
-                                            <div class="format-card-icon">📊</div>
+                                            <div class="format-card-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg></div>
                                             <div class="format-card-name">CSV</div>
                                             <div class="format-card-desc">Surowe punkty telemetryczne do analizy w
                                               Excelu</div>
                                             <span class="format-badge">Arkusz</span>
                                           </div>
                                           <div class="format-card" data-format="geojson">
-                                            <div class="format-card-icon">🌐</div>
+                                            <div class="format-card-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg></div>
                                             <div class="format-card-name">GeoJSON</div>
                                             <div class="format-card-desc">Format GIS zgodny ze standardem RFC 7946</div>
                                             <span class="format-badge">GIS</span>
                                           </div>
                                           <div class="format-card" data-format="kml">
-                                            <div class="format-card-icon">🌍</div>
+                                            <div class="format-card-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg></div>
                                             <div class="format-card-name">KML</div>
                                             <div class="format-card-desc">Ślad 3D do wizualizacji w Google Earth</div>
                                             <span class="format-badge">Google Earth</span>
@@ -726,14 +684,6 @@
                                               <option value="last">Ostatni przejazd (chronologicznie)</option>
                                             </select>
                                           </div>
-                                          <div class="export-opt-row" id="opt-chart-row" style="display: none;">
-                                            <span>Profil wysokości:</span>
-                                            <label class="sidebar-chk-label"
-                                              title="Dołącz profil wysokości n.p.m. z oznaczonym punktem MIN i MAX">
-                                              <input type="checkbox" id="export-opt-include-chart" checked />
-                                              <span>Dołącz profil wysokości (z Min/Max)</span>
-                                            </label>
-                                          </div>
                                           <div class="export-opt-row" id="opt-gforce-row" style="display: none;">
                                             <span>Diagram G-G:</span>
                                             <label class="sidebar-chk-label"
@@ -757,13 +707,13 @@
                                                 style="font-size: 11.5px; color: #94a3b8; white-space: nowrap;">Profil:</label>
                                               <select id="export-opt-gif-preset" class="export-select-sm"
                                                 style="flex: 1;" title="Wybierz gotowy profil lub dopasuj parametry">
-                                                <option value="auto-5mb" selected>⚡ Auto: Maksymalna płynność (limit 5.0
+                                                <option value="auto-5mb" selected>Auto: Maksymalna płynność (limit 5.0
                                                   MB)</option>
-                                                <option value="messenger-2mb">💬 Komunikatory (limit 2.0 MB)</option>
-                                                <option value="discord-8mb">👾 Discord (limit 8.0 MB)</option>
-                                                <option value="hq-15mb">💎 Wysoka jakość (limit 15.0 MB)</option>
-                                                <option value="unlimited">🚀 Bez limitu wagi (Maks. 30 FPS)</option>
-                                                <option value="custom">⚙️ Własne parametry (ręczne klatki/czas)</option>
+                                                <option value="messenger-2mb">Komunikatory (limit 2.0 MB)</option>
+                                                <option value="discord-8mb">Discord (limit 8.0 MB)</option>
+                                                <option value="hq-15mb">Wysoka jakość (limit 15.0 MB)</option>
+                                                <option value="unlimited">Bez limitu wagi (Maks. 30 FPS)</option>
+                                                <option value="custom">Własne parametry (ręczne klatki/czas)</option>
                                               </select>
                                             </div>
                                             <div
@@ -816,7 +766,7 @@
                                       <button id="btn-cancel-export" class="export-btn-secondary"
                                         type="button">Anuluj</button>
                                       <button id="btn-do-export" class="export-btn-primary" type="button">
-                                        <span class="btn-export-icon">📥</span> Pobierz plik
+                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> Pobierz plik
                                       </button>
                                     </div>
                                   </div>
@@ -827,7 +777,7 @@
                                   <div class="export-modal-dialog parser-modal-dialog">
                                     <div class="export-header">
                                       <div style="display: flex; align-items: center; gap: 10px;">
-                                        <span style="font-size: 22px;">⚙️</span>
+                                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
                                         <div>
                                           <h3 class="export-title" style="margin: 0;">Import i Parsowanie Danych GPS
                                           </h3>
@@ -837,33 +787,21 @@
                                         </div>
                                       </div>
                                       <button id="btn-close-parser" class="export-close-btn" type="button"
-                                        title="Zamknij">✕</button>
+                                        title="Zamknij">&times;</button>
                                     </div>
 
                                     <div class="export-body parser-modal-body">
                                       <!-- Ostrzeżenie o braku logowania (jeśli niezalogowany) -->
                                       <div id="parser-auth-warning" class="parser-warning-banner"
                                         style="display: none;">
-                                        ⚠️ <strong>Wymagane logowanie:</strong> Zaloguj się w prawym panelu profilu, aby
+                                        <strong>Wymagane logowanie:</strong> Zaloguj się w prawym panelu profilu, aby
                                         zaimportować trasy na swoje konto.
-                                      </div>
-
-                                      <!-- Informacja o ochronie przed duplikatami w głównym panelu -->
-                                      <div class="parser-dedup-banner">
-                                        <div class="dedup-icon">🛡️</div>
-                                        <div class="dedup-text">
-                                          <strong>Automatyczna ochrona przed duplikatami:</strong>
-                                          <span>System automatycznie weryfikuje historię Twojego konta i wykrywa
-                                            wcześniej przesłane pliki. Jeśli załadujesz ponownie ten sam plik,
-                                            zostaniesz zapytany o jego pominięcie, a baza danych gwarantuje brak
-                                            nakładających się duplikatów epok czasowych.</span>
-                                        </div>
                                       </div>
 
                                       <!-- Wybór profilu docelowego dla wgrywanych śladów -->
                                       <div class="parser-profile-box" id="parser-profile-box">
                                         <div class="parser-profile-head">
-                                          <span class="parser-profile-icon">🏷️</span>
+                                          <span class="parser-profile-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg></span>
                                           <div class="parser-profile-title-wrap">
                                             <strong class="parser-profile-title">Profil docelowy dla importowanych
                                               śladów:</strong>
@@ -878,14 +816,14 @@
                                           </select>
                                           <button type="button" id="btn-parser-new-profile"
                                             class="parser-btn-new-profile" title="Dodaj nowy profil dla tych tras">
-                                            <span>➕</span> Nowy profil
+                                            Nowy profil
                                           </button>
                                         </div>
                                       </div>
 
                                       <!-- Strefa Drag & Drop -->
                                       <div id="parser-dropzone" class="parser-dropzone">
-                                        <div class="dropzone-icon">📥</div>
+                                        <div class="dropzone-icon"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg></div>
                                         <div class="dropzone-title">Przeciągnij i upuść pliki lub foldery tutaj</div>
                                         <div class="dropzone-desc">
                                           Obsługiwane formaty: <code>.txt</code>, <code>.log</code>, <code>.nmea</code>
@@ -893,17 +831,16 @@
                                           <code>.csv</code>
                                           <button type="button" id="btn-csv-info" class="csv-info-btn"
                                             title="Kliknij, aby sprawdzić wymagane formatowanie i kolumny pliku CSV">
-                                            <span class="csv-info-icon">ℹ️</span>
                                             <span>Format CSV</span>
                                           </button>
                                           (współrzędne tras)
                                         </div>
                                         <div class="dropzone-actions">
                                           <button type="button" id="btn-choose-files" class="parser-action-btn">
-                                            <span>📄</span> Wybierz pliki
+                                            Wybierz pliki
                                           </button>
                                           <button type="button" id="btn-choose-folder" class="parser-action-btn">
-                                            <span>📁</span> Wybierz cały folder
+                                            Wybierz cały folder
                                           </button>
                                           <input type="file" id="parser-file-input" multiple
                                             accept=".txt,.log,.nmea,.gpx,.csv,text/*" style="display: none;" />
@@ -917,10 +854,10 @@
                                         style="display: none;">
                                         <div class="csv-info-header">
                                           <div class="csv-info-title">
-                                            <span>ℹ️</span> <strong>Wymagany format i kolumny plików CSV</strong>
+                                            <strong>Wymagany format i kolumny plików CSV</strong>
                                           </div>
                                           <button type="button" id="btn-close-csv-info" class="csv-info-close"
-                                            title="Zamknij podgląd formatowania">✕</button>
+                                            title="Zamknij podgląd formatowania">&times;</button>
                                         </div>
                                         <div class="csv-info-body">
                                           <p class="csv-info-lead">
@@ -962,7 +899,7 @@
 2026-05-10 14:32:00,52.2297,21.0122,0.02,0.08,-0.99
 2026-05-10 14:32:01,52.2299,21.0126,0.05,0.12,-0.98</pre>
                                             <div class="csv-example-tip">
-                                              💡 <strong>Wskazówka:</strong> Wartości dziesiętne mogą używać zarówno
+                                              <strong>Wskazówka:</strong> Wartości dziesiętne mogą używać zarówno
                                               kropki (np. <code>52.2297</code>), jak i przecinka (np.
                                               <code>52,2297</code>).
                                             </div>
@@ -974,7 +911,7 @@
                                       <div id="parser-duplicates-prompt" class="parser-duplicates-prompt"
                                         style="display: none;">
                                         <div class="dup-prompt-header">
-                                          <span class="dup-icon">⚠️</span>
+                                          <span class="dup-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg></span>
                                           <div>
                                             <div class="dup-title">Wykryto pliki przetworzone już wcześniej</div>
                                             <div class="dup-subtitle">Poniższe pliki zostały już pomyślnie zaimportowane
@@ -985,11 +922,11 @@
                                         <div class="dup-question">Czy na pewno chcesz ponownie parsować te pliki?</div>
                                         <div class="dup-actions">
                                           <button type="button" id="btn-dup-skip" class="dup-btn-primary" type="button">
-                                            ⏭️ Pomiń już sparsowane (zalecane)
+                                            Pomiń już sparsowane (zalecane)
                                           </button>
                                           <button type="button" id="btn-dup-reparse" class="dup-btn-secondary"
                                             type="button">
-                                            🔄 Parsuj wszystkie ponownie
+                                            Parsuj wszystkie ponownie
                                           </button>
                                           <button type="button" id="btn-dup-cancel" class="dup-btn-tertiary"
                                             type="button">
@@ -998,19 +935,7 @@
                                         </div>
                                       </div>
 
-                                      <!-- Opcje przetwarzania -->
-                                      <div class="parser-options-box">
-                                        <label class="parser-checkbox-label">
-                                          <input type="checkbox" id="parser-opt-snap" checked />
-                                          <span class="checkbox-custom"></span>
-                                          <div>
-                                            <strong>Dociągaj punkty do sieci dróg OSM (Map Matching OSRM)</strong>
-                                            <div class="option-hint">Automatycznie dopasowuje punkty do geometrii ulic i
-                                              wyznacza linie dróg. Odznacz dla surowych współrzędnych (zalecane dla
-                                              bardzo dużych plików >50 MB).</div>
-                                          </div>
-                                        </label>
-                                      </div>
+
 
                                       <!-- Kolejka wybranych plików -->
                                       <div id="parser-queue-section" style="display: none;">
@@ -1052,35 +977,35 @@
 
                                         <div class="parser-metrics-grid">
                                           <div class="metric-pill">
-                                            <span class="metric-label">📦 Pliki:</span>
+                                            <span class="metric-label">Pliki:</span>
                                             <strong id="metric-files-progress">0 / 0</strong>
                                           </div>
                                           <div class="metric-pill">
-                                            <span class="metric-label">⏱️ Upłynęło:</span>
+                                            <span class="metric-label">Upłynęło:</span>
                                             <strong id="metric-elapsed-time">00:00</strong>
                                           </div>
                                           <div class="metric-pill metric-pill-highlight">
-                                            <span class="metric-label">⏳ Pozostało (ETA):</span>
+                                            <span class="metric-label">Pozostało (ETA):</span>
                                             <strong id="metric-eta-time">--:--</strong>
                                           </div>
                                           <div class="metric-pill">
-                                            <span class="metric-label">⚡ Prędkość:</span>
+                                            <span class="metric-label">Prędkość:</span>
                                             <strong id="metric-speed">-- MB/s</strong>
                                           </div>
                                           <div class="metric-pill">
-                                            <span class="metric-label">📍 Epoki GPS:</span>
+                                            <span class="metric-label">Epoki GPS:</span>
                                             <strong id="metric-epochs-count">0</strong>
                                           </div>
                                           <div class="metric-pill">
-                                            <span class="metric-label">🛰️ Satelity:</span>
-                                            <strong id="metric-sats-count">0</strong>
+                                            <span class="metric-label" id="metric-data-label">Dane:</span>
+                                            <strong id="metric-data-progress">0.0 / 0.0 MB</strong>
                                           </div>
                                         </div>
                                       </div>
 
                                       <!-- Sukces / Podsumowanie -->
                                       <div id="parser-success-box" class="parser-success-box" style="display: none;">
-                                        <div class="success-icon">🎉</div>
+                                        <div class="success-icon"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
                                         <div class="success-title">Parsowanie zakończone sukcesem!</div>
                                         <div id="parser-success-details" class="success-details">
                                           Wszystkie pliki zostały przetworzone. Nowe ślady GPS zostały pomyślnie dodane
@@ -1091,16 +1016,14 @@
                                     </div>
 
                                     <div class="export-footer">
-                                      <button id="btn-cancel-parser" class="export-btn-secondary"
-                                        type="button">Zamknij</button>
                                       <button id="btn-abort-parser" class="export-btn-danger" type="button"
                                         style="display: none;">Przerwij</button>
                                       <button id="btn-start-parser" class="export-btn-primary" type="button" disabled>
-                                        <span class="btn-export-icon">▶</span> Rozpocznij parsowanie
+                                        Rozpocznij parsowanie
                                       </button>
                                       <button id="btn-view-map-parser" class="export-btn-success" type="button"
                                         style="display: none;">
-                                        <span class="btn-export-icon">🗺️</span> Pokaż na mapie
+                                        Pokaż na mapie
                                       </button>
                                     </div>
                                   </div>
@@ -1111,13 +1034,13 @@
   <script src="runtime-config.js"></script>
   <script src="runtime-config.local.js"></script>
   <script src="auth-manager.js?v=20261108_v37_fix_syntax_ok"></script>
-  <script src="layers.js?v=20261108_v37_fix_syntax_ok"></script>
-  <script src="layer-manager.js?v=20261108_v37_fix_syntax_ok"></script>
-  <script src="app.js?v=20261108_v37_fix_syntax_ok"></script>
-  <script src="playback-inline.js?v=20261108_v37_fix_syntax_ok"></script>
-  <script src="route-inline.js?v=20261108_v37_fix_syntax_ok"></script>
-  <script src="export-manager.js?v=20261108_v37_fix_syntax_ok"></script>
-  <script src="parser-manager.js?v=20261108_v37_fix_syntax_ok"></script>
+  <script src="layers.js?v=20261109_v45_fix_pmtiles_cache"></script>
+  <script src="layer-manager.js?v=20261108_v38_real_progress"></script>
+  <script src="app.js?v=20261109_v45_fix_pmtiles_cache"></script>
+  <script src="playback-inline.js?v=20261110_v46_replay_dates_fixed"></script>
+  <script src="route-inline.js?v=20261108_v38_real_progress"></script>
+  <script src="export-manager.js?v=20261109_v42_export_day"></script>
+  <script src="parser-manager.js?v=20261109_v41_sync_persistent"></script>
 </body>
 
 </html>
