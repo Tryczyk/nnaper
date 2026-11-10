@@ -2,6 +2,7 @@ services:
   db:
     image: postgis/postgis:16-3.4
     container_name: nnaper_db
+    shm_size: 256mb
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-nnaper}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-nnaper}
@@ -33,9 +34,10 @@ services:
       - DB_URL=postgresql://${POSTGRES_USER:-nnaper}:${POSTGRES_PASSWORD:-nnaper}@db:5432/${POSTGRES_DB:-nnaper_db}
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
       - OSRM_URL=http://osrm:5000
+      - OSM_PBF_PATH=/app/osm_data/${OSM_FILE_NAME:-pomorskie.osm.pbf}
       - PORT=8000
     command: >
-      sh -c "chmod +x /app/nnaper-server && exec /app/nnaper-server"
+      sh -c "if [ -f /app/nnaper-server ]; then chmod +x /app/nnaper-server && exec /app/nnaper-server; else exec /usr/local/bin/nnaper-server; fi"
     depends_on:
       db:
         condition: service_healthy
@@ -78,14 +80,16 @@ services:
       - OSM_DOWNLOAD_BASE_URL=${OSM_DOWNLOAD_BASE_URL:-https://download.geofabrik.de/europe/poland}
     entrypoint: ["/bin/sh", "-c"]
     command: >
-      "apk add --no-cache curl &&
-       if [ ! -f /data/$${PMTILES_FILE} ] && [ ! -f /data/$${OSM_FILE_NAME} ]; then
-         echo '[DOCKER] Brak kafelkow i pliku /data/'$${OSM_FILE_NAME}'. Pobieranie PBF z Geofabrik...';
-         REGION=$$(echo $${OSM_FILE_NAME} | sed 's/\.osm\.pbf//' | sed 's/\.pbf//');
-         curl -L --fail $${OSM_DOWNLOAD_BASE_URL}/$${REGION}-latest.osm.pbf -o /data/$${OSM_FILE_NAME};
-       else
-         echo '[DOCKER] PBF lub kafelki juz istnieja. Pomijam pobieranie.';
-       fi"
+      "if [ -f /data/$${PMTILES_FILE} ] || [ -f /data/$${OSM_FILE_NAME} ]; then
+         echo '[DOCKER] Plik PBF lub kafelki PMTiles juz istnieja na dysku. Pomijam pobieranie (tryb offline aktywny).';
+         exit 0;
+       fi;
+       echo '[DOCKER] Brak kafelkow i pliku /data/'$${OSM_FILE_NAME}'. Proba pobrania PBF z Geofabrik...';
+       REGION=$$(echo $${OSM_FILE_NAME} | sed 's/\.osm\.pbf//' | sed 's/\.pbf//');
+       wget -O /data/$${OSM_FILE_NAME} $${OSM_DOWNLOAD_BASE_URL}/$${REGION}-latest.osm.pbf || {
+         echo '[DOCKER WARNING] Brak polaczenia z internetem - nie udalo sie pobrac pliku PBF (tryb offline).';
+         exit 0;
+       }"
 
   tiles-generator:
     image: ghcr.io/onthegomap/planetiler:latest
@@ -101,12 +105,17 @@ services:
       - ./osm_data:/data
     entrypoint: ["/bin/sh", "-c"]
     command: >
-      "if [ -f /data/$${PMTILES_FILE} ] && [ \"$(head -c 7 /data/$${PMTILES_FILE})\" = 'PMTiles' ]; then
+      "if [ -f /data/$${PMTILES_FILE} ] && [ \"$$(head -c 7 /data/$${PMTILES_FILE})\" = 'PMTiles' ]; then
          echo '[DOCKER] Poprawne archiwum /data/'$${PMTILES_FILE}' juz istnieje. Pomijam Planetiler.';
          exit 0;
        fi;
+       if [ ! -f /data/$${OSM_FILE_NAME} ]; then
+         echo '[DOCKER WARNING] Brak pliku PBF oraz PMTiles. Pomijam generowanie kafelkow.';
+         exit 0;
+       fi;
        echo '[DOCKER] Brak poprawnego archiwum PMTiles. Uruchamiam Planetiler.';
-       exec java -cp @/app/jib-classpath-file com.onthegomap.planetiler.Main --osm-path=/data/$${OSM_FILE_NAME} --output=/data/$${PMTILES_FILE} --download"
+       java -cp @/app/jib-classpath-file com.onthegomap.planetiler.Main --osm-path=/data/$${OSM_FILE_NAME} --output=/data/$${PMTILES_FILE} ||
+       java -cp @/app/jib-classpath-file com.onthegomap.planetiler.Main --osm-path=/data/$${OSM_FILE_NAME} --output=/data/$${PMTILES_FILE} --download"
 
   tiles-server:
     image: caddy:alpine
@@ -122,7 +131,7 @@ services:
       - API_PUBLIC_URL=${API_PUBLIC_URL:-http://localhost:8000}
       - TILES_PUBLIC_URL=${TILES_PUBLIC_URL:-http://localhost:8080}
       - OSRM_PUBLIC_URL=${OSRM_PUBLIC_URL:-http://localhost:5000}
-      - PHOTON_URL=${PHOTON_URL:-https://photon.komoot.io}
+      - PHOTON_URL=${PHOTON_URL:-http://localhost:8000/api/geocode}
       - PHOTON_BBOX=${PHOTON_BBOX:-14.1,53.9,19.9,55.9}
       - PHOTON_SEARCH_LIMIT=${PHOTON_SEARCH_LIMIT:-50}
       - PMTILES_FILE=${PMTILES_FILE:-pomorskie.pmtiles}
@@ -163,13 +172,12 @@ services:
     environment:
       - PUBLIC_MAP_URL=${TILES_PUBLIC_URL:-http://localhost:8080}/maps/map.html
     command: >
-      "apk add --no-cache curl &&
-       echo '[DOCKER] Oczekiwanie na serwer mapy...' &&
-       until curl -s -f http://tiles-server:8080/maps/map.html > /dev/null; do
+      "echo '[DOCKER] Oczekiwanie na serwer mapy (tryb offline-safe)...' &&
+       until wget -q --spider http://tiles-server:8080/maps/map.html 2>/dev/null; do
          sleep 1;
        done &&
        echo '========================================================' &&
-      echo '  MAPA GOTOWA: '$${PUBLIC_MAP_URL}' ' &&
+       echo '  MAPA GOTOWA: '$${PUBLIC_MAP_URL}' ' &&
        echo '========================================================'"
 
 volumes:

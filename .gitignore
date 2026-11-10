@@ -30,3 +30,8 @@ maps/runtime-config.local.js
 # Systemowe pliki tymczasowe
 .DS_Store
 Thumbs.db
+
+# Lokalne pliki agentów AI
+.antigravity/
+.agent_state.md
+.geminirules

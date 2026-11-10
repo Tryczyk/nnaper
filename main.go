@@ -22,7 +22,10 @@ import (
 	"nnaper/internal/db"
 	"nnaper/internal/epochs"
 	"nnaper/internal/export"
+	"nnaper/internal/features"
 	"nnaper/internal/jobs"
+	"nnaper/internal/osm"
+	"nnaper/internal/routing"
 	"nnaper/internal/tiles"
 )
 
@@ -49,6 +52,16 @@ func main() {
 	epochsService := epochs.NewService(database.Pool, tilesService)
 	exportService := export.NewService(database.Pool)
 	jobsManager := jobs.NewManager(database.Pool, cfg, tilesService)
+	osmService := osm.NewService(database.Pool)
+	featuresService := features.NewService(database.Pool)
+	routingService := routing.NewService(database.Pool, cfg.OSRMURL)
+
+	// Asynchroniczne indeksowanie pliku .osm.pbf (infrastruktura, POI, adresy offline, graf dróg, działki mgły wojny)
+	go func() {
+		if err := osm.EnsureIndexed(ctx, database.Pool, cfg.OSMPBFPath); err != nil {
+			log.Printf("[NNAPER OSM WARNING] Indeksowanie PBF: %v\n", err)
+		}
+	}()
 
 	// Konfiguracja routera Chi
 	r := chi.NewRouter()
@@ -70,6 +83,12 @@ func main() {
 
 	// Rejestracja endpointów API
 	r.Route("/api", func(api chi.Router) {
+		api.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		})
+
 		// Autoryzacja i profile
 		api.Post("/auth/register", authService.HandleRegister)
 		api.Post("/auth/login", authService.HandleLogin)
@@ -79,6 +98,15 @@ func main() {
 		api.Get("/auth/profiles", authService.HandleListProfiles)
 		api.Post("/auth/profiles", authService.HandleCreateProfile)
 		api.Delete("/auth/profiles/{profile_id}", authService.HandleDeleteProfile)
+		api.Get("/auth/settings", authService.HandleUpdateSettings)
+		api.Put("/auth/settings", authService.HandleUpdateSettings)
+		api.Post("/auth/settings", authService.HandleUpdateSettings)
+
+		// Statystyki konta i presety warstw
+		api.Get("/stats", authService.HandleGetStats)
+		api.Get("/presets", authService.HandleListPresets)
+		api.Post("/presets", authService.HandleSavePreset)
+		api.Delete("/presets/{preset_id}", authService.HandleDeletePreset)
 
 		// Drzewo dat i godzin
 		api.Get("/dates-tree", datesService.HandleDatesTree)
@@ -88,15 +116,41 @@ func main() {
 		api.Get("/cache/clear", tilesService.HandleClearCache)
 		api.Post("/cache/clear", tilesService.HandleClearCache)
 
-		// Dynamiczne kafelki wektorowe MVT
+		// Dynamiczne kafelki wektorowe MVT (ślady GPS, infrastruktura drogowa, punkty POI)
 		api.Get("/track/{z}/{x}/{y}.pbf", tilesService.HandleGetTrackTile)
+		api.Get("/infrastructure/{z}/{x}/{y}.pbf", osmService.HandleGetInfrastructureTile)
+		api.Get("/poi/{z}/{x}/{y}.pbf", osmService.HandleGetPOITile)
+		api.Get("/poi/details", osmService.HandleGetPOIDetails)
 
-		// Punkty telemetryczne (epoki)
+		// Lokalny serwis geokodowania i wyszukiwania adresów (100% offline, kompatybilny z Photon)
+		api.Get("/geocode/api", osmService.HandleGeocodeSearch)
+		api.Get("/geocode/api/", osmService.HandleGeocodeSearch)
+		api.Get("/geocode/search", osmService.HandleGeocodeSearch)
+		api.Get("/geocode/reverse", osmService.HandleGeocodeReverse)
+
+		// Punkty telemetryczne (epoki) — edycja manualna, batchowa, zaznaczanie ramką i timelapse
 		api.Get("/epoch/{epoch_id}", epochsService.HandleGetEpoch)
+		api.Put("/epoch/{epoch_id}", epochsService.HandleUpdateEpoch)
 		api.Delete("/epoch/{epoch_id}", epochsService.HandleDeleteEpoch)
+		api.Post("/epoch", epochsService.HandleCreateEpoch)
 		api.Delete("/epochs/day", epochsService.HandleDeleteEpochsDay)
 		api.Post("/epochs/delete-batch", epochsService.HandleDeleteEpochsBatch)
+		api.Post("/epochs/box-select", epochsService.HandleBoxSelectEpochs)
+		api.Post("/epochs/translate-batch", epochsService.HandleTranslateEpochsBatch)
 		api.Get("/playback-day", epochsService.HandlePlaybackDay)
+		api.Get("/timelapse", epochsService.HandleTimelapseSummary)
+
+		// Heatmapa, Odkrywanie mapy (Mgła wojny) oraz Rysowanie po mapie
+		api.Get("/heatmap/tiles/{z}/{x}/{y}.png", featuresService.HandleGetHeatmapTile)
+		api.Get("/heatmap/grid", featuresService.HandleGetHeatmapGrid)
+		api.Get("/fog-of-war", featuresService.HandleGetFogOfWar)
+		api.Get("/drawings", featuresService.HandleListDrawings)
+		api.Post("/drawings", featuresService.HandleSaveDrawing)
+		api.Put("/drawings/{drawing_id}", featuresService.HandleUpdateDrawing)
+		api.Delete("/drawings/{drawing_id}", featuresService.HandleDeleteDrawing)
+
+		// Zaawansowane wyznaczanie tras (punkty unikania, suwaki niechęci, unikanie przebytych dróg, generator tras)
+		api.Post("/route/plan", routingService.HandlePlanRoute)
 
 		// Eksport danych
 		api.Get("/export-data", exportService.HandleExportData)

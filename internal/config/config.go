@@ -12,6 +12,7 @@ type Config struct {
 	Port            int
 	DBURL           string
 	OSRMURL         string
+	OSMPBFPath      string
 	CORSOrigins     []string
 	DataDir         string
 	UploadDir       string
@@ -89,10 +90,20 @@ func LoadConfig() *Config {
 
 	_ = os.MkdirAll(uploadDir, 0o755)
 
+	osmPbfPath := os.Getenv("OSM_PBF_PATH")
+	if osmPbfPath == "" {
+		osmFileName := os.Getenv("OSM_FILE_NAME")
+		if osmFileName == "" {
+			osmFileName = "pomorskie.osm.pbf"
+		}
+		osmPbfPath = filepath.Join("osm_data", osmFileName)
+	}
+
 	return &Config{
 		Port:            port,
 		DBURL:           dbURL,
 		OSRMURL:         osrmURL,
+		OSMPBFPath:      osmPbfPath,
 		CORSOrigins:     corsOrigins,
 		DataDir:         dataDir,
 		UploadDir:       uploadDir,
