@@ -60,6 +60,10 @@ func (db *DBClient) EnsureSchema(ctx context.Context) error {
 		"CREATE EXTENSION IF NOT EXISTS postgis;",
 		"ALTER TABLE epochs ADD COLUMN IF NOT EXISTS geom_snapped GEOMETRY(Point, 4326);",
 		"ALTER TABLE epochs ADD COLUMN IF NOT EXISTS geom_line GEOMETRY(LineString, 4326);",
+		"ALTER TABLE epochs ADD COLUMN IF NOT EXISTS altitude_m NUMERIC(7, 2);",
+		"ALTER TABLE epochs ADD COLUMN IF NOT EXISTS hdop NUMERIC(5, 2);",
+		"ALTER TABLE epochs ADD COLUMN IF NOT EXISTS num_satellites SMALLINT;",
+		"ALTER TABLE epochs ADD COLUMN IF NOT EXISTS fix_quality SMALLINT;",
 		"CREATE INDEX IF NOT EXISTS idx_epochs_timestamp ON epochs (timestamp ASC);",
 		"CREATE INDEX IF NOT EXISTS idx_epochs_profile_id ON epochs (profile_id);",
 		"CREATE INDEX IF NOT EXISTS idx_epochs_profile_ts ON epochs (profile_id, timestamp DESC NULLS LAST);",
@@ -117,16 +121,20 @@ func (db *DBClient) SaveBatch(ctx context.Context, epochs []*Epoch) error {
 
 	_, err = tx.Exec(ctx, `
 		CREATE TEMP TABLE staging_epochs (
-			epoch_id     UUID,
-			profile_id   UUID,
-			timestamp    TIMESTAMPTZ,
-			geom         TEXT,
-			speed_kmh    NUMERIC,
-			g_x          NUMERIC,
-			g_y          NUMERIC,
-			g_z          NUMERIC,
-			geom_snapped TEXT,
-			geom_line    TEXT
+			epoch_id       UUID,
+			profile_id     UUID,
+			timestamp      TIMESTAMPTZ,
+			geom           TEXT,
+			speed_kmh      NUMERIC,
+			altitude_m     NUMERIC,
+			hdop           NUMERIC,
+			num_satellites SMALLINT,
+			fix_quality    SMALLINT,
+			g_x            NUMERIC,
+			g_y            NUMERIC,
+			g_z            NUMERIC,
+			geom_snapped   TEXT,
+			geom_line      TEXT
 		) ON COMMIT DROP;
 	`)
 	if err != nil {
@@ -155,6 +163,10 @@ func (db *DBClient) SaveBatch(ctx context.Context, epochs []*Epoch) error {
 			ep.Timestamp,
 			ep.GeomWKT,
 			ep.SpeedKmh,
+			ep.AltitudeM,
+			ep.HDOP,
+			ep.NumSatellites,
+			ep.FixQuality,
 			ep.GX,
 			ep.GY,
 			ep.GZ,
@@ -174,7 +186,7 @@ func (db *DBClient) SaveBatch(ctx context.Context, epochs []*Epoch) error {
 	}
 
 	copyCols := []string{
-		"epoch_id", "profile_id", "timestamp", "geom", "speed_kmh", "g_x", "g_y", "g_z", "geom_snapped", "geom_line",
+		"epoch_id", "profile_id", "timestamp", "geom", "speed_kmh", "altitude_m", "hdop", "num_satellites", "fix_quality", "g_x", "g_y", "g_z", "geom_snapped", "geom_line",
 	}
 	_, err = tx.CopyFrom(
 		ctx,
@@ -196,12 +208,16 @@ func (db *DBClient) SaveBatch(ctx context.Context, epochs []*Epoch) error {
 			geom_line = COALESCE(
 				CASE WHEN s.geom_line IS NOT NULL AND s.geom_line != '' THEN ST_GeomFromEWKT(s.geom_line) ELSE NULL END,
 				e.geom_line
-			)
+			),
+			altitude_m = COALESCE(s.altitude_m, e.altitude_m),
+			hdop = COALESCE(s.hdop, e.hdop),
+			num_satellites = COALESCE(s.num_satellites, e.num_satellites),
+			fix_quality = COALESCE(s.fix_quality, e.fix_quality)
 		FROM staging_epochs s
 		WHERE s.timestamp IS NOT NULL
 		  AND e.profile_id = s.profile_id
 		  AND e.timestamp = s.timestamp
-		  AND ((s.geom_snapped IS NOT NULL AND s.geom_snapped != '') OR (s.geom_line IS NOT NULL AND s.geom_line != ''));
+		  AND ((s.geom_snapped IS NOT NULL AND s.geom_snapped != '') OR (s.geom_line IS NOT NULL AND s.geom_line != '') OR s.altitude_m IS NOT NULL);
 	`)
 	if err != nil {
 		return fmt.Errorf("błąd UPDATE epochs z staging_epochs: %w", err)
@@ -209,7 +225,7 @@ func (db *DBClient) SaveBatch(ctx context.Context, epochs []*Epoch) error {
 
 	_, err = tx.Exec(ctx, `
 		INSERT INTO epochs (
-			epoch_id, profile_id, timestamp, geom, speed_kmh, g_x, g_y, g_z, geom_snapped, geom_line
+			epoch_id, profile_id, timestamp, geom, speed_kmh, altitude_m, hdop, num_satellites, fix_quality, g_x, g_y, g_z, geom_snapped, geom_line
 		)
 		SELECT DISTINCT ON (s.profile_id, s.timestamp)
 			s.epoch_id,
@@ -217,6 +233,10 @@ func (db *DBClient) SaveBatch(ctx context.Context, epochs []*Epoch) error {
 			s.timestamp,
 			ST_GeomFromEWKT(s.geom),
 			s.speed_kmh,
+			s.altitude_m,
+			s.hdop,
+			s.num_satellites,
+			s.fix_quality,
 			s.g_x,
 			s.g_y,
 			s.g_z,

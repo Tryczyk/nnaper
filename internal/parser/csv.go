@@ -26,7 +26,7 @@ func ParseCSVStream(r io.Reader, profileID string, totalBytes int64, onBatch fun
 	}
 
 	rawHeaders := strings.Split(headerLine, delim)
-	latIdx, lonIdx, timeIdx := -1, -1, -1
+	latIdx, lonIdx, timeIdx, altIdx := -1, -1, -1, -1
 	gxIdx, gyIdx, gzIdx := -1, -1, -1
 
 	for i, h := range rawHeaders {
@@ -39,6 +39,8 @@ func ParseCSVStream(r io.Reader, profileID string, totalBytes int64, onBatch fun
 			latIdx = i
 		case "lon", "lng", "longitude", "dlugosc", "długość", "lon_x", "x":
 			lonIdx = i
+		case "ele", "elevation", "alt", "altitude", "wysokosc", "wysokość", "h", "height", "alt_m", "altitude_m", "wysokosc_m", "wysokość_m":
+			altIdx = i
 		case "time", "timestamp", "datetime", "czas", "data", "date_time":
 			timeIdx = i
 		case "gx", "g_x", "accel_x", "acc_x", "ax", "przeciazenie_x", "przeciążenie_x", "gforce_x":
@@ -104,6 +106,14 @@ func ParseCSVStream(r io.Reader, profileID string, totalBytes int64, onBatch fun
 			}
 		}
 
+		var alt *float64
+		if altIdx >= 0 && altIdx < len(parts) {
+			cleanAlt := strings.Replace(strings.Trim(parts[altIdx], `"' `), ",", ".", 1)
+			if v, err := strconv.ParseFloat(cleanAlt, 64); err == nil {
+				alt = &v
+			}
+		}
+
 		var gx, gy, gz *float64
 		if gxIdx >= 0 && gxIdx < len(parts) {
 			if v, err := strconv.ParseFloat(strings.Trim(parts[gxIdx], `"' `), 64); err == nil {
@@ -128,6 +138,7 @@ func ParseCSVStream(r io.Reader, profileID string, totalBytes int64, onBatch fun
 			Timestamp: ts,
 			Lat:       lat,
 			Lon:       lon,
+			AltitudeM: alt,
 			GeomWKT:   p.WKT(),
 			GX:        gx,
 			GY:        gy,

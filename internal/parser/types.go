@@ -58,21 +58,51 @@ type SatelliteData struct {
 	Azimuth   int16
 }
 
+// NMEAFilterOptions definiuje parametry filtrowania danych NMEA / GPS
+type NMEAFilterOptions struct {
+	MinFixQuality   int     `json:"min_fix_quality"`   // 0 = dowolny, 1 = GPS SPS (zalecane), 2 = DGPS, 4 = RTK
+	MinSatellites   int     `json:"min_satellites"`    // min liczba satelitow (zalecane: 4)
+	MaxHDOP         float64 `json:"max_hdop"`          // maks dopuszczalny blad HDOP (zalecane: 5.0, 0 = wylaczony)
+	MaxPDOP         float64 `json:"max_pdop"`          // maks dopuszczalny blad PDOP (zalecane: 6.0, 0 = wylaczony)
+	MinAltitude     float64 `json:"min_altitude"`      // min wysokosc n.p.m. w metrach (zalecane: -50.0)
+	MaxAltitude     float64 `json:"max_altitude"`      // maks wysokosc n.p.m. w metrach (zalecane: 5000.0)
+	MaxSpeedKmh     float64 `json:"max_speed_kmh"`     // maks predkosc km/h do odciecia teleportacji (zalecane: 250.0)
+	RequireValidRMC bool    `json:"require_valid_rmc"` // czy wymagac statusu 'A' (Valid) z RMC (zalecane: true)
+}
+
+// DefaultNMEAFilterOptions zwraca standardowe, zalecane parametry filtracji
+func DefaultNMEAFilterOptions() NMEAFilterOptions {
+	return NMEAFilterOptions{
+		MinFixQuality:   1,
+		MinSatellites:   4,
+		MaxHDOP:         5.0,
+		MaxPDOP:         6.0,
+		MinAltitude:     -50.0,
+		MaxAltitude:     5000.0,
+		MaxSpeedKmh:     250.0,
+		RequireValidRMC: true,
+	}
+}
+
 // Epoch reprezentuje epokę telemetryczną GPS
 type Epoch struct {
-	ID          string
-	ProfileID   string
-	Timestamp   *time.Time
-	Lat         float64
-	Lon         float64
-	GeomWKT     string
-	GeomSnapped string
-	GeomLine    string
-	SpeedKmh    float64
-	GX          *float64
-	GY          *float64
-	GZ          *float64
-	Satellites  []SatelliteData
+	ID            string
+	ProfileID     string
+	Timestamp     *time.Time
+	Lat           float64
+	Lon           float64
+	GeomWKT       string
+	GeomSnapped   string
+	GeomLine      string
+	SpeedKmh      float64
+	AltitudeM     *float64
+	HDOP          *float64
+	NumSatellites *int16
+	FixQuality    *int16
+	GX            *float64
+	GY            *float64
+	GZ            *float64
+	Satellites    []SatelliteData
 }
 
 // ProgressEvent reprezentuje zdarzenie raportowania postępu kompatybilne z frontendem NNAPER
@@ -106,4 +136,3 @@ func HaversineMeters(lat1, lon1, lat2, lon2 float64) float64 {
 	c := 2.0 * math.Atan2(math.Sqrt(a), math.Sqrt(math.Max(0.0, 1.0-a)))
 	return r * c
 }
-

@@ -845,6 +845,65 @@
                                         </div>
                                       </div>
 
+                                      <!-- Filtry telemetryczne NMEA / GPS (konfigurowalne z zalecanymi wartościami) -->
+                                      <details id="parser-filters-details" class="parser-filters-details">
+                                        <summary class="parser-filters-summary">
+                                          <div style="display: flex; align-items: center; gap: 8px;">
+                                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
+                                            <strong>Zaawansowane filtry jakości NMEA / GPS</strong>
+                                          </div>
+                                          <span style="font-size: 11px; color: #38bdf8; font-weight: normal;">Dostosuj parametry odrzucania błędnych punktów</span>
+                                        </summary>
+                                        <div class="parser-filters-body">
+                                          <div class="parser-filters-grid">
+                                            <div class="parser-filter-field">
+                                              <label for="flt-min-fix-quality">Minimalna jakość Fix (GGA Quality):</label>
+                                              <select id="flt-min-fix-quality" class="parser-filter-input">
+                                                <option value="1" selected>Fix ≥ 1: GPS SPS (Zalecane)</option>
+                                                <option value="0">Fix ≥ 0: Dowolny (w tym brak fixa)</option>
+                                                <option value="2">Fix ≥ 2: DGPS (poprawki różnicowe)</option>
+                                                <option value="4">Fix = 4: RTK (wysoka precyzja)</option>
+                                              </select>
+                                            </div>
+                                            <div class="parser-filter-field">
+                                              <label for="flt-min-satellites">Minimalna liczba satelitów w użyciu:</label>
+                                              <input type="number" id="flt-min-satellites" class="parser-filter-input" min="0" max="32" step="1" value="4" />
+                                            </div>
+                                            <div class="parser-filter-field">
+                                              <label for="flt-max-hdop">Maks. błąd poziomy HDOP (0 = wyłączony):</label>
+                                              <input type="number" id="flt-max-hdop" class="parser-filter-input" min="0" max="50" step="0.5" value="5.0" />
+                                            </div>
+                                            <div class="parser-filter-field">
+                                              <label for="flt-max-pdop">Maks. błąd przestrzenny PDOP (0 = wyłączony):</label>
+                                              <input type="number" id="flt-max-pdop" class="parser-filter-input" min="0" max="50" step="0.5" value="6.0" />
+                                            </div>
+                                            <div class="parser-filter-field">
+                                              <label for="flt-min-altitude">Minimalna wysokość n.p.m. (metry):</label>
+                                              <input type="number" id="flt-min-altitude" class="parser-filter-input" min="-500" max="9000" step="10" value="-50" />
+                                            </div>
+                                            <div class="parser-filter-field">
+                                              <label for="flt-max-altitude">Maksymalna wysokość n.p.m. (metry):</label>
+                                              <input type="number" id="flt-max-altitude" class="parser-filter-input" min="0" max="9000" step="50" value="5000" />
+                                            </div>
+                                            <div class="parser-filter-field">
+                                              <label for="flt-max-speed">Maks. dopuszczalna prędkość (km/h):</label>
+                                              <input type="number" id="flt-max-speed" class="parser-filter-input" min="10" max="1500" step="10" value="250" />
+                                            </div>
+                                            <div class="parser-filter-field" style="display: flex; align-items: center; padding-top: 18px;">
+                                              <label style="display: inline-flex; align-items: center; gap: 8px; cursor: pointer; color: #f1f5f9; font-size: 11.5px;">
+                                                <input type="checkbox" id="flt-require-rmc-valid" checked style="accent-color: #38bdf8;" />
+                                                <span>Wymagaj poprawnego statusu RMC (Active 'A')</span>
+                                              </label>
+                                            </div>
+                                          </div>
+                                          <div style="display: flex; justify-content: flex-end; margin-top: 8px;">
+                                            <button type="button" id="btn-flt-reset-defaults" class="parser-btn-reset-filters">
+                                              Przywróć zalecane wartości
+                                            </button>
+                                          </div>
+                                        </div>
+                                      </details>
+
                                       <!-- Karta ze specyfikacją i formatowaniem CSV na stałe -->
                                       <div id="parser-csv-info-card" class="parser-csv-info-card">
                                         <div class="csv-info-header">
@@ -879,6 +938,12 @@
                                                 <code>data</code> (np. <code>2026-05-10 14:32:00</code>)</div>
                                             </div>
                                             <div class="csv-col-row">
+                                              <div class="csv-col-name"><strong>Wysokość (Alt / Elevation)</strong> <span
+                                                  class="tag-opt">opcjonalna</span></div>
+                                              <div class="csv-col-desc">Kolumna o nazwie: <code>alt</code>,
+                                                <code>altitude</code>, <code>ele</code>, <code>elevation</code>, <code>wysokosc</code> lub <code>h</code> (w metrach n.p.m.)</div>
+                                            </div>
+                                            <div class="csv-col-row">
                                               <div class="csv-col-name"><strong>Przeciążenia X, Y, Z</strong> <span
                                                   class="tag-opt">opcjonalna</span></div>
                                               <div class="csv-col-desc">Kolumny: <code>g_x</code> (lub <code>gx</code>,
@@ -888,9 +953,9 @@
                                           </div>
                                           <div class="csv-example-container">
                                             <div class="csv-example-head">Przykład poprawnego pliku CSV:</div>
-                                            <pre class="csv-example-code">timestamp,latitude,longitude,g_x,g_y,g_z
-2026-05-10 14:32:00,52.2297,21.0122,0.02,0.08,-0.99
-2026-05-10 14:32:01,52.2299,21.0126,0.05,0.12,-0.98</pre>
+                                            <pre class="csv-example-code">timestamp,latitude,longitude,altitude,g_x,g_y,g_z
+2026-05-10 14:32:00,52.2297,21.0122,125.4,0.02,0.08,-0.99
+2026-05-10 14:32:01,52.2299,21.0126,126.1,0.05,0.12,-0.98</pre>
                                             <div class="csv-example-tip">
                                               <strong>Wskazówka:</strong> Wartości dziesiętne mogą używać zarówno
                                               kropki (np. <code>52.2297</code>), jak i przecinka (np.

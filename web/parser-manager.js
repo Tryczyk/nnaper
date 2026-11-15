@@ -260,11 +260,15 @@
   async function loadProfilesIntoParserSelect() {
     const targetProfileSelect = document.getElementById('parser-target-profile-select');
     if (!targetProfileSelect) return;
+    const subNote = document.querySelector('.parser-profile-sub');
     try {
       const profiles = await window.fetchUserProfiles?.() || [];
       targetProfileSelect.innerHTML = '';
       if (!profiles || profiles.length === 0) {
-        targetProfileSelect.innerHTML = '<option value="">Domyślny profil</option>';
+        targetProfileSelect.innerHTML = '<option value="">Profil Główny (domyślny)</option>';
+        if (subNote) {
+          subNote.innerText = 'Trasy zostaną automatycznie przypisane do Twojego profilu domyślnego w bazie danych.';
+        }
         return;
       }
       const activeId = window.getActiveProfileId?.() || '';
@@ -278,9 +282,99 @@
       if (!targetProfileSelect.value && profiles.length > 0) {
         targetProfileSelect.value = profiles[0].profile_id;
       }
+      if (subNote) {
+        const selName = targetProfileSelect.options[targetProfileSelect.selectedIndex]?.text || '';
+        subNote.innerText = `Wgrywane trasy zostaną przypisane do profilu: ${selName}`;
+      }
     } catch (e) {
-      targetProfileSelect.innerHTML = '<option value="">Domyślny profil</option>';
+      targetProfileSelect.innerHTML = '<option value="">Profil Główny (domyślny)</option>';
     }
+  }
+
+  const NMEA_FILTER_STORAGE_KEY = 'nnaper_nmea_filters_config';
+  const DEFAULT_NMEA_FILTERS = {
+    min_fix_quality: 1,
+    min_satellites: 4,
+    max_hdop: 5.0,
+    max_pdop: 6.0,
+    min_altitude: -50,
+    max_altitude: 5000,
+    max_speed_kmh: 250,
+    require_valid_rmc: true
+  };
+
+  function getNmeaFilterValues() {
+    const fixQ = document.getElementById('flt-min-fix-quality');
+    const minSats = document.getElementById('flt-min-satellites');
+    const maxHdop = document.getElementById('flt-max-hdop');
+    const maxPdop = document.getElementById('flt-max-pdop');
+    const minAlt = document.getElementById('flt-min-altitude');
+    const maxAlt = document.getElementById('flt-max-altitude');
+    const maxSpeed = document.getElementById('flt-max-speed');
+    const reqRmc = document.getElementById('flt-require-rmc-valid');
+
+    return {
+      min_fix_quality: fixQ ? parseInt(fixQ.value, 10) : DEFAULT_NMEA_FILTERS.min_fix_quality,
+      min_satellites: minSats ? parseInt(minSats.value, 10) : DEFAULT_NMEA_FILTERS.min_satellites,
+      max_hdop: maxHdop ? parseFloat(maxHdop.value) : DEFAULT_NMEA_FILTERS.max_hdop,
+      max_pdop: maxPdop ? parseFloat(maxPdop.value) : DEFAULT_NMEA_FILTERS.max_pdop,
+      min_altitude: minAlt ? parseFloat(minAlt.value) : DEFAULT_NMEA_FILTERS.min_altitude,
+      max_altitude: maxAlt ? parseFloat(maxAlt.value) : DEFAULT_NMEA_FILTERS.max_altitude,
+      max_speed_kmh: maxSpeed ? parseFloat(maxSpeed.value) : DEFAULT_NMEA_FILTERS.max_speed_kmh,
+      require_valid_rmc: reqRmc ? reqRmc.checked : DEFAULT_NMEA_FILTERS.require_valid_rmc
+    };
+  }
+
+  function getNmeaFilterQueryString() {
+    const f = getNmeaFilterValues();
+    const p = new URLSearchParams();
+    if (f.min_fix_quality !== undefined && !isNaN(f.min_fix_quality)) p.set('min_fix_quality', f.min_fix_quality);
+    if (f.min_satellites !== undefined && !isNaN(f.min_satellites)) p.set('min_satellites', f.min_satellites);
+    if (f.max_hdop !== undefined && !isNaN(f.max_hdop)) p.set('max_hdop', f.max_hdop);
+    if (f.max_pdop !== undefined && !isNaN(f.max_pdop)) p.set('max_pdop', f.max_pdop);
+    if (f.min_altitude !== undefined && !isNaN(f.min_altitude)) p.set('min_altitude', f.min_altitude);
+    if (f.max_altitude !== undefined && !isNaN(f.max_altitude)) p.set('max_altitude', f.max_altitude);
+    if (f.max_speed_kmh !== undefined && !isNaN(f.max_speed_kmh)) p.set('max_speed_kmh', f.max_speed_kmh);
+    p.set('require_valid_rmc', f.require_valid_rmc ? 'true' : 'false');
+    const str = p.toString();
+    return str ? `&${str}` : '';
+  }
+
+  function restoreNmeaFilters() {
+    try {
+      const raw = localStorage.getItem(NMEA_FILTER_STORAGE_KEY);
+      const data = raw ? JSON.parse(raw) : DEFAULT_NMEA_FILTERS;
+      applyNmeaFiltersToDom(data);
+    } catch (e) {
+      applyNmeaFiltersToDom(DEFAULT_NMEA_FILTERS);
+    }
+  }
+
+  function applyNmeaFiltersToDom(d) {
+    const fixQ = document.getElementById('flt-min-fix-quality');
+    const minSats = document.getElementById('flt-min-satellites');
+    const maxHdop = document.getElementById('flt-max-hdop');
+    const maxPdop = document.getElementById('flt-max-pdop');
+    const minAlt = document.getElementById('flt-min-altitude');
+    const maxAlt = document.getElementById('flt-max-altitude');
+    const maxSpeed = document.getElementById('flt-max-speed');
+    const reqRmc = document.getElementById('flt-require-rmc-valid');
+
+    if (fixQ && d.min_fix_quality !== undefined) fixQ.value = String(d.min_fix_quality);
+    if (minSats && d.min_satellites !== undefined) minSats.value = String(d.min_satellites);
+    if (maxHdop && d.max_hdop !== undefined) maxHdop.value = String(d.max_hdop);
+    if (maxPdop && d.max_pdop !== undefined) maxPdop.value = String(d.max_pdop);
+    if (minAlt && d.min_altitude !== undefined) minAlt.value = String(d.min_altitude);
+    if (maxAlt && d.max_altitude !== undefined) maxAlt.value = String(d.max_altitude);
+    if (maxSpeed && d.max_speed_kmh !== undefined) maxSpeed.value = String(d.max_speed_kmh);
+    if (reqRmc && d.require_valid_rmc !== undefined) reqRmc.checked = Boolean(d.require_valid_rmc);
+  }
+
+  function saveNmeaFilters() {
+    try {
+      const f = getNmeaFilterValues();
+      localStorage.setItem(NMEA_FILTER_STORAGE_KEY, JSON.stringify(f));
+    } catch (e) {}
   }
 
   function closeParserModal() {
@@ -967,7 +1061,8 @@
       const targetProfileSelect = document.getElementById('parser-target-profile-select');
       const targetProfileId = targetProfileSelect ? targetProfileSelect.value : (window.getActiveProfileId?.() || '');
       const profParam = targetProfileId ? `&profile_id=${encodeURIComponent(targetProfileId)}` : '';
-      const url = `${getApiBaseUrl()}/api/parser/upload?token=${encodeURIComponent(token)}&snap=${snap ? 'true' : 'false'}&filename=${encodeURIComponent(combinedName)}${profParam}`;
+      const filterParams = getNmeaFilterQueryString();
+      const url = `${getApiBaseUrl()}/api/parser/upload?token=${encodeURIComponent(token)}&snap=${snap ? 'true' : 'false'}&filename=${encodeURIComponent(combinedName)}${profParam}${filterParams}`;
 
       const xhr = new XMLHttpRequest();
       activeXhr = xhr;
@@ -1383,6 +1478,39 @@
 
   function setupEventListeners() {
     setupBeforeUnloadProtection();
+    restoreNmeaFilters();
+
+    const fltInputs = [
+      'flt-min-fix-quality', 'flt-min-satellites', 'flt-max-hdop', 'flt-max-pdop',
+      'flt-min-altitude', 'flt-max-altitude', 'flt-max-speed', 'flt-require-rmc-valid'
+    ];
+    fltInputs.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.addEventListener('input', saveNmeaFilters);
+        el.addEventListener('change', saveNmeaFilters);
+      }
+    });
+
+    const btnResetFlt = document.getElementById('btn-flt-reset-defaults');
+    if (btnResetFlt) {
+      btnResetFlt.addEventListener('click', (e) => {
+        e.preventDefault();
+        applyNmeaFiltersToDom(DEFAULT_NMEA_FILTERS);
+        saveNmeaFilters();
+      });
+    }
+
+    const selTargetProfile = document.getElementById('parser-target-profile-select');
+    if (selTargetProfile) {
+      selTargetProfile.addEventListener('change', () => {
+        const subNote = document.querySelector('.parser-profile-sub');
+        if (subNote) {
+          const selName = selTargetProfile.options[selTargetProfile.selectedIndex]?.text || '';
+          subNote.innerText = `Wgrywane trasy zostaną przypisane do profilu: ${selName}`;
+        }
+      });
+    }
 
     if (btnOpenMenu) btnOpenMenu.addEventListener('click', openParserModal);
     document.addEventListener('click', (e) => {

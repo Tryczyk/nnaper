@@ -87,6 +87,7 @@ func ParseNMEADate(dStr string) (int, int, int, bool) {
 // NMEAParser odpowiada za strumieniowe parsowanie plików NMEA / LOG
 type NMEAParser struct {
 	profileID      string
+	filters        NMEAFilterOptions
 	lastPoint      *Point
 	lastTime       *time.Time
 	lastKnownDate  *time.Time
@@ -99,16 +100,25 @@ type NMEAParser struct {
 }
 
 func NewNMEAParser(profileID string, lastTs *time.Time, lastLat, lastLon float64, totalBytes int64) *NMEAParser {
+	return NewNMEAParserWithFilters(profileID, DefaultNMEAFilterOptions(), lastTs, lastLat, lastLon, totalBytes)
+}
+
+func NewNMEAParserWithFilters(profileID string, filters NMEAFilterOptions, lastTs *time.Time, lastLat, lastLon float64, totalBytes int64) *NMEAParser {
 	var p *Point
 	if lastLat != 0 || lastLon != 0 {
 		p = &Point{Lat: lastLat, Lon: lastLon}
 	}
+	maxSpd := filters.MaxSpeedKmh
+	if maxSpd <= 0 {
+		maxSpd = 1000.0
+	}
 	return &NMEAParser{
 		profileID:     profileID,
+		filters:       filters,
 		lastPoint:     p,
 		lastTime:      lastTs,
 		lastKnownDate: lastTs,
-		maxSpeedKmh:   1000.0,
+		maxSpeedKmh:   maxSpd,
 		totalBytes:    totalBytes,
 		startTime:     time.Now(),
 		lastYieldTime: time.Now(),
@@ -122,21 +132,30 @@ func (np *NMEAParser) ParseStream(r io.Reader, onBatch func(epochs []*Epoch) err
 	scanner.Buffer(buf, 10*1024*1024)
 
 	type rawEpochBuilder struct {
-		hasSensord  bool
-		gx, gy, gz  float64
-		hasRMC      bool
-		rmcTime     string
-		rmcDate     string
-		rmcLat      float64
-		rmcLon      float64
-		rmcSpeedKmh float64
-		rmcValid    bool
-		hasGGA      bool
-		ggaTime     string
-		ggaLat      float64
-		ggaLon      float64
-		ggaValid    bool
-		satellites  []SatelliteData
+		hasSensord    bool
+		gx, gy, gz    float64
+		hasRMC        bool
+		rmcTime       string
+		rmcDate       string
+		rmcLat        float64
+		rmcLon        float64
+		rmcSpeedKmh   float64
+		rmcValid      bool
+		hasGGA        bool
+		ggaTime       string
+		ggaLat        float64
+		ggaLon        float64
+		ggaValid      bool
+		ggaFixQuality int
+		ggaNumSats    int
+		ggaHDOP       float64
+		ggaAlt        float64
+		hasAlt        bool
+		hasGSA        bool
+		gsaPDOP       float64
+		gsaHDOP       float64
+		gsaVDOP       float64
+		satellites    []SatelliteData
 	}
 
 	curBuilder := &rawEpochBuilder{}
@@ -151,6 +170,46 @@ func (np *NMEAParser) ParseStream(r io.Reader, onBatch func(epochs []*Epoch) err
 		var lat, lon float64
 		hasCoord := false
 		speedKmh := 0.0
+
+		// Filtrowanie RMC: czy wymagać statusu Valid 'A'
+		if np.filters.RequireValidRMC && curBuilder.hasRMC && !curBuilder.rmcValid {
+			curBuilder = &rawEpochBuilder{}
+			return
+		}
+
+		// Filtrowanie jakości Fix i błędów z GGA
+		if curBuilder.hasGGA {
+			if np.filters.MinFixQuality > 0 && curBuilder.ggaFixQuality < np.filters.MinFixQuality {
+				curBuilder = &rawEpochBuilder{}
+				return
+			}
+			if np.filters.MinSatellites > 0 && curBuilder.ggaNumSats < np.filters.MinSatellites {
+				curBuilder = &rawEpochBuilder{}
+				return
+			}
+			if np.filters.MaxHDOP > 0 && curBuilder.ggaHDOP > 0 && curBuilder.ggaHDOP > np.filters.MaxHDOP {
+				curBuilder = &rawEpochBuilder{}
+				return
+			}
+			if curBuilder.hasAlt {
+				if curBuilder.ggaAlt < np.filters.MinAltitude || curBuilder.ggaAlt > np.filters.MaxAltitude {
+					curBuilder = &rawEpochBuilder{}
+					return
+				}
+			}
+		}
+
+		// Filtrowanie błędu przestrzennego PDOP / HDOP z GSA
+		if curBuilder.hasGSA {
+			if np.filters.MaxPDOP > 0 && curBuilder.gsaPDOP > 0 && curBuilder.gsaPDOP > np.filters.MaxPDOP {
+				curBuilder = &rawEpochBuilder{}
+				return
+			}
+			if np.filters.MaxHDOP > 0 && curBuilder.gsaHDOP > 0 && curBuilder.gsaHDOP > np.filters.MaxHDOP {
+				curBuilder = &rawEpochBuilder{}
+				return
+			}
+		}
 
 		if curBuilder.rmcValid {
 			lat = curBuilder.rmcLat
@@ -202,7 +261,12 @@ func (np *NMEAParser) ParseStream(r io.Reader, onBatch func(epochs []*Epoch) err
 			}
 		}
 
-		if speedKmh <= np.maxSpeedKmh {
+		maxSpd := np.filters.MaxSpeedKmh
+		if maxSpd <= 0 {
+			maxSpd = np.maxSpeedKmh
+		}
+
+		if speedKmh <= maxSpd {
 			pt := Point{Lon: lon, Lat: lat}
 			ep := &Epoch{
 				ID:         NewUUID(),
@@ -213,6 +277,25 @@ func (np *NMEAParser) ParseStream(r io.Reader, onBatch func(epochs []*Epoch) err
 				GeomWKT:    pt.WKT(),
 				SpeedKmh:   math.Round(speedKmh*100) / 100,
 				Satellites: curBuilder.satellites,
+			}
+			if curBuilder.hasAlt {
+				alt := math.Round(curBuilder.ggaAlt*100) / 100
+				ep.AltitudeM = &alt
+			}
+			if curBuilder.hasGGA && curBuilder.ggaHDOP > 0 {
+				hdop := math.Round(curBuilder.ggaHDOP*100) / 100
+				ep.HDOP = &hdop
+			} else if curBuilder.hasGSA && curBuilder.gsaHDOP > 0 {
+				hdop := math.Round(curBuilder.gsaHDOP*100) / 100
+				ep.HDOP = &hdop
+			}
+			if curBuilder.hasGGA && curBuilder.ggaNumSats > 0 {
+				sats := int16(curBuilder.ggaNumSats)
+				ep.NumSatellites = &sats
+			}
+			if curBuilder.hasGGA && curBuilder.ggaFixQuality > 0 {
+				fq := int16(curBuilder.ggaFixQuality)
+				ep.FixQuality = &fq
 			}
 			if curBuilder.hasSensord {
 				gx := curBuilder.gx
@@ -309,6 +392,47 @@ func (np *NMEAParser) ParseStream(r io.Reader, onBatch func(epochs []*Epoch) err
 						curBuilder.ggaLat = lat
 						curBuilder.ggaLon = lon
 						curBuilder.ggaValid = true
+						if len(parts) > 6 && parts[6] != "" {
+							if fq, err := strconv.Atoi(parts[6]); err == nil {
+								curBuilder.ggaFixQuality = fq
+							}
+						}
+						if len(parts) > 7 && parts[7] != "" {
+							if ns, err := strconv.Atoi(parts[7]); err == nil {
+								curBuilder.ggaNumSats = ns
+							}
+						}
+						if len(parts) > 8 && parts[8] != "" {
+							if hd, err := strconv.ParseFloat(parts[8], 64); err == nil {
+								curBuilder.ggaHDOP = hd
+							}
+						}
+						if len(parts) > 9 && parts[9] != "" {
+							if alt, err := strconv.ParseFloat(parts[9], 64); err == nil {
+								curBuilder.ggaAlt = alt
+								curBuilder.hasAlt = true
+							}
+						}
+					}
+				}
+			}
+
+		} else if strings.HasSuffix(tag, "GSA") {
+			if len(parts) >= 16 {
+				curBuilder.hasGSA = true
+				if len(parts) > 15 && parts[15] != "" {
+					if pd, err := strconv.ParseFloat(parts[15], 64); err == nil {
+						curBuilder.gsaPDOP = pd
+					}
+				}
+				if len(parts) > 16 && parts[16] != "" {
+					if hd, err := strconv.ParseFloat(parts[16], 64); err == nil {
+						curBuilder.gsaHDOP = hd
+					}
+				}
+				if len(parts) > 17 && parts[17] != "" {
+					if vd, err := strconv.ParseFloat(parts[17], 64); err == nil {
+						curBuilder.gsaVDOP = vd
 					}
 				}
 			}

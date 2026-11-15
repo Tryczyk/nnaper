@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -185,6 +186,46 @@ func (m *Manager) HandleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	profileID := query.Get("profile_id")
 
+	filters := parser.DefaultNMEAFilterOptions()
+	if v := query.Get("min_fix_quality"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			filters.MinFixQuality = n
+		}
+	}
+	if v := query.Get("min_satellites"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			filters.MinSatellites = n
+		}
+	}
+	if v := query.Get("max_hdop"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			filters.MaxHDOP = f
+		}
+	}
+	if v := query.Get("max_pdop"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			filters.MaxPDOP = f
+		}
+	}
+	if v := query.Get("min_altitude"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			filters.MinAltitude = f
+		}
+	}
+	if v := query.Get("max_altitude"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			filters.MaxAltitude = f
+		}
+	}
+	if v := query.Get("max_speed_kmh"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			filters.MaxSpeedKmh = f
+		}
+	}
+	if v := query.Get("require_valid_rmc"); v != "" {
+		filters.RequireValidRMC = (v == "true" || v == "1")
+	}
+
 	// Wygenerowanie losowego identyfikatora zadania
 	rndBytes := make([]byte, 6)
 	_, _ = rand.Read(rndBytes)
@@ -259,7 +300,7 @@ func (m *Manager) HandleUpload(w http.ResponseWriter, r *http.Request) {
 	m.mu.Unlock()
 
 	// Uruchomienie parsowania asynchronicznie w goroutine w tle
-	go m.runBackgroundJob(jobID, savedPath, realFilename, userID, targetProfileID, targetProfileName, snap, fileSize)
+	go m.runBackgroundJob(jobID, savedPath, realFilename, userID, targetProfileID, targetProfileName, snap, filters, fileSize)
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
@@ -271,7 +312,7 @@ func (m *Manager) HandleUpload(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (m *Manager) runBackgroundJob(jobID, filePath, filename, userID, profileID, profileName string, snap bool, fileSize int64) {
+func (m *Manager) runBackgroundJob(jobID, filePath, filename, userID, profileID, profileName string, snap bool, filters parser.NMEAFilterOptions, fileSize int64) {
 	defer func() {
 		_ = os.Remove(filePath)
 	}()
@@ -293,6 +334,7 @@ func (m *Manager) runBackgroundJob(jobID, filePath, filename, userID, profileID,
 		FilePath:    filePath,
 		ProfileID:   profileID,
 		SnapToRoads: snap,
+		Filters:     filters,
 		AbortCheck: func() bool {
 			m.mu.RLock()
 			defer m.mu.RUnlock()

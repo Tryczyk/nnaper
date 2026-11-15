@@ -3211,6 +3211,92 @@ gap: 8px;
   line-height: 1;
 }
 
+/* Filtry NMEA / GPS w panelu parsowania */
+.parser-filters-details {
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  border-radius: 10px;
+  margin-bottom: 14px;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+
+.parser-filters-details[open] {
+  border-color: rgba(56, 189, 248, 0.5);
+}
+
+.parser-filters-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  cursor: pointer;
+  background: rgba(2, 6, 23, 0.6);
+  user-select: none;
+  font-size: 12.5px;
+  color: #f1f5f9;
+}
+
+.parser-filters-summary::-webkit-details-marker {
+  display: none;
+}
+
+.parser-filters-body {
+  padding: 12px 14px;
+  border-top: 1px solid rgba(56, 189, 248, 0.15);
+  background: #020617;
+}
+
+.parser-filters-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px 14px;
+}
+
+.parser-filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.parser-filter-field label {
+  font-size: 11px;
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.parser-filter-input {
+  background: #0f172a;
+  border: 1px solid #334155;
+  color: #f8fafc;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.parser-filter-input:focus {
+  border-color: #38bdf8;
+}
+
+.parser-btn-reset-filters {
+  background: none;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  color: #94a3b8;
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.parser-btn-reset-filters:hover {
+  color: #38bdf8;
+  border-color: #38bdf8;
+  background: rgba(56, 189, 248, 0.1);
+}
+
 /* Karta specyfikacji CSV */
 .parser-csv-info-card {
   background: #090d16;

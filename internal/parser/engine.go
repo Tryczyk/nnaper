@@ -37,6 +37,7 @@ type ParseOptions struct {
 	FilePath    string
 	ProfileID   string
 	SnapToRoads bool
+	Filters     NMEAFilterOptions
 	OnProgress  func(ProgressEvent)
 	AbortCheck  func() bool
 }
@@ -118,7 +119,11 @@ func (e *Engine) ParseFile(ctx context.Context, opts ParseOptions) (*ParseStats,
 	} else if ext == ".csv" || (strings.Contains(sampleStr, "lat") && (strings.Contains(sampleStr, ",") || strings.Contains(sampleStr, ";"))) {
 		err = ParseCSVStream(file, opts.ProfileID, totalBytes, batchHandler, progressCallback)
 	} else {
-		nmeaParser := NewNMEAParser(opts.ProfileID, lastTs, lastLat, lastLon, totalBytes)
+		filters := opts.Filters
+		if filters.MaxSpeedKmh == 0 && filters.MaxAltitude == 0 && filters.MinAltitude == 0 {
+			filters = DefaultNMEAFilterOptions()
+		}
+		nmeaParser := NewNMEAParserWithFilters(opts.ProfileID, filters, lastTs, lastLat, lastLon, totalBytes)
 		err = nmeaParser.ParseStream(file, batchHandler, progressCallback)
 	}
 

@@ -14,6 +14,7 @@ type GPXTrkPt struct {
 	XMLName xml.Name `xml:"trkpt"`
 	Lat     float64  `xml:"lat,attr"`
 	Lon     float64  `xml:"lon,attr"`
+	Ele     *float64 `xml:"ele"`
 	Time    string   `xml:"time"`
 }
 
@@ -66,6 +67,7 @@ func ParseGPXStream(r io.Reader, profileID string, totalBytes int64, onBatch fun
 						Timestamp: ts,
 						Lat:       pt.Lat,
 						Lon:       pt.Lon,
+						AltitudeM: pt.Ele,
 						GeomWKT:   p.WKT(),
 					}
 					batch = append(batch, ep)
