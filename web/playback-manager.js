@@ -139,6 +139,7 @@
   const btnPlay = document.getElementById('btn-playback-play');
   const speedMultiplier = document.getElementById('playback-speed-multiplier');
   const chkFollow = document.getElementById('chk-playback-follow');
+  let lastWheelScrollTime = 0;
 
   let chartStats = {
     maxLatG: 0,
@@ -412,6 +413,25 @@
     };
   }
 
+  function setupPlaybackScrollZoom() {
+    const m = getMap();
+    if (!m) return;
+
+    if (chkFollow && chkFollow.checked) {
+      m.scrollZoom?.enable({ around: 'center' });
+    }
+
+    const container = m.getContainer();
+    if (container && !container._nnaper_playback_wheel) {
+      container._nnaper_playback_wheel = true;
+      container.addEventListener('wheel', () => {
+        if (isPlaybackActive) {
+          lastWheelScrollTime = performance.now();
+        }
+      }, { passive: true });
+    }
+  }
+
   function renderCarAt(index, centerCamera = false) {
     const m = getMap();
     if (!trackData[index] || !m) return;
@@ -439,7 +459,13 @@
 
     const followCheckbox = chkFollow || document.getElementById('chk-playback-follow');
     if (centerCamera || (followCheckbox && followCheckbox.checked)) {
-      m.jumpTo({ center: [pt.lon, pt.lat] });
+      const isUserZooming = (performance.now() - lastWheelScrollTime < 400) || (typeof m.isZooming === 'function' && m.isZooming());
+      if (isUserZooming && m.transform) {
+        m.transform.center = maplibregl.LngLat.convert([pt.lon, pt.lat]);
+        m.triggerRepaint();
+      } else {
+        m.jumpTo({ center: [pt.lon, pt.lat] });
+      }
     }
 
     // Ślad samochodzika (zapełnianie mapy śladem)
@@ -1141,10 +1167,16 @@
     
 
     ensureSatelliteLayers();
+    ensurePlaybackTrailLayers();
+    ensurePlaybackCarLayers();
+    setupPlaybackScrollZoom();
 
     const m = getMap();
     if (m && typeof m.getPitch === 'function' && m.getPitch() < 30) {
       m.easeTo({ pitch: 50, duration: 600 });
+    }
+    if (m && chkFollow && chkFollow.checked) {
+      m.scrollZoom?.enable({ around: 'center' });
     }
 
     const token = window.getAuthToken?.() || '';
@@ -1186,6 +1218,7 @@
 
     const m = getMap();
     if (m && typeof m.getSource === 'function') {
+      m.scrollZoom?.enable();
       const linesSrc = m.getSource('satellites-lines-source');
       const ptsSrc = m.getSource('satellites-points-source');
       const trailSrc = m.getSource('playback-trail-source');
@@ -1318,6 +1351,44 @@
         renderCarAt(currentIndex);
       }
     });
+  }
+
+  if (chkFollow) {
+    chkFollow.addEventListener('change', () => {
+      const m = getMap();
+      if (!m) return;
+      if (chkFollow.checked) {
+        m.scrollZoom?.enable({ around: 'center' });
+        if (trackData[currentIndex]) {
+          renderCarAt(currentIndex, true);
+        }
+      } else {
+        m.scrollZoom?.enable();
+      }
+    });
+  }
+
+  if (bottomControlsEl) {
+    bottomControlsEl.addEventListener('wheel', (e) => {
+      if (e.target.tagName === 'SELECT' || e.target.type === 'range') return;
+      const m = getMap();
+      if (!m || !isPlaybackActive) return;
+      lastWheelScrollTime = performance.now();
+      const delta = e.deltaY;
+      const currentZoom = m.getZoom();
+      const zoomStep = delta < 0 ? 0.35 : -0.35;
+      const targetZoom = Math.min(m.getMaxZoom(), Math.max(m.getMinZoom(), currentZoom + zoomStep));
+      if (m.transform) {
+        m.transform.zoom = targetZoom;
+        if (trackData[currentIndex] && (chkFollow && chkFollow.checked)) {
+          m.transform.center = maplibregl.LngLat.convert([trackData[currentIndex].lon, trackData[currentIndex].lat]);
+        }
+        m.triggerRepaint();
+      } else {
+        m.easeTo({ zoom: targetZoom, duration: 150 });
+      }
+      e.preventDefault();
+    }, { passive: false });
   }
 
   // Automatyczny start przy parametrze URL ?mode=playback
