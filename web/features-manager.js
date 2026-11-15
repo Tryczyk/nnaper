@@ -1376,8 +1376,7 @@
       }
     });
 
-    // Bindowanie przycisków w prawym menu
-    document.getElementById('btn-locate-user')?.addEventListener('click', () => window.locateUserOnMap());
+    // Bindowanie przycisków akcji
     document.getElementById('btn-open-timelapse')?.addEventListener('click', () => window.openTimelapsePanel());
     document.getElementById('btn-open-drawing')?.addEventListener('click', () => window.toggleDrawingStudio());
     document.getElementById('btn-open-settings')?.addEventListener('click', () => window.openSettingsModal());

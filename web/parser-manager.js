@@ -26,7 +26,6 @@
   const btnAbort = document.getElementById('btn-abort-parser');
   const btnStart = document.getElementById('btn-start-parser');
   const btnViewMap = document.getElementById('btn-view-map-parser');
-  const btnOpenMenu = document.getElementById('btn-open-parser');
 
   const dropzoneEl = document.getElementById('parser-dropzone');
   const fileInput = document.getElementById('parser-file-input');
@@ -1613,7 +1612,6 @@
       });
     }
 
-    if (btnOpenMenu) btnOpenMenu.addEventListener('click', openParserModal);
     document.addEventListener('click', (e) => {
       const trigger = e.target.closest('#btn-open-parser, .btn-trigger-parser');
       if (trigger) {

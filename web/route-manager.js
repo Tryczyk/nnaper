@@ -14,7 +14,6 @@
   const btnRouteImportClipboard = document.getElementById('btn-route-import-clipboard');
   const routeImportFeedback = document.getElementById('route-import-feedback');
   let importFeedbackTimer = null;
-  const btnOpenPlannerMenu = document.getElementById('btn-open-planner-menu');
   let inlineRouteState = { points: [], mode: null };
   let lastCalculatedPlannedRoute = null;
   let inlineRouteLayerReady = false;
@@ -152,7 +151,6 @@
     renderInlineRouteMarkers();
     scheduleInlineRouteCalculation();
     document.getElementById('btn-search-open-planner')?.classList.add('active');
-    document.getElementById('btn-open-planner-menu')?.classList.add('active');
   }
 
   function openInlineRoutePlannerFromStart(start) {
@@ -172,7 +170,6 @@
     routePlannerStats.innerText = '';
     renderInlineRouteMarkers();
     document.getElementById('btn-search-open-planner')?.classList.add('active');
-    document.getElementById('btn-open-planner-menu')?.classList.add('active');
   }
 
   function openEmptyRoutePlanner() {
@@ -194,7 +191,6 @@
     routePlannerStats.innerText = '';
     renderInlineRouteMarkers();
     document.getElementById('btn-search-open-planner')?.classList.add('active');
-    document.getElementById('btn-open-planner-menu')?.classList.add('active');
   }
 
   function toggleRoutePlanner() {
@@ -231,7 +227,6 @@
     }
     if (routeImportFeedback) routeImportFeedback.innerText = '';
     document.getElementById('btn-search-open-planner')?.classList.remove('active');
-    document.getElementById('btn-open-planner-menu')?.classList.remove('active');
   }
 
   window.addEventListener('nnaper-route-destination-selected', event => {
@@ -263,13 +258,6 @@
       const isCollapsed = routePlannerPanel.classList.toggle('collapsed');
       btnToggleRoutePlanner.setAttribute('title', isCollapsed ? 'Rozwiń panel planowania trasy' : 'Zwiń panel planowania trasy');
       btnToggleRoutePlanner.setAttribute('aria-label', isCollapsed ? 'Rozwiń panel planowania trasy' : 'Zwiń panel planowania trasy');
-    });
-  }
-
-  if (btnOpenPlannerMenu) {
-    btnOpenPlannerMenu.addEventListener('click', (e) => {
-      e.stopPropagation();
-      toggleRoutePlanner();
     });
   }
 

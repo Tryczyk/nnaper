@@ -1346,66 +1346,6 @@ body.playback-mode #menu:not(.collapsed)~#playback-hud-panel {
   cursor: default;
 }
 
-.g-circle-target {
-  width: 50px;
-  height: 50px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(30, 41, 59, 0.8) 0%, rgba(9, 13, 22, 0.95) 100%);
-  border: 1px solid #334155;
-  position: relative;
-  overflow: hidden;
-  box-shadow: inset 0 0 8px rgba(0, 0, 0, 0.7);
-}
-
-.g-circle-ring.ring-1 {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 26px;
-  height: 26px;
-  transform: translate(-50%, -50%);
-  border-radius: 50%;
-  border: 1px dashed rgba(71, 85, 105, 0.5);
-  pointer-events: none;
-}
-
-.g-circle-cross-h {
-  position: absolute;
-  top: 50%;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: rgba(71, 85, 105, 0.5);
-  transform: translateY(-50%);
-  pointer-events: none;
-}
-
-.g-circle-cross-v {
-  position: absolute;
-  left: 50%;
-  top: 0;
-  bottom: 0;
-  width: 1px;
-  background: rgba(71, 85, 105, 0.5);
-  transform: translateX(-50%);
-  pointer-events: none;
-}
-
-.g-circle-dot {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #38bdf8;
-  box-shadow: 0 0 8px #38bdf8, 0 0 2px #fff;
-  transform: translate(21px, 21px);
-  transition: transform 0.08s ease-out, background-color 0.15s ease, box-shadow 0.15s ease;
-  z-index: 2;
-  pointer-events: none;
-}
-
 .g-circle-sub {
   font-size: 8px;
   font-weight: 700;
@@ -1608,22 +1548,6 @@ body.playback-mode #playback-bottom-controls {
 .btn-ctrl:hover {
   background: #38bdf8;
   color: #090d16;
-}
-
-.car-marker {
-  font-size: 26px;
-  line-height: 1;
-  user-select: none;
-  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.8));
-  pointer-events: none;
-  transition: none !important;
-  will-change: transform;
-}
-
-.car-marker.maplibregl-marker,
-.maplibregl-marker.car-marker {
-  transition: none !important;
-  animation: none !important;
 }
 
 /* ==================== MODAL EKSPORTU TRASY ==================== */
@@ -2063,26 +1987,6 @@ gap: 8px;
 }
 
 /* Przycisk eksportu w drzewie warstw */
-.btn-tree-export {
-  background: transparent;
-  border: none;
-  color: #64748b;
-  font-size: 12px;
-  cursor: pointer;
-  padding: 0 4px;
-  border-radius: 3px;
-  line-height: 1;
-  opacity: 0.7;
-  transition: all 0.15s ease;
-}
-
-.btn-tree-export:hover {
-  color: #38bdf8;
-  opacity: 1;
-  background: rgba(56, 189, 248, 0.15);
-}
-
-
 /* ============================================================
    RUBRYKA EKSPORTU TRASY W PRAWYM PANELU BOCZNYM
    ============================================================ */
@@ -4582,74 +4486,6 @@ gap: 8px;
     border-bottom-color: rgba(9, 13, 22, 0.96) !important;
   }
 
-  .layer-presets-bar {
-    background: rgba(15, 23, 42, 0.65);
-    border: 1px solid rgba(148, 163, 184, 0.18);
-    border-radius: 8px;
-    padding: 8px;
-    margin-bottom: 10px;
-  }
-
-  .layer-presets-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 6px;
-  }
-
-  .layer-presets-title {
-    font-size: 11px;
-    font-weight: 700;
-    color: #94a3b8;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-
-  .btn-save-preset {
-    background: rgba(56, 189, 248, 0.15);
-    border: 1px solid rgba(56, 189, 248, 0.4);
-    color: #38bdf8;
-    border-radius: 5px;
-    padding: 2px 8px;
-    font-size: 11px;
-    font-weight: 600;
-    cursor: pointer;
-  }
-
-  .layer-presets-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 5px;
-  }
-
-  .layer-presets-chips .preset-chip {
-    width: auto;
-    height: auto;
-    padding: 4px 8px;
-    background: rgba(30, 41, 59, 0.85);
-    border: 1px solid rgba(148, 163, 184, 0.25);
-    border-radius: 6px;
-    color: #e2e8f0;
-    font-size: 11px;
-    font-weight: 600;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-  }
-
-  .layer-presets-chips .preset-chip:hover {
-    transform: none;
-    border-color: #38bdf8;
-    color: #ffffff;
-  }
-
-  .preset-chip-del {
-    color: #f87171;
-    font-weight: 700;
-    margin-left: 3px;
-    cursor: pointer;
-  }
-
   .auth-stats-box {
     background: rgba(15, 23, 42, 0.65);
     border: 1px solid rgba(56, 189, 248, 0.22);
@@ -4955,42 +4791,6 @@ gap: 8px;
 
 .left-toggles-grid .menu-toggle-label {
   font-size: 11px !important;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Grupy i siatki 2-kolumnowe w prawym panelu (#menu-right) */
-.right-panel-group {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-top: 8px;
-  margin-top: 6px;
-  border-top: 1px solid rgba(148, 163, 184, 0.12);
-}
-
-.right-panel-group-title {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: #64748b;
-  padding: 0 2px;
-}
-
-.right-tools-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-}
-
-.right-tools-grid .menu-action-btn {
-  margin: 0 !important;
-  padding: 7px 6px !important;
-  font-size: 11.5px !important;
-  text-align: center;
-  justify-content: center;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
