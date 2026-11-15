@@ -804,30 +804,35 @@
 
   function renderSavedDrawingsListUI() {
     const listEl = document.getElementById('drawing-saved-list');
+    const badge = document.getElementById('draw-saved-count-badge');
+    if (badge) {
+      badge.innerText = `Kształty (${savedDrawings.length})`;
+    }
     if (!listEl) return;
     if (savedDrawings.length === 0) {
-      listEl.innerHTML = '<div style="color:#64748b; font-size:11px;">Brak zapisanych kształtów. Klikaj na mapie, aby narysować wielokąt lub ścieżkę.</div>';
+      listEl.innerHTML = '<div style="color:#64748b; font-size:11px; padding:4px 0; text-align:center;">Brak zapisanych kształtów. Klikaj na mapie, aby rysować.</div>';
       return;
     }
     listEl.innerHTML = '';
     savedDrawings.forEach((d, idx) => {
       const row = document.createElement('div');
-      row.style.cssText = 'display:flex; justify-content:space-between; align-items:center; gap:6px; padding:5px 7px; background:rgba(15,23,42,0.7); border:1px solid rgba(148,163,184,0.18); border-radius:6px; font-size:11.5px;';
+      row.className = 'draw-saved-item';
       const info = document.createElement('div');
-      info.style.cssText = 'display:flex; align-items:center; gap:6px; overflow:hidden;';
+      info.className = 'draw-saved-info';
       const dot = document.createElement('span');
-      dot.style.cssText = `width:10px; height:10px; border-radius:50%; background:${d.color || '#38bdf8'}; flex-shrink:0;`;
+      dot.className = 'draw-saved-dot';
+      dot.style.background = d.color || '#38bdf8';
       const txt = document.createElement('span');
-      txt.style.cssText = 'white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:#e2e8f0;';
+      txt.className = 'draw-saved-text';
       txt.innerText = formatMetricsLabel(d).replace('\n', ' • ');
       info.appendChild(dot);
       info.appendChild(txt);
 
       const btnDel = document.createElement('button');
       btnDel.type = 'button';
-      btnDel.style.cssText = 'background:transparent; border:none; color:#ef4444; cursor:pointer; font-weight:700; padding:2px 5px;';
+      btnDel.className = 'draw-saved-del';
       btnDel.innerText = '×';
-      btnDel.title = 'Usuń rysunek';
+      btnDel.title = 'Usuń kształt';
       btnDel.addEventListener('click', async () => {
         const token = getAuthTokenSafe();
         const itemId = d.drawing_id || d.id;
@@ -1090,33 +1095,56 @@
     `;
     document.body.appendChild(timelapseBar);
 
-    // 5. Studio rysowania po mapie
+    // 5. Studio rysowania po mapie - kompaktowy, nowoczesny panel
     const drawPanel = document.createElement('div');
     drawPanel.id = 'nnaper-drawing-panel';
-    drawPanel.className = 'nnaper-floating-bar';
+    drawPanel.className = 'nnaper-drawing-bar';
     drawPanel.style.display = 'none';
     drawPanel.innerHTML = `
-      <div style="display:flex; align-items:center; justify-content:space-between; width:100%;">
-        <strong style="color:#38bdf8; font-size:12.5px;">Rysowanie po mapie</strong>
-        <button type="button" id="btn-drawing-close" style="background:transparent; border:none; color:#94a3b8; font-size:16px; cursor:pointer;">&times;</button>
+      <div class="draw-bar-row-top">
+        <div class="draw-bar-brand" title="Przeciągnij, aby przesunąć panel">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 20h9"/>
+            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+          </svg>
+          <span class="draw-bar-title">Rysowanie</span>
+        </div>
+        <div class="draw-bar-inputs">
+          <select id="drawing-type-select" class="draw-select-sm" title="Typ kształtu">
+            <option value="polygon">Wielokąt</option>
+            <option value="path">Ścieżka</option>
+          </select>
+          <input type="text" id="drawing-name-input" class="draw-input-sm" placeholder="Nazwa kształtu (opcjonalnie)..." />
+          <input type="hidden" id="drawing-color-input" value="#38bdf8" />
+          <label class="draw-toggle-sm" title="Pokaż wymiary i metryki na mapie">
+            <input type="checkbox" id="drawing-show-metrics-chk" checked />
+            <span>Wymiary</span>
+          </label>
+        </div>
+        <button type="button" id="btn-drawing-close" class="draw-close-btn" title="Zamknij studio rysowania">&times;</button>
       </div>
-      <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; width:100%;">
-        <select id="drawing-type-select" style="background:#0f172a; color:#f8fafc; border:1px solid #334155; border-radius:5px; padding:4px 7px; font-size:11.5px;">
-          <option value="polygon">Wielokąt</option>
-          <option value="path">Ścieżka</option>
-        </select>
-        <input type="text" id="drawing-name-input" placeholder="Nazwa kształtu..." style="flex:1; min-width:110px; background:#0f172a; color:#f8fafc; border:1px solid #334155; border-radius:5px; padding:4px 7px; font-size:11.5px;" />
-        <input type="hidden" id="drawing-color-input" value="#38bdf8" />
-        <label style="font-size:11px; color:#cbd5e1; display:flex; align-items:center; gap:4px; cursor:pointer;">
-          <input type="checkbox" id="drawing-show-metrics-chk" checked style="accent-color:#38bdf8;" /> Wymiary
-        </label>
+
+      <div class="draw-bar-row-actions">
+        <button type="button" id="btn-drawing-finish" class="draw-btn draw-btn-primary" title="Zapisz narysowany kształt">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          <span>Zapisz</span>
+        </button>
+        <button type="button" id="btn-drawing-undo" class="draw-btn draw-btn-secondary" title="Cofnij ostatni punkt">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+          <span>Cofnij</span>
+        </button>
+        <button type="button" id="btn-drawing-clear-draft" class="draw-btn draw-btn-secondary draw-btn-danger" title="Wyczyść obecny szkic">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          <span>Wyczyść</span>
+        </button>
+        <button type="button" id="btn-toggle-saved-drawings" class="draw-btn draw-btn-secondary draw-btn-shapes" title="Pokaż zapisane kształty">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+          <span id="draw-saved-count-badge">Kształty (0)</span>
+          <span class="draw-caret">▾</span>
+        </button>
       </div>
-      <div style="display:flex; gap:6px; width:100%;">
-        <button type="button" id="btn-drawing-finish" class="route-action-btn" style="flex:1; padding:5px 10px; background:#0284c7; color:#fff; border:none; font-weight:600;">Zapisz kształt</button>
-        <button type="button" id="btn-drawing-undo" class="route-action-btn" style="padding:5px 10px;">Cofnij pkt</button>
-        <button type="button" id="btn-drawing-clear-draft" class="route-action-btn" style="padding:5px 10px;">Wyczyść szkic</button>
-      </div>
-      <div id="drawing-saved-list" style="width:100%; max-height:130px; overflow-y:auto; display:flex; flex-direction:column; gap:4px;"></div>
+
+      <div id="drawing-saved-list" class="draw-saved-dropdown" style="display:none;"></div>
     `;
     document.body.appendChild(drawPanel);
 
@@ -1213,6 +1241,50 @@
       currentDrawPoints = [];
       renderDrawingsOnMap();
     });
+    document.getElementById('btn-toggle-saved-drawings')?.addEventListener('click', () => {
+      const listEl = document.getElementById('drawing-saved-list');
+      if (listEl) {
+        const isHidden = listEl.style.display === 'none';
+        listEl.style.display = isHidden ? 'flex' : 'none';
+      }
+    });
+
+    // Przeciąganie panelu rysowania po ekranie
+    let isDraggingDraw = false;
+    let startDrawX = 0, startDrawY = 0;
+    let initDrawLeft = 0, initDrawTop = 0;
+    const drawBrandEl = drawPanel.querySelector('.draw-bar-brand');
+    if (drawBrandEl) {
+      drawBrandEl.style.cursor = 'grab';
+      drawBrandEl.addEventListener('mousedown', (e) => {
+        isDraggingDraw = true;
+        drawBrandEl.style.cursor = 'grabbing';
+        const rect = drawPanel.getBoundingClientRect();
+        drawPanel.style.left = `${rect.left}px`;
+        drawPanel.style.top = `${rect.top}px`;
+        drawPanel.style.transform = 'none';
+        startDrawX = e.clientX;
+        startY = e.clientY;
+        initDrawLeft = rect.left;
+        initDrawTop = rect.top;
+        e.preventDefault();
+      });
+      window.addEventListener('mousemove', (e) => {
+        if (!isDraggingDraw) return;
+        const dx = e.clientX - startDrawX;
+        const dy = e.clientY - startDrawY;
+        const newX = Math.max(10, Math.min(window.innerWidth - drawPanel.offsetWidth - 10, initDrawLeft + dx));
+        const newY = Math.max(10, Math.min(window.innerHeight - drawPanel.offsetHeight - 10, initDrawTop + dy));
+        drawPanel.style.left = `${newX}px`;
+        drawPanel.style.top = `${newY}px`;
+      });
+      window.addEventListener('mouseup', () => {
+        if (isDraggingDraw) {
+          isDraggingDraw = false;
+          drawBrandEl.style.cursor = 'grab';
+        }
+      });
+    }
 
     // Bindowanie akcji modala Ustawień
     document.getElementById('btn-close-settings-modal')?.addEventListener('click', () => {
