@@ -264,7 +264,7 @@ function computeEdgeCostJS(e, avoidPoints, avoidMode, prefs) {
     countAssert(lmContent.includes('Infrastruktura drogowa/Odcinkowe pomiary prędkości - znaki'), 'Brak synchronizacji widoczności znaków OPP');
   });
 
-  await runSuite('Uchwyt zwijania/rozwijania ("ten cosiek") przy planowaniu trasy, unikanie autostrad, tryb MAX=11 i GPX 1:1', () => {
+  await runSuite('Uchwyt zwijania/rozwijania ("ten cosiek") przy planowaniu trasy, unikanie autostrad, suwaki 0-N i GPX 1:1', () => {
     const htmlContent = fs.readFileSync(path.join(rootDir, 'web/index.html'), 'utf8');
     const cssContent = fs.readFileSync(path.join(rootDir, 'web/styles.css'), 'utf8');
     const routeContent = fs.readFileSync(path.join(rootDir, 'web/route-manager.js'), 'utf8');
@@ -273,8 +273,8 @@ function computeEdgeCostJS(e, avoidPoints, avoidMode, prefs) {
     countAssert(htmlContent.includes('id="btn-route-download-gpx"'), 'Brak przycisku #btn-route-download-gpx w index.html');
     countAssert(cssContent.includes('.route-planner-panel.collapsed'), 'Brak stylu .route-planner-panel.collapsed w styles.css');
     countAssert(routeContent.includes('chk-route-avoid-highways'), 'Brak przełącznika unikania autostrad w route-manager.js');
-    countAssert(routeContent.includes('max="11"'), 'Suwaki przeszkód powinny mieć max="11" (tryb MAX / Minimum totalne)');
-    countAssert(routeContent.includes('Minimum totalne'), 'Brak opisu trybu Minimum totalne');
+    countAssert(routeContent.includes('max="5"'), 'Suwaki przeszkód powinny mieć max="5" (zakres 0-5 odpowiadający liczbie obiektów)');
+    countAssert(routeContent.includes('Wagi przeszkód drogowych'), 'Brak sekcji wagi przeszkód drogowych');
   });
 
   await runSuite('Statystyki konta i 4 skrajne punkty geograficzne (N/S/E/W) w web/auth-manager.js', () => {

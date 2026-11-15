@@ -775,35 +775,32 @@
 
       <details id="route-prefs-details" class="route-advanced-box route-clean-details">
         <summary class="route-clean-summary">
-          Wagi przeszkód drogowych (priorytet 1–5)
+          Wagi przeszkód drogowych (0–5)
         </summary>
-        <div style="font-size:10px; color:#94a3b8; margin:4px 0 6px 0; line-height:1.35;">
-          Skala priorytetu niechęci <strong>1–5</strong> („Czego nie chcę najbardziej”: 0 = neutralne, 1–5 = koszty 1000–5000 per przeszkoda). Poziom <strong>MAX</strong> na końcu suwaka oznacza <strong>Unikaj zupełnie (Minimum totalne)</strong> — eliminacja przeszkody (przejazd tylko gdy fizycznie niezbędny).
-        </div>
         <div class="route-clean-sliders-list">
           <div class="route-compact-slider-row">
             <span class="route-compact-slider-label">Progi zwalniające</span>
-            <input type="range" id="rng-av-bumps" class="route-aversion-range" min="0" max="11" step="1" value="0" />
+            <input type="range" id="rng-av-bumps" class="route-aversion-range" min="0" max="5" step="1" value="0" />
             <strong id="val-av-bumps" class="route-compact-slider-val">0</strong>
           </div>
           <div class="route-compact-slider-row">
             <span class="route-compact-slider-label">Skrzyżowania</span>
-            <input type="range" id="rng-av-inter" class="route-aversion-range" min="0" max="11" step="1" value="0" />
+            <input type="range" id="rng-av-inter" class="route-aversion-range" min="0" max="5" step="1" value="0" />
             <strong id="val-av-inter" class="route-compact-slider-val">0</strong>
           </div>
           <div class="route-compact-slider-row">
             <span class="route-compact-slider-label">Przejścia dla pieszych</span>
-            <input type="range" id="rng-av-cross" class="route-aversion-range" min="0" max="11" step="1" value="0" />
+            <input type="range" id="rng-av-cross" class="route-aversion-range" min="0" max="5" step="1" value="0" />
             <strong id="val-av-cross" class="route-compact-slider-val">0</strong>
           </div>
           <div class="route-compact-slider-row">
             <span class="route-compact-slider-label">Ronda</span>
-            <input type="range" id="rng-av-round" class="route-aversion-range" min="0" max="11" step="1" value="0" />
+            <input type="range" id="rng-av-round" class="route-aversion-range" min="0" max="5" step="1" value="0" />
             <strong id="val-av-round" class="route-compact-slider-val">0</strong>
           </div>
           <div class="route-compact-slider-row">
             <span class="route-compact-slider-label">Sygnalizacja świetlna</span>
-            <input type="range" id="rng-av-signals" class="route-aversion-range" min="0" max="11" step="1" value="0" />
+            <input type="range" id="rng-av-signals" class="route-aversion-range" min="0" max="5" step="1" value="0" />
             <strong id="val-av-signals" class="route-compact-slider-val">0</strong>
           </div>
         </div>
@@ -929,34 +926,72 @@
       }
     });
 
-    const bindAversionSlider = (rngId, valId, prefKey) => {
-      const rng = box.querySelector('#' + rngId);
-      const val = box.querySelector('#' + valId);
-      if (!rng || !val) return;
-      rng.addEventListener('input', () => {
-        const num = parseFloat(rng.value) || 0;
-        if (num >= 11) {
-          val.innerText = 'MAX';
-          val.style.color = '#f43f5e';
-          val.title = 'Unikaj zupełnie (Minimum totalne) - eliminacja przeszkody';
-        } else if (num === 0) {
-          val.innerText = '0';
-          val.style.color = '';
-          val.title = 'Neutralne (brak dodatkowej kary)';
-        } else {
-          val.innerText = String(num);
-          val.style.color = '';
-          val.title = `Priorytet niecheci: ${num} (kara ${num * 1000} per przeszkoda)`;
+    const aversionSlidersConfig = [
+      { rngId: 'rng-av-bumps', valId: 'val-av-bumps', prefKey: 'aversion_speed_bumps' },
+      { rngId: 'rng-av-inter', valId: 'val-av-inter', prefKey: 'aversion_intersections' },
+      { rngId: 'rng-av-cross', valId: 'val-av-cross', prefKey: 'aversion_crossings' },
+      { rngId: 'rng-av-round', valId: 'val-av-round', prefKey: 'aversion_roundabouts' },
+      { rngId: 'rng-av-signals', valId: 'val-av-signals', prefKey: 'aversion_traffic_signals' }
+    ];
+
+    const maxAversionObjects = aversionSlidersConfig.length; // 5
+
+    const getTakenAversionValues = (excludeRng) => {
+      const taken = new Set();
+      aversionSlidersConfig.forEach(item => {
+        const r = box.querySelector('#' + item.rngId);
+        if (r && r !== excludeRng) {
+          const v = parseInt(r.value, 10) || 0;
+          if (v > 0) taken.add(v);
         }
-        routePreferences[prefKey] = num;
+      });
+      return taken;
+    };
+
+    const resolveAllowedAversionValue = (requestedVal, currentVal, takenSet, maxVal) => {
+      if (requestedVal === 0) return 0;
+      if (!takenSet.has(requestedVal)) return requestedVal;
+
+      if (requestedVal > currentVal) {
+        for (let v = requestedVal + 1; v <= maxVal; v++) {
+          if (!takenSet.has(v)) return v;
+        }
+        for (let v = requestedVal - 1; v >= 1; v--) {
+          if (!takenSet.has(v)) return v;
+        }
+      } else {
+        for (let v = requestedVal - 1; v >= 1; v--) {
+          if (!takenSet.has(v)) return v;
+        }
+        for (let v = requestedVal + 1; v <= maxVal; v++) {
+          if (!takenSet.has(v)) return v;
+        }
+      }
+      return !takenSet.has(currentVal) ? currentVal : 0;
+    };
+
+    aversionSlidersConfig.forEach(item => {
+      const rng = box.querySelector('#' + item.rngId);
+      const val = box.querySelector('#' + item.valId);
+      if (!rng || !val) return;
+
+      rng.max = String(maxAversionObjects);
+      let lastVal = parseInt(rng.value, 10) || 0;
+
+      rng.addEventListener('input', () => {
+        const requested = parseInt(rng.value, 10) || 0;
+        const taken = getTakenAversionValues(rng);
+        const finalVal = resolveAllowedAversionValue(requested, lastVal, taken, maxAversionObjects);
+
+        rng.value = String(finalVal);
+        lastVal = finalVal;
+        val.innerText = String(finalVal);
+        val.style.color = finalVal > 0 ? '#38bdf8' : '';
+
+        routePreferences[item.prefKey] = finalVal;
         scheduleInlineRouteCalculation();
       });
-    };
-    bindAversionSlider('rng-av-bumps', 'val-av-bumps', 'aversion_speed_bumps');
-    bindAversionSlider('rng-av-inter', 'val-av-inter', 'aversion_intersections');
-    bindAversionSlider('rng-av-cross', 'val-av-cross', 'aversion_crossings');
-    bindAversionSlider('rng-av-round', 'val-av-round', 'aversion_roundabouts');
-    bindAversionSlider('rng-av-signals', 'val-av-signals', 'aversion_traffic_signals');
+    });
   }
 
   function setStartPointFromCoords(lon, lat, label) {
