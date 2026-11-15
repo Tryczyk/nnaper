@@ -923,7 +923,10 @@
   window.toggleDrawingStudio = function (forceState) {
     drawingModeActive = typeof forceState === 'boolean' ? forceState : !drawingModeActive;
     const panel = document.getElementById('nnaper-drawing-panel');
-    if (panel) panel.style.display = drawingModeActive ? 'flex' : 'none';
+    if (panel) {
+      panel.classList.toggle('active', drawingModeActive);
+      panel.style.display = drawingModeActive ? 'flex' : 'none';
+    }
     const btn = document.getElementById('btn-open-drawing');
     if (btn) btn.classList.toggle('active', drawingModeActive);
     const mapBtn = document.getElementById('btn-map-draw-control');
@@ -1264,7 +1267,7 @@
         drawPanel.style.top = `${rect.top}px`;
         drawPanel.style.transform = 'none';
         startDrawX = e.clientX;
-        startY = e.clientY;
+        startDrawY = e.clientY;
         initDrawLeft = rect.left;
         initDrawTop = rect.top;
         e.preventDefault();
@@ -1282,6 +1285,11 @@
         if (isDraggingDraw) {
           isDraggingDraw = false;
           drawBrandEl.style.cursor = 'grab';
+        }
+      });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && drawingModeActive) {
+          window.toggleDrawingStudio(false);
         }
       });
     }

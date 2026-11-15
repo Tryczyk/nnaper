@@ -4207,7 +4207,7 @@ gap: 8px;
     padding: 7px 11px !important;
     width: min(460px, calc(100vw - 32px)) !important;
     max-width: 460px !important;
-    display: flex !important;
+    display: none;
     flex-direction: column !important;
     gap: 7px !important;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7), 0 0 15px rgba(56, 189, 248, 0.12) !important;
@@ -4215,6 +4215,10 @@ gap: 8px;
     color: #f8fafc !important;
     font-family: inherit !important;
     user-select: none;
+  }
+
+  #nnaper-drawing-panel.nnaper-drawing-bar.active {
+    display: flex !important;
   }
 
   .draw-bar-row-top {
