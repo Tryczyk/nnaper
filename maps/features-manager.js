@@ -788,9 +788,8 @@
 
   window.locateUserOnMap = function (callback) {
     if (!navigator.geolocation) {
-      const fallback = lastUserLocation || { lat: 54.3520, lon: 18.6466, accuracy: 50 };
-      updateUserLocationOnMap(fallback.lat, fallback.lon, fallback.accuracy, true);
-      if (typeof callback === 'function') callback(fallback);
+      alert('Twoja przeglądarka nie obsługuje usługi lokalizacji.');
+      if (typeof callback === 'function') callback(null);
       return;
     }
 
@@ -811,10 +810,17 @@
         }
       },
       (err) => {
-        console.warn('Geolocation API niedostępne lub odrzucone, używam widoku mapy:', err.message);
-        const center = window.map ? window.map.getCenter() : { lat: 54.3520, lng: 18.6466 };
-        updateUserLocationOnMap(center.lat, center.lng, 40, true);
-        if (typeof callback === 'function') callback({ lat: center.lat, lon: center.lng, accuracy: 40 });
+        console.warn('Geolocation API niedostępne lub odrzucone:', err.message);
+        let msg = 'Nie udało się ustalić Twojej lokalizacji.';
+        if (err.code === 1) { // PERMISSION_DENIED
+          msg = 'Dostęp do lokalizacji jest zablokowany. Upewnij się, że usługa lokalizacji jest włączona w ustawieniach systemu operacyjnego (np. Ustawienia Windows -> Prywatność i zabezpieczenia -> Lokalizacja) oraz zezwolono na dostęp w przeglądarce.';
+        } else if (err.code === 2) { // POSITION_UNAVAILABLE
+          msg = 'Brak sygnału pozycji GPS/Wi-Fi w systemie komputera. Sprawdź, czy usługi lokalizacji systemu są aktywne.';
+        } else if (err.code === 3) { // TIMEOUT
+          msg = 'Przekroczono limit czasu oczekiwania na ustalenie pozycji urządzenia.';
+        }
+        alert(msg);
+        if (typeof callback === 'function') callback(null);
       },
       { enableHighAccuracy: true, timeout: 8000, maximumAge: 5000 }
     );

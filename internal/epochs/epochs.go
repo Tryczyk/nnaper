@@ -766,18 +766,20 @@ func (s *Service) HandleTimelapseSummary(w http.ResponseWriter, r *http.Request)
 		args = []interface{}{userID}
 	}
 
-	query := fmt.Sprintf(`
+	queryTpl := `
 		SELECT
 			COALESCE(e.timestamp::date::text, 'None') AS day,
 			count(*) AS epochs_count,
-			COALESCE(round((sum(ST_Length(e.geom_line::geography)) / 1000.0)::numeric, 2), 0) AS distance_km,
-			round(AVG(ST_Y(COALESCE(e.geom_snapped, e.geom)))::numeric, 5) AS center_lat,
-			round(AVG(ST_X(COALESCE(e.geom_snapped, e.geom)))::numeric, 5) AS center_lon
+			COALESCE(round((sum(ST_Length(e.geom_line::geography)) / 1000.0)::numeric, 2), 0)::float8 AS distance_km,
+			COALESCE(round(AVG(ST_Y(COALESCE(e.geom_snapped, e.geom)))::numeric, 5), 0)::float8 AS center_lat,
+			COALESCE(round(AVG(ST_X(COALESCE(e.geom_snapped, e.geom)))::numeric, 5), 0)::float8 AS center_lon
 		FROM epochs e
 		WHERE %s
 		GROUP BY COALESCE(e.timestamp::date::text, 'None')
 		ORDER BY CASE WHEN COALESCE(e.timestamp::date::text, 'None') = 'None' THEN '9999-99-99' ELSE e.timestamp::date::text END ASC;
-	`, whereProfile)
+	`
+
+	query := fmt.Sprintf(queryTpl, whereProfile)
 
 	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -804,6 +806,25 @@ func (s *Service) HandleTimelapseSummary(w http.ResponseWriter, r *http.Request)
 			cumKM += d.DistanceKM
 			d.CumulativeKM = float64(int(cumKM*100+0.5)) / 100.0
 			days = append(days, d)
+		}
+	}
+
+	// Jesli dla wybranego pod-profilu brak tras, ale uzytkownik posiada trasy na innym profilu, pobierz dla wszystkich profili uzytkownika
+	if len(days) == 0 && profileID != "" && profileID != "all" && profileID != "__all__" {
+		allWhere := "e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = $1::uuid)"
+		fallbackQuery := fmt.Sprintf(queryTpl, allWhere)
+		fbRows, fbErr := s.pool.Query(ctx, fallbackQuery, userID)
+		if fbErr == nil {
+			defer fbRows.Close()
+			var fbCumKM float64
+			for fbRows.Next() {
+				var d daySummary
+				if err := fbRows.Scan(&d.Day, &d.EpochsCount, &d.DistanceKM, &d.CenterLat, &d.CenterLon); err == nil {
+					fbCumKM += d.DistanceKM
+					d.CumulativeKM = float64(int(fbCumKM*100+0.5)) / 100.0
+					days = append(days, d)
+				}
+			}
 		}
 	}
 	if days == nil {

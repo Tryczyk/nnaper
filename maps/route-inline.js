@@ -822,9 +822,12 @@
     btnMyLoc.addEventListener('click', () => {
       if (typeof window.locateUserOnMap === 'function') {
         window.locateUserOnMap((coords) => {
+          if (!coords) return;
           const lon = coords.lon !== undefined ? coords.lon : coords.longitude;
           const lat = coords.lat !== undefined ? coords.lat : coords.latitude;
-          setStartPointFromCoords(lon, lat, 'Moja lokalizacja');
+          if (typeof lon === 'number' && typeof lat === 'number') {
+            setStartPointFromCoords(lon, lat, 'Moja lokalizacja');
+          }
         });
       } else if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(pos => {

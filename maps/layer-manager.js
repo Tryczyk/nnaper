@@ -264,7 +264,10 @@
     styleLayers.forEach(raw => {
       if (!raw || !raw.id || raw.id === 'bg' || raw.id.startsWith('GPS') || raw.id.startsWith('Budynki')) return;
       const parts = raw.id.split('/').map(p => p.trim());
-      const cat = parts.length > 1 ? parts[0] : 'Inne';
+      let cat = parts.length > 1 ? parts[0] : 'Inne';
+      if (raw.id.startsWith('nnaper-drawings-')) {
+        cat = 'Szkice i rysunki';
+      }
       const catVis = (newCfg.categories[cat] !== undefined) ? !!newCfg.categories[cat] : true;
 
       if (!newCfg.layers[raw.id]) {
@@ -921,8 +924,19 @@
       ) return;
 
       const parts = layer.id.split('/').map(p => p.trim());
-      const groupName = parts.length > 1 ? parts[0] : 'Inne';
-      const leafTitle = parts.length > 1 ? parts[1] : layer.id.trim();
+      let groupName = parts.length > 1 ? parts[0] : 'Inne';
+      let leafTitle = parts.length > 1 ? parts[1] : layer.id.trim();
+
+      if (layer.id === 'nnaper-drawings-fill') {
+        groupName = 'Szkice i rysunki';
+        leafTitle = 'Wypełnienia kształtów';
+      } else if (layer.id === 'nnaper-drawings-line') {
+        groupName = 'Szkice i rysunki';
+        leafTitle = 'Obrysy i linie tras';
+      } else if (layer.id === 'nnaper-drawings-labels') {
+        groupName = 'Szkice i rysunki';
+        leafTitle = 'Etykiety i wymiary';
+      }
 
       if (!groups[groupName]) groups[groupName] = [];
       groups[groupName].push({ id: layer.id, title: leafTitle, raw: JSON.parse(JSON.stringify(layer)) });
@@ -1271,8 +1285,20 @@
       ) return;
 
       const parts = l.id.split('/').map(p => p.trim());
-      const gName = parts.length > 1 ? parts[0] : 'Inne';
-      const leafTitle = parts.length > 1 ? parts[1] : l.id.trim();
+      let gName = parts.length > 1 ? parts[0] : 'Inne';
+      let leafTitle = parts.length > 1 ? parts[1] : l.id.trim();
+
+      if (l.id === 'nnaper-drawings-fill') {
+        gName = 'Szkice i rysunki';
+        leafTitle = 'Wypełnienia kształtów';
+      } else if (l.id === 'nnaper-drawings-line') {
+        gName = 'Szkice i rysunki';
+        leafTitle = 'Obrysy i linie tras';
+      } else if (l.id === 'nnaper-drawings-labels') {
+        gName = 'Szkice i rysunki';
+        leafTitle = 'Etykiety i wymiary';
+      }
+
       if (!groups[gName]) groups[gName] = [];
       groups[gName].push({ id: l.id, title: leafTitle });
     });
