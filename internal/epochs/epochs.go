@@ -4,13 +4,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"nnaper/internal/auth"
 	"nnaper/internal/tiles"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Service struct {
@@ -280,20 +282,32 @@ func (s *Service) HandlePlaybackDay(w http.ResponseWriter, r *http.Request) {
 		nextArg++
 	}
 
-	var whereTime, orderClauseCTE, orderClauseOuter string
+	var whereTime, orderClauseCTE string
+	day = strings.TrimSpace(day)
 	if day == "None" || day == "null" {
 		whereTime = "e.timestamp IS NULL"
 		orderClauseCTE = "e.epoch_id ASC"
-		orderClauseOuter = "de.epoch_id ASC"
+	} else if day == "all" || day == "0" || day == "all-history" {
+		whereTime = "1=1"
+		orderClauseCTE = "e.timestamp ASC"
+	} else if len(day) == 4 && regexp.MustCompile(`^\d{4}$`).MatchString(day) {
+		whereTime = fmt.Sprintf("e.timestamp >= $%d::date AND e.timestamp < ($%d::date + INTERVAL '1 year')", nextArg, nextArg)
+		args = append(args, day+"-01-01")
+		orderClauseCTE = "e.timestamp ASC"
+		nextArg++
+	} else if len(day) == 7 && regexp.MustCompile(`^\d{4}-\d{2}$`).MatchString(day) {
+		whereTime = fmt.Sprintf("e.timestamp >= $%d::date AND e.timestamp < ($%d::date + INTERVAL '1 month')", nextArg, nextArg)
+		args = append(args, day+"-01")
+		orderClauseCTE = "e.timestamp ASC"
+		nextArg++
 	} else {
 		if _, err := time.Parse("2006-01-02", day); err != nil {
-			http.Error(w, `{"detail":"Nieprawidłowy format daty. Oczekiwano YYYY-MM-DD lub None."}`, http.StatusBadRequest)
+			http.Error(w, `{"detail":"Nieprawidłowy format daty. Oczekiwano YYYY-MM-DD, YYYY-MM, YYYY, 0 lub None."}`, http.StatusBadRequest)
 			return
 		}
 		whereTime = fmt.Sprintf("e.timestamp >= $%d::date AND e.timestamp < ($%d::date + INTERVAL '1 day')", nextArg, nextArg)
 		args = append(args, day)
 		orderClauseCTE = "e.timestamp ASC"
-		orderClauseOuter = "de.timestamp ASC"
 		nextArg++
 	}
 
@@ -318,18 +332,7 @@ func (s *Service) HandlePlaybackDay(w http.ResponseWriter, r *http.Request) {
 			WHERE %s
 			  AND %s
 			ORDER BY %s
-		),
-		day_satellites AS (
-			SELECT 
-				s.epoch_id,
-				json_agg(json_build_object(
-					'prn', s.prn,
-					'elevation', s.elevation,
-					'azimuth', s.azimuth
-				) ORDER BY s.prn) AS sats
-			FROM satellite s
-			JOIN day_epochs de ON s.epoch_id = de.epoch_id
-			GROUP BY s.epoch_id
+			LIMIT 35000
 		)
 		SELECT COALESCE(json_agg(
 			json_build_object(
@@ -342,12 +345,11 @@ func (s *Service) HandlePlaybackDay(w http.ResponseWriter, r *http.Request) {
 				'g_x', de.g_x,
 				'g_y', de.g_y,
 				'g_z', de.g_z,
-				'satellites', COALESCE(ds.sats, '[]'::json)
-			) ORDER BY %s
+				'satellites', '[]'::json
+			) ORDER BY de.timestamp ASC
 		)::text, '[]')
-		FROM day_epochs de
-		LEFT JOIN day_satellites ds ON de.epoch_id = ds.epoch_id;
-	`, activeGeom, activeGeom, whereProfile, whereTime, orderClauseCTE, orderClauseOuter)
+		FROM day_epochs de;
+	`, activeGeom, activeGeom, whereProfile, whereTime, orderClauseCTE)
 
 	var resultJSON string
 	err := s.pool.QueryRow(ctx, query, args...).Scan(&resultJSON)
@@ -630,7 +632,7 @@ func (s *Service) HandleBoxSelectEpochs(w http.ResponseWriter, r *http.Request) 
 			dateOr = append(dateOr, "e.timestamp IS NULL")
 		}
 		if len(dateOr) > 0 {
-			conds = append(conds, "(" + strings.Join(dateOr, " OR ") + ")")
+			conds = append(conds, "("+strings.Join(dateOr, " OR ")+")")
 		}
 	}
 
@@ -836,4 +838,3 @@ func (s *Service) HandleTimelapseSummary(w http.ResponseWriter, r *http.Request)
 		"days": days,
 	})
 }
-

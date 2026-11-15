@@ -11,7 +11,8 @@ RUN apk add --no-cache ca-certificates tzdata || true
 WORKDIR /app
 
 COPY --from=builder /out/nnaper-server /usr/local/bin/nnaper-server
-COPY maps /app/maps
+COPY web /app/web
+RUN ln -s /app/web /app/maps || true
 COPY assets /app/assets
 
 RUN chmod +x /usr/local/bin/nnaper-server

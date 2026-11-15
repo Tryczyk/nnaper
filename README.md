@@ -97,19 +97,19 @@ nnaper/
 │   ├── parser/              # Silnik strumieniowego parsowania NMEA/GPX/CSV i Map Matchingu OSRM
 │   ├── routing/             # Grafowy silnik wyznaczania tras, tryb MAX=11, auto-trasy i 10 znaczników
 │   └── tiles/               # Dynamiczne kafelki wektorowe MVT śladów GPS (raw/snapped/osm) i cache
-├── maps/                    # Statyczne pliki frontendu (HTML, CSS, JS):
-│   ├── icons/               # Ikony znaków drogowych (m.in. speed_bump.png - A-11a)
+├── web/                     # Statyczne pliki frontendu (HTML, CSS, JS):
 │   ├── app.js               # Główna logika interfejsu mapy, filtr dat/czasu, popup POI, edytor epok
 │   ├── auth-manager.js      # Panel konta, logowania, profili i 4 skrajnych punktów geograficznych
 │   ├── export-manager.js    # Eksport tras (HTML, PNG, SVG, GIF, GPX, CSV, GeoJSON, KML)
 │   ├── features-manager.js  # Obsługa Heatmapy, Mgły Wojny, Rysowania i Timelapse
+│   ├── index.html           # Główny widok aplikacji (Single Page Application)
 │   ├── layer-manager.js     # Edytor kolorów warstw, widoczności i presetów
 │   ├── layers.js            # Definicje warstw MapLibre, PMTiles oraz rejestracja ikon znaków (D-6, D-51, D-51a)
-│   ├── map.html             # Główny widok aplikacji
 │   ├── parser-manager.js    # Modal importu, upload i monitoring zadań z ETA
-│   ├── playback-inline.js   # Odtwarzacz trasy (HUD, G-G diagram, profil wysokości, satelity)
-│   ├── route-inline.js      # Planer i generator tras, suwaki przeszkód, eksport Google Maps i GPX 1:1
+│   ├── playback-manager.js  # Odtwarzacz trasy (HUD, G-G diagram, profil wysokości, satelity)
+│   ├── route-manager.js     # Planer i generator tras, suwaki przeszkód, eksport Google Maps i GPX 1:1
 │   ├── runtime-config.js    # Konfiguracja endpointów API i OSRM
+│   ├── runtime-config.local.js # Lokalne nadpisania konfiguracji w runtime
 │   └── styles.css           # Stylizacja interfejsu
 ├── osm_data/                # Wyciągi OSM (.osm.pbf) i podkład wektorowy (.pmtiles)
 ├── osrm/                    # Profile routingu OSRM (car.lua)
@@ -135,8 +135,8 @@ docker compose up -d --build
 ```
 
 Usługi są dostępne pod adresami:
-* **Interfejs mapy i podkład wektorowy (Caddy)**: <http://localhost:8080/maps/map.html>
-* **Bezpośredni serwer aplikacji i API (Go)**: <http://localhost:8000/maps/map.html>
+* **Interfejs mapy i podkład wektorowy (Caddy)**: <http://localhost:8080/web/index.html>
+* **Bezpośredni serwer aplikacji i API (Go)**: <http://localhost:8000/web/index.html>
 * **Silnik nawigacji drogowej (OSRM)**: <http://localhost:5000>
 
 ---

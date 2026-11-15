@@ -98,6 +98,7 @@ func main() {
 		api.Get("/auth/profiles", authService.HandleListProfiles)
 		api.Post("/auth/profiles", authService.HandleCreateProfile)
 		api.Delete("/auth/profiles/{profile_id}", authService.HandleDeleteProfile)
+		api.Delete("/auth/account", authService.HandleDeleteAccount)
 		api.Get("/auth/settings", authService.HandleUpdateSettings)
 		api.Put("/auth/settings", authService.HandleUpdateSettings)
 		api.Post("/auth/settings", authService.HandleUpdateSettings)
@@ -162,22 +163,29 @@ func main() {
 		api.Post("/parser/job/{job_id}/abort", jobsManager.HandleAbortJob)
 	})
 
-	// Obsługa statycznych plików UI (mapa, style, skrypty, kafelki PMTiles)
+	// Obsługa statycznych plików UI (frontend / web)
 	workDir, _ := os.Getwd()
-	mapsDir := filepath.Join(workDir, "maps")
+	webDir := filepath.Join(workDir, "web")
+	if _, err := os.Stat(webDir); os.IsNotExist(err) {
+		webDir = filepath.Join(workDir, "maps")
+	}
 	assetsDir := filepath.Join(workDir, "assets")
 	osmDataDir := filepath.Join(workDir, "osm_data")
 
-	fileServer(r, "/maps", http.Dir(mapsDir), false)
+	fileServer(r, "/web", http.Dir(webDir), false)
+	fileServer(r, "/maps", http.Dir(webDir), false) // alias dla wstecznej kompatybilności
 	fileServer(r, "/assets", http.Dir(assetsDir), false)
 	fileServer(r, "/osm_data", http.Dir(osmDataDir), true)
 
 	// Przekierowanie głównego adresu na mapę
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/maps/map.html", http.StatusMovedPermanently)
+		http.Redirect(w, r, "/web/", http.StatusMovedPermanently)
 	})
 	r.Get("/map.html", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/maps/map.html", http.StatusMovedPermanently)
+		http.Redirect(w, r, "/web/", http.StatusMovedPermanently)
+	})
+	r.Get("/maps/map.html", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/web/", http.StatusMovedPermanently)
 	})
 
 	addr := fmt.Sprintf("0.0.0.0:%d", cfg.Port)

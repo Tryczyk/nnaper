@@ -34,7 +34,7 @@ func TestClassifyPOI(t *testing.T) {
 		"opening_hours": "Mo-Su 10:00-22:00",
 	}
 	cat, sub := classifyPOI(tags)
-	if cat != "restaurant" || sub != "restaurant" {
+	if cat != "food" || sub != "restaurant" {
 		t.Fatalf("expected restaurant POI, got cat=%q sub=%q", cat, sub)
 	}
 

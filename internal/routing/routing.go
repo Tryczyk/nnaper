@@ -201,6 +201,23 @@ func isHighwayClass(hw string) bool {
 	}
 }
 
+func highwayRank(hw string) int {
+	switch hw {
+	case "motorway", "motorway_link", "trunk", "trunk_link":
+		return 5
+	case "primary", "primary_link":
+		return 4
+	case "secondary", "secondary_link":
+		return 3
+	case "tertiary", "tertiary_link":
+		return 2
+	case "unclassified", "residential":
+		return 1
+	default:
+		return 0
+	}
+}
+
 // ComputeEdgeCost wylicza ważony koszt przejazdu przez krawędź z uwzględnieniem punktów unikania,
 // unikania autostrad, suwaków niechęci do przeszkód (w tym trybu MAX=11 "Unikaj zupełnie / Minimum totalne"),
 // unikania przebytych już dróg oraz zakazu powtarzania tej samej drogi.
@@ -209,13 +226,27 @@ func ComputeEdgeCost(e GraphEdge, avoidPoints []AvoidPoint, avoidMode string, pr
 	cost := math.Max(e.DurationS, 0.5)
 	if prefs.AutoExploratory {
 		cost = math.Max(e.LengthM/12.5, 0.5)
-		switch e.Highway {
-		case "motorway", "motorway_link", "trunk", "trunk_link":
-			cost = cost*35.0 + 3500.0
-		case "primary", "primary_link":
-			cost = cost * 1.35
-		case "secondary", "tertiary", "unclassified":
-			cost = cost * 0.88
+		rank := highwayRank(e.Highway)
+		if prefs.AvoidHighways && isHighwayClass(e.Highway) {
+			cost = cost*5000.0 + 2500000.0
+		} else if !e.Traversed {
+			// Nowa nieprzejechana droga - premiujemy scisle wg hierarchii klas (od najwyzszej klasy do najgorszej)
+			switch rank {
+			case 5:
+				cost *= 0.12
+			case 4:
+				cost *= 0.18
+			case 3:
+				cost *= 0.30
+			case 2:
+				cost *= 0.48
+			case 1:
+				cost *= 0.72
+			default:
+				cost *= 0.95
+			}
+		} else {
+			cost = cost*80.0 + 5000.0
 		}
 	}
 	hitAvoid := false
@@ -244,40 +275,40 @@ func ComputeEdgeCost(e GraphEdge, avoidPoints []AvoidPoint, avoidMode string, pr
 		}
 	}
 
-	// 2. Kary wynikające z poziomu niechęci (0..10 lub 11 = MAX / Minimum totalne) do przeszkód drogowych
+	// 2. Kary wynikające z priorytetu niechęci (skala 1..5: 1000..5000 kary, 11 = MAX / Minimum totalne) do przeszkód drogowych
 	if prefs.AversionSpeedBumps > 0 && e.SpeedBumps > 0 {
 		if prefs.AversionSpeedBumps >= 10.5 {
 			cost += float64(e.SpeedBumps) * 2500000.0
 		} else {
-			cost += float64(e.SpeedBumps) * prefs.AversionSpeedBumps * 85.0
+			cost += float64(e.SpeedBumps) * prefs.AversionSpeedBumps * 1000.0
 		}
 	}
 	if prefs.AversionCrossings > 0 && e.Crossings > 0 {
 		if prefs.AversionCrossings >= 10.5 {
 			cost += float64(e.Crossings) * 2500000.0
 		} else {
-			cost += float64(e.Crossings) * prefs.AversionCrossings * 45.0
+			cost += float64(e.Crossings) * prefs.AversionCrossings * 1000.0
 		}
 	}
 	if prefs.AversionTrafficSignals > 0 && e.TrafficSignals > 0 {
 		if prefs.AversionTrafficSignals >= 10.5 {
 			cost += float64(e.TrafficSignals) * 2500000.0
 		} else {
-			cost += float64(e.TrafficSignals) * prefs.AversionTrafficSignals * 65.0
+			cost += float64(e.TrafficSignals) * prefs.AversionTrafficSignals * 1000.0
 		}
 	}
 	if prefs.AversionRoundabouts > 0 && e.IsRoundabout {
 		if prefs.AversionRoundabouts >= 10.5 {
 			cost += 2500000.0
 		} else {
-			cost += prefs.AversionRoundabouts * 95.0
+			cost += prefs.AversionRoundabouts * 1000.0
 		}
 	}
 	if prefs.AversionIntersections > 0 && e.IsIntersection {
 		if prefs.AversionIntersections >= 10.5 {
 			cost += 2500000.0
 		} else {
-			cost += prefs.AversionIntersections * 30.0
+			cost += prefs.AversionIntersections * 1000.0
 		}
 	}
 
@@ -847,14 +878,29 @@ func (g *Graph) buildIntelligentAutoRoute(req RoutePlanRequest, targetKM float64
 		isBad := false
 		untraversedLen := 0.0
 		obstaclePenalty := 0.0
+		rankBonus := 0.0
 		for _, a := range adjs {
 			e := g.Edges[a.edgeIdx]
-			if isHighwayClass(e.Highway) {
+			if req.Preferences.AvoidHighways && isHighwayClass(e.Highway) {
 				isBad = true
 				break
 			}
 			if !e.Traversed {
 				untraversedLen += e.LengthM
+				switch highwayRank(e.Highway) {
+				case 5:
+					if !req.Preferences.AvoidHighways {
+						rankBonus += 15000.0
+					}
+				case 4:
+					rankBonus += 12000.0
+				case 3:
+					rankBonus += 6000.0
+				case 2:
+					rankBonus += 2500.0
+				case 1:
+					rankBonus += 600.0
+				}
 			}
 			obstaclePenalty += float64(e.SpeedBumps*30 + e.Crossings*10 + e.TrafficSignals*20)
 		}
@@ -870,7 +916,7 @@ func (g *Graph) buildIntelligentAutoRoute(req RoutePlanRequest, targetKM float64
 			coord:        c,
 			roadDistM:    rDist,
 			angleRad:     ang,
-			newRoadBonus: untraversedLen - obstaclePenalty,
+			newRoadBonus: untraversedLen*2.0 + rankBonus - obstaclePenalty,
 		})
 	}
 
@@ -916,7 +962,7 @@ func (g *Graph) buildIntelligentAutoRoute(req RoutePlanRequest, targetKM float64
 
 		if isLoop {
 			// Budujemy płynną pętlę przez 4 dobrze odseparowane węzły korytarzowe na sieci dróg (tworzące szeroki wielokąt bez zawracania)
-			targetLegRoadDist := math.Max(400.0, (targetKM*1000.0*0.30)*sc)
+			targetLegRoadDist := math.Max(400.0, (targetKM*1000.0/4.2)*sc)
 			sectorOffsets := []float64{-0.75, -0.25, 0.30, 0.80}
 			usedHubs := make(map[int64]bool)
 

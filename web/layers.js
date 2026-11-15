@@ -494,7 +494,7 @@ window.MAP_STYLE = MAP_STYLE;
         const imgData = ctx.getImageData(0, 0, cw, ch);
         if (map.hasImage && map.hasImage(iconId)) {
           if (replaceExisting) {
-            try { map.removeImage(iconId); } catch (e) {}
+            try { map.removeImage(iconId); } catch (e) { }
           } else {
             return;
           }

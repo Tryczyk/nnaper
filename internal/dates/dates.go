@@ -74,7 +74,10 @@ func (s *Service) HandleDatesTree(w http.ResponseWriter, r *http.Request) {
 			args = append(args, profileID)
 			nextArg++
 		} else {
-			whereProfile = "1=1"
+			// Uzytkownik niezalogowany bez wybranego profilu - brak dostepu do cudzych tras
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			_, _ = w.Write([]byte("{}"))
+			return
 		}
 	}
 
@@ -142,6 +145,12 @@ func (s *Service) HandleTimeTree(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"detail":"Brak parametru day"}`, http.StatusBadRequest)
 		return
 	}
+	if day != "None" && day != "null" {
+		if _, err := time.Parse("2006-01-02", day); err != nil {
+			http.Error(w, `{"detail":"Nieprawidłowy format daty. Oczekiwano YYYY-MM-DD lub None."}`, http.StatusBadRequest)
+			return
+		}
+	}
 
 	token := r.URL.Query().Get("token")
 	authHeader := r.Header.Get("Authorization")
@@ -171,7 +180,10 @@ func (s *Service) HandleTimeTree(w http.ResponseWriter, r *http.Request) {
 			args = append(args, profileID)
 			nextArg++
 		} else {
-			whereProfile = "1=1"
+			// Uzytkownik niezalogowany bez wybranego profilu - brak dostepu do cudzych tras
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			_, _ = w.Write([]byte("{}"))
+			return
 		}
 	}
 
@@ -179,10 +191,6 @@ func (s *Service) HandleTimeTree(w http.ResponseWriter, r *http.Request) {
 	if day == "None" || day == "null" {
 		whereTime = "e.timestamp IS NULL"
 	} else {
-		if _, err := time.Parse("2006-01-02", day); err != nil {
-			http.Error(w, `{"detail":"Nieprawidłowy format daty. Oczekiwano YYYY-MM-DD lub None."}`, http.StatusBadRequest)
-			return
-		}
 		whereTime = fmt.Sprintf("e.timestamp >= $%d::date AND e.timestamp < ($%d::date + INTERVAL '1 day')", nextArg, nextArg)
 		args = append(args, day)
 		nextArg++

@@ -32,12 +32,12 @@ func (s *Service) HandleGetInfrastructureTile(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Dla niskich zoomów pokazujemy fotoradary i odcinkowe pomiary prędkości, a od zoom >= 12 również światła, progi i przejścia
+	// Dla niskich zoomów pokazujemy fotoradary i odcinkowe pomiary prędkości (oraz ich bramki początkowe/końcowe), a od zoom >= 13 również światła, progi i przejścia
 	catFilter := "1=1"
 	if z < 11 {
-		catFilter = "i.category IN ('speed_camera', 'average_speed')"
+		catFilter = "i.category IN ('speed_camera', 'average_speed', 'average_speed_point')"
 	} else if z < 13 {
-		catFilter = "i.category IN ('speed_camera', 'average_speed', 'traffic_signals', 'speed_bump')"
+		catFilter = "i.category IN ('speed_camera', 'average_speed', 'average_speed_point', 'traffic_signals', 'speed_bump')"
 	}
 
 	sqlQuery := fmt.Sprintf(`
@@ -59,36 +59,6 @@ func (s *Service) HandleGetInfrastructureTile(w http.ResponseWriter, r *http.Req
 			CROSS JOIN bounds
 			WHERE i.geom && bounds.geom4326
 			  AND %s
-			UNION ALL
-			SELECT
-				i.id::bigint * 100000 + 1 AS id,
-				i.osm_id,
-				'node' AS osm_type,
-				'average_speed_point' AS category,
-				'start' AS subtype,
-				COALESCE(i.name, 'Początek odcinkowego pomiaru prędkości') AS name,
-				COALESCE(i.maxspeed, '') AS maxspeed,
-				ST_StartPoint(i.geom) AS geom
-			FROM osm_infrastructure i
-			CROSS JOIN bounds
-			WHERE i.category = 'average_speed'
-			  AND ST_GeometryType(i.geom) = 'ST_LineString'
-			  AND ST_StartPoint(i.geom) && bounds.geom4326
-			UNION ALL
-			SELECT
-				i.id::bigint * 100000 + 2 AS id,
-				i.osm_id,
-				'node' AS osm_type,
-				'average_speed_point' AS category,
-				'end' AS subtype,
-				COALESCE(i.name, 'Koniec odcinkowego pomiaru prędkości') AS name,
-				COALESCE(i.maxspeed, '') AS maxspeed,
-				ST_EndPoint(i.geom) AS geom
-			FROM osm_infrastructure i
-			CROSS JOIN bounds
-			WHERE i.category = 'average_speed'
-			  AND ST_GeometryType(i.geom) = 'ST_LineString'
-			  AND ST_EndPoint(i.geom) && bounds.geom4326
 		),
 		tile_features AS (
 			SELECT

@@ -71,6 +71,7 @@
 
   const successBox = document.getElementById('parser-success-box');
   const successDetails = document.getElementById('parser-success-details');
+  const csvInfoCard = document.getElementById('parser-csv-info-card');
 
   // Stan
   let queue = [];
@@ -189,6 +190,38 @@
 
   // ------------------ MODAL & STAN ------------------
 
+  function updateCsvInfoCardVisibility() {
+    if (!csvInfoCard) return;
+
+    // Jezeli wystapil blad w pliku CSV w kolejce lub zadaniu serwera, ZAWSZE pokazujemy specyfikacje
+    const hasCsvError = queue.some(q => q.status === 'error' && q.name && q.name.toLowerCase().endsWith('.csv'));
+    if (hasCsvError) {
+      csvInfoCard.style.display = 'block';
+      return;
+    }
+
+    // W trakcie trwania aktywnego parsowania komunikat znika
+    if (isProcessing) {
+      csvInfoCard.style.display = 'none';
+      return;
+    }
+
+    // Gdy zakonczono parsowanie wszystkich plikow z sukcesem (bez bledow CSV), karta pozostaje ukryta
+    if (queue.length > 0 && queue.every(q => q.status === 'done')) {
+      csvInfoCard.style.display = 'none';
+      return;
+    }
+
+    // Jesli strefa upuszczania plikow jest ukryta (np. widok podsumowania bez bledow CSV), ukryj
+    if (dropzoneEl && dropzoneEl.style.display === 'none') {
+      csvInfoCard.style.display = 'none';
+      return;
+    }
+
+    // Domyslnie w stanie bezczynnosci / wyboru plikow - widoczna
+    csvInfoCard.style.display = 'block';
+  }
+
   function updateMenuButtonRunningState(isRunning, job) {
     if (!btnOpenMenu) return;
     if (isRunning && job) {
@@ -215,6 +248,7 @@
       if (queueSection) queueSection.style.display = 'block';
     }
 
+    updateCsvInfoCardVisibility();
     syncWithServerJobs();
   }
 
@@ -248,8 +282,6 @@
     if (modalEl) {
       modalEl.style.display = 'none';
     }
-    const csvInfoCard = document.getElementById('parser-csv-info-card');
-    if (csvInfoCard) csvInfoCard.style.display = 'none';
   }
 
   function checkAuthStatus() {
@@ -364,6 +396,7 @@
 
     if (btnViewMap) btnViewMap.style.display = job.status === 'done' ? 'inline-flex' : 'none';
     updateMenuButtonRunningState(false);
+    updateCsvInfoCardVisibility();
   }
 
   function restoreRunningServerJob(job) {
@@ -375,6 +408,7 @@
     if (dropzoneEl) dropzoneEl.style.display = 'none';
     const profBox = document.getElementById('parser-profile-box');
     if (profBox) profBox.style.display = 'none';
+    updateCsvInfoCardVisibility();
 
     const srvPct = Math.min(100, Math.max(0, job.percent || 0));
     const mappedPct = (job.status === 'done') ? 100 : Math.max(18, Math.min(99, Math.round(18 + (srvPct * 0.81))));
@@ -532,6 +566,7 @@
       btnStart.disabled = true;
     }
     updateMenuButtonRunningState(false);
+    updateCsvInfoCardVisibility();
   }
 
   function renderQueueUI() {
@@ -781,6 +816,7 @@
     if (dropzoneEl) dropzoneEl.style.display = 'none';
     const profBox = document.getElementById('parser-profile-box');
     if (profBox) profBox.style.display = 'none';
+    updateCsvInfoCardVisibility();
 
     const snap = true; // Zawsze dociągaj do dróg OSM
 
@@ -807,6 +843,9 @@
         item.error = err.message;
         item.message = `Błąd: ${err.message}`;
         updateFileRow(item);
+        if (item.name && item.name.toLowerCase().endsWith('.csv')) {
+          updateCsvInfoCardVisibility();
+        }
       }
     }
 
@@ -1045,6 +1084,9 @@
             queueItem.error = job.error || job.message;
             queueItem.message = `Błąd: ${job.error || job.message}`;
             updateFileRow(queueItem);
+            if (queueItem.name && queueItem.name.toLowerCase().endsWith('.csv')) {
+              updateCsvInfoCardVisibility();
+            }
             reject(new Error(job.error || job.message || 'Błąd zadania serwera'));
           }
         } catch (err) {
@@ -1067,6 +1109,9 @@
         queueItem.status = 'error';
         queueItem.message = err.message;
         updateFileRow(queueItem);
+        if (queueItem.name && queueItem.name.toLowerCase().endsWith('.csv')) {
+          updateCsvInfoCardVisibility();
+        }
         cleanupProcessingState();
       });
     }
@@ -1137,6 +1182,8 @@
         window.updateTrackTilesSource();
       }
     } catch (e) {}
+
+    updateCsvInfoCardVisibility();
   }
 
   function abortProcessing() {
@@ -1159,6 +1206,7 @@
 
     if (currentStageEl) currentStageEl.innerText = 'Przetwarzanie zostało przerwane.';
     cleanupProcessingState();
+    updateCsvInfoCardVisibility();
   }
 
   function cleanupProcessingState() {
@@ -1244,32 +1292,10 @@
       });
     }
 
-    // Obsługa okna pomocy formatu CSV
-    const btnCsvInfo = document.getElementById('btn-csv-info');
-    const csvInfoCard = document.getElementById('parser-csv-info-card');
-    const btnCloseCsvInfo = document.getElementById('btn-close-csv-info');
-
-    if (btnCsvInfo && csvInfoCard) {
-      btnCsvInfo.addEventListener('click', (e) => {
-        e.stopPropagation();
-        e.preventDefault();
-        const isHidden = csvInfoCard.style.display === 'none';
-        csvInfoCard.style.display = isHidden ? 'block' : 'none';
-      });
-    }
-
-    if (btnCloseCsvInfo && csvInfoCard) {
-      btnCloseCsvInfo.addEventListener('click', (e) => {
-        e.stopPropagation();
-        e.preventDefault();
-        csvInfoCard.style.display = 'none';
-      });
-    }
-
     // Drag & Drop
     if (dropzoneEl) {
       dropzoneEl.addEventListener('click', (e) => {
-        if (e.target && e.target.closest && (e.target.closest('#btn-csv-info') || e.target.closest('#parser-csv-info-card'))) {
+        if (e.target && e.target.closest && e.target.closest('#parser-csv-info-card')) {
           return;
         }
         if (fileInput) fileInput.click();

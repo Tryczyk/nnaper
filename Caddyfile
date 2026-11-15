@@ -1,0 +1,21 @@
+:8080 {
+    root * /usr/share/caddy
+    redir / /web/ 301
+    redir /index.html /web/ 301
+    redir /map.html /web/ 301
+    redir /maps/map.html /web/index.html 301
+    redir /maps /web/ 301
+    redir /maps/ /web/ 301
+    redir /maps/* /web/ 301
+    file_server
+
+    header {
+        Access-Control-Allow-Origin *
+        Access-Control-Expose-Headers "Content-Range, Accept-Ranges, Content-Length, ETag"
+    }
+
+    @pmtiles path *.pmtiles
+    header @pmtiles {
+        Cache-Control "no-store, no-cache, must-revalidate"
+    }
+}

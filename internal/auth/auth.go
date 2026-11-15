@@ -160,6 +160,10 @@ func (s *Service) HandleDeleteProfile(w http.ResponseWriter, r *http.Request) {
 	DeleteProfileHandler(s.pool, nil)(w, r)
 }
 
+func (s *Service) HandleDeleteAccount(w http.ResponseWriter, r *http.Request) {
+	DeleteAccountHandler(s.pool, nil)(w, r)
+}
+
 func (s *Service) HandleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	UpdateSettingsHandler(s.pool)(w, r)
 }
@@ -515,12 +519,37 @@ func DeleteProfileHandler(pool *pgxpool.Pool, onDeleted func()) http.HandlerFunc
 		profileID := chi.URLParam(r, "profile_id")
 		ctx := r.Context()
 
-		// Usuwamy powiązane epoki profilu oraz sam profil
-		_, _ = pool.Exec(ctx, `DELETE FROM epochs WHERE profile_id = $1::uuid`, profileID)
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			http.Error(w, `{"detail":"Błąd transakcji bazy danych."}`, http.StatusInternalServerError)
+			return
+		}
+		defer tx.Rollback(ctx)
 
-		res, err := pool.Exec(ctx, `DELETE FROM profiles WHERE profile_id = $1::uuid AND user_id = $2::uuid`, profileID, user.UserID)
+		// 1. Wyłączamy kosztowne wyzwalacze sprawdzania kluczy obcych (1 mln wierszy)
+		_, _ = tx.Exec(ctx, `SET LOCAL session_replication_role = 'replica'`)
+
+		// 2. Hurtowe usuwanie satelitów przez bezpośredni JOIN USING z epokami
+		_, _ = tx.Exec(ctx, `
+			DELETE FROM satellite s
+			USING epochs e
+			WHERE s.epoch_id = e.epoch_id AND e.profile_id = $1::uuid`, profileID)
+
+		// 3. Odpinamy profil od ewentualnych rysunków
+		_, _ = tx.Exec(ctx, `UPDATE map_drawings SET profile_id = NULL WHERE profile_id = $1::uuid`, profileID)
+
+		// 4. Usuwamy powiązane epoki profilu
+		_, _ = tx.Exec(ctx, `DELETE FROM epochs WHERE profile_id = $1::uuid`, profileID)
+
+		// 5. Usuwamy profil użytkownika
+		res, err := tx.Exec(ctx, `DELETE FROM profiles WHERE profile_id = $1::uuid AND user_id = $2::uuid`, profileID, user.UserID)
 		if err != nil || res.RowsAffected() == 0 {
 			http.Error(w, `{"detail":"Profil nie został odnaleziony."}`, http.StatusNotFound)
+			return
+		}
+
+		if err := tx.Commit(ctx); err != nil {
+			http.Error(w, `{"detail":"Błąd zapisu usunięcia profilu."}`, http.StatusInternalServerError)
 			return
 		}
 
@@ -532,6 +561,77 @@ func DeleteProfileHandler(pool *pgxpool.Pool, onDeleted func()) http.HandlerFunc
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":  "ok",
 			"message": "Profil oraz powiązane z nim ślady zostały usunięte.",
+		})
+	}
+}
+
+// DeleteAccountHandler bezpowrotnie usuwa konto użytkownika wraz ze wszystkimi profilami,
+// trasami GPS, satelitami, rysunkami, presetami i sesjami.
+func DeleteAccountHandler(pool *pgxpool.Pool, onDeleted func()) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		token := ExtractToken(r)
+		user, err := GetUserFromToken(r.Context(), pool, token)
+		if err != nil || user == nil {
+			http.Error(w, `{"detail":"Wymagane logowanie."}`, http.StatusUnauthorized)
+			return
+		}
+
+		ctx := r.Context()
+
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			http.Error(w, `{"detail":"Błąd transakcji bazy danych."}`, http.StatusInternalServerError)
+			return
+		}
+		defer tx.Rollback(ctx)
+
+		// Bypasujemy kosztowne wyzwalacze sprawdzania kluczy obcych
+		_, _ = tx.Exec(ctx, `SET LOCAL session_replication_role = 'replica'`)
+
+		// 1. Usuwamy satelity dla wszystkich epok należących do profili użytkownika
+		_, _ = tx.Exec(ctx, `
+			DELETE FROM satellite s
+			USING epochs e, profiles p
+			WHERE s.epoch_id = e.epoch_id AND e.profile_id = p.profile_id AND p.user_id = $1::uuid`, user.UserID)
+
+		// 2. Usuwamy wszystkie epoki powiązane z profilami użytkownika
+		_, _ = tx.Exec(ctx, `
+			DELETE FROM epochs e
+			USING profiles p
+			WHERE e.profile_id = p.profile_id AND p.user_id = $1::uuid`, user.UserID)
+
+		// 3. Usuwamy rysunki mapy użytkownika
+		_, _ = tx.Exec(ctx, `DELETE FROM map_drawings WHERE user_id = $1::uuid`, user.UserID)
+
+		// 4. Usuwamy presety warstw użytkownika
+		_, _ = tx.Exec(ctx, `DELETE FROM layer_presets WHERE user_id = $1::uuid`, user.UserID)
+
+		// 5. Usuwamy wszystkie profile użytkownika
+		_, _ = tx.Exec(ctx, `DELETE FROM profiles WHERE user_id = $1::uuid`, user.UserID)
+
+		// 6. Usuwamy sesje użytkownika
+		_, _ = tx.Exec(ctx, `DELETE FROM user_sessions WHERE user_id = $1::uuid`, user.UserID)
+
+		// 7. Usuwamy rekord użytkownika
+		res, err := tx.Exec(ctx, `DELETE FROM users WHERE user_id = $1::uuid`, user.UserID)
+		if err != nil || res.RowsAffected() == 0 {
+			http.Error(w, `{"detail":"Konto użytkownika nie zostało odnalezione."}`, http.StatusNotFound)
+			return
+		}
+
+		if err := tx.Commit(ctx); err != nil {
+			http.Error(w, `{"detail":"Błąd zapisu usunięcia konta."}`, http.StatusInternalServerError)
+			return
+		}
+
+		if onDeleted != nil {
+			onDeleted()
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "ok",
+			"message": "Konto użytkownika oraz wszystkie powiązane dane zostały bezpowrotnie usunięte.",
 		})
 	}
 }
@@ -691,6 +791,58 @@ func GetAccountStatsHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		ctx := r.Context()
 		profileID := strings.TrimSpace(r.URL.Query().Get("profile_id"))
 
+		// Instant-load: jeśli profil ma już zapisane przeliczone statystyki, serwujemy je natychmiast z tabeli profiles
+		if profileID != "" && profileID != "all" && profileID != "__all__" && len(profileID) == 36 {
+			var nLat, nLon, sLat, sLon, eLat, eLon, wLat, wLon *float64
+			var statsUpdatedAt *time.Time
+			var pEpochs, pDays int64
+			var pMaxSpeed, pAvgSpeed, pTotalKM, pUniqueKM float64
+			var pMinLat, pMaxLat, pMinLon, pMaxLon *float64
+
+			rowErr := pool.QueryRow(ctx, `
+				SELECT epochs_count, days_count, max_speed_kmh, avg_speed_kmh, total_km, unique_km,
+				       min_lat, max_lat, min_lon, max_lon,
+				       north_lat, north_lon, south_lat, south_lon, east_lat, east_lon, west_lat, west_lon,
+				       stats_updated_at
+				FROM profiles
+				WHERE profile_id = $1::uuid AND user_id = $2::uuid
+			`, profileID, user.UserID).Scan(
+				&pEpochs, &pDays, &pMaxSpeed, &pAvgSpeed, &pTotalKM, &pUniqueKM,
+				&pMinLat, &pMaxLat, &pMinLon, &pMaxLon,
+				&nLat, &nLon, &sLat, &sLon, &eLat, &eLon, &wLat, &wLon,
+				&statsUpdatedAt,
+			)
+			if rowErr == nil && (statsUpdatedAt != nil || pEpochs == 0) {
+				resp := map[string]interface{}{
+					"epochs_count":  pEpochs,
+					"days_count":    pDays,
+					"max_speed_kmh": pMaxSpeed,
+					"avg_speed_kmh": pAvgSpeed,
+					"total_km":      pTotalKM,
+					"unique_km":     pUniqueKM,
+					"min_lat":       pMinLat,
+					"max_lat":       pMaxLat,
+					"min_lon":       pMinLon,
+					"max_lon":       pMaxLon,
+				}
+				if nLat != nil && nLon != nil {
+					resp["north_point"] = map[string]float64{"lat": *nLat, "lon": *nLon}
+				}
+				if sLat != nil && sLon != nil {
+					resp["south_point"] = map[string]float64{"lat": *sLat, "lon": *sLon}
+				}
+				if eLat != nil && eLon != nil {
+					resp["east_point"] = map[string]float64{"lat": *eLat, "lon": *eLon}
+				}
+				if wLat != nil && wLon != nil {
+					resp["west_point"] = map[string]float64{"lat": *wLat, "lon": *wLon}
+				}
+				w.Header().Set("Content-Type", "application/json; charset=utf-8")
+				_ = json.NewEncoder(w).Encode(resp)
+				return
+			}
+		}
+
 		var whereProfile string
 		var args []interface{}
 		if profileID != "" && profileID != "all" && profileID != "__all__" && len(profileID) == 36 {
@@ -716,6 +868,7 @@ func GetAccountStatsHandler(pool *pgxpool.Pool) http.HandlerFunc {
 				count(*) AS epochs_count,
 				count(DISTINCT timestamp::date) AS days_count,
 				COALESCE(round(max(speed_kmh)::numeric, 2), 0) AS max_speed_kmh,
+				COALESCE(round(avg(speed_kmh)::numeric, 2), 0) AS avg_speed_kmh,
 				COALESCE(round((sum(ST_Length(geom_line) * 85.0))::numeric, 2), 0) AS snapped_total_km,
 				COALESCE(round((count(DISTINCT CASE WHEN geom_snapped IS NOT NULL THEN ((floor(ST_X(geom_snapped) * 4000.0)::bigint << 32) | (floor(ST_Y(geom_snapped) * 4000.0)::bigint & 4294967295)) END) * 0.0235)::numeric, 2), 0) AS unique_km,
 				round(min(ST_Y(pt))::numeric, 6) AS min_lat,
@@ -730,7 +883,7 @@ func GetAccountStatsHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		`, whereProfile)
 
 		var epochsCount, daysCount int64
-		var maxSpeed, totalKM, uniqueKM float64
+		var maxSpeed, avgSpeed, totalKM, uniqueKM float64
 		var minLat, maxLat, minLon, maxLon *float64
 		var northPt, southPt, eastPt, westPt []float64
 
@@ -738,6 +891,7 @@ func GetAccountStatsHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			&epochsCount,
 			&daysCount,
 			&maxSpeed,
+			&avgSpeed,
 			&totalKM,
 			&uniqueKM,
 			&minLat,
@@ -775,10 +929,41 @@ func GetAccountStatsHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			totalKM = uniqueKM
 		}
 
+		// Zapisanie wyliczonych statystyk do profilu jeśli to konkretny profil
+		if profileID != "" && profileID != "all" && profileID != "__all__" && len(profileID) == 36 {
+			var nLat, nLon, sLat, sLon, eLat, eLon, wLat, wLon *float64
+			if len(northPt) == 2 {
+				nLat, nLon = &northPt[0], &northPt[1]
+			}
+			if len(southPt) == 2 {
+				sLat, sLon = &southPt[0], &southPt[1]
+			}
+			if len(eastPt) == 2 {
+				eLat, eLon = &eastPt[1], &eastPt[0]
+			}
+			if len(westPt) == 2 {
+				wLat, wLon = &westPt[1], &westPt[0]
+			}
+			_, _ = pool.Exec(ctx, `
+				UPDATE profiles
+				SET epochs_count = $1, days_count = $2, max_speed_kmh = $3, avg_speed_kmh = $4,
+				    total_km = $5, unique_km = $6, min_lat = $7, max_lat = $8, min_lon = $9, max_lon = $10,
+				    north_lat = $11, north_lon = $12, south_lat = $13, south_lon = $14,
+				    east_lat = $15, east_lon = $16, west_lat = $17, west_lon = $18,
+				    stats_updated_at = NOW()
+				WHERE profile_id = $19::uuid
+			`, epochsCount, daysCount, maxSpeed, avgSpeed, totalKM, uniqueKM,
+				minLat, maxLat, minLon, maxLon,
+				nLat, nLon, sLat, sLon, eLat, eLon, wLat, wLon,
+				profileID,
+			)
+		}
+
 		resp := map[string]interface{}{
 			"epochs_count":  epochsCount,
 			"days_count":    daysCount,
 			"max_speed_kmh": maxSpeed,
+			"avg_speed_kmh": avgSpeed,
 			"total_km":      totalKM,
 			"unique_km":     uniqueKM,
 			"min_lat":       minLat,

@@ -1,7 +1,7 @@
 /**
- * playback-inline.js - Zintegrowany moduł Odtwarzacza Trasy (Playback) dla NNAPER
- * Uruchamiany bezpośrednio na głównej mapie (map.html).
- * Wykorzystuje istniejące warstwy, style i mechanizmy 3D z map.html.
+ * playback-manager.js - Zintegrowany moduł Odtwarzacza Trasy (Playback) dla NNAPER
+ * Uruchamiany bezpośrednio na głównej mapie (index.html).
+ * Wykorzystuje istniejące warstwy, style i mechanizmy 3D z index.html.
  */
 
 (function () {
@@ -14,6 +14,9 @@
   let currentIndex = 0;
   let isPlaying = false;
   let totalDistanceDayKm = 0;
+  let cumDistKm = [];
+  let cumSpeedSum = [];
+  let cumUniqueKm = [];
 
   let virtualTime = 0;
   let lastWallClockTime = 0;
@@ -57,11 +60,14 @@
   const hudGz = document.getElementById('playback-hud-gz');
   const hudDist = document.getElementById('playback-hud-dist');
   const hudAvgSpeed = document.getElementById('playback-hud-avg-speed');
+  const hudUniqueKm = document.getElementById('playback-hud-unique-km');
   const hudMaxSpeed = document.getElementById('playback-hud-max-speed');
   const hudMaxAltitude = document.getElementById('playback-hud-max-altitude');
   const hudMaxG = document.getElementById('playback-hud-max-g');
   const hudMaxGxyz = document.getElementById('playback-hud-max-gxyz');
   const hudProgressInfo = document.getElementById('playback-hud-progress-info');
+  const loadingBanner = document.getElementById('playback-loading-banner');
+  const chkDropPoints = document.getElementById('chk-playback-drop-points');
 
   const hudGgCanvas = document.getElementById('playback-hud-gg-canvas') || document.getElementById('hud-gg-canvas');
   const gCircleWrapper = document.getElementById('g-circle-wrapper');
@@ -205,6 +211,35 @@
     }
   }
 
+  function ensurePlaybackTrailLayers() {
+    const m = getMap();
+    if (!m) return;
+
+    if (!m.getSource('playback-trail-source')) {
+      m.addSource('playback-trail-source', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] }
+      });
+    }
+
+    if (!m.getLayer('playback-trail-layer')) {
+      m.addLayer({
+        id: 'playback-trail-layer',
+        type: 'line',
+        source: 'playback-trail-source',
+        layout: {
+          'line-join': 'round',
+          'line-cap': 'round'
+        },
+        paint: {
+          'line-color': '#06b6d4',
+          'line-width': 4.5,
+          'line-opacity': 0.85
+        }
+      });
+    }
+  }
+
   function getDistanceKm(lat1, lon1, lat2, lon2) {
     const R = 6371;
     const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -341,6 +376,44 @@
       m.jumpTo({ center: [pt.lon, pt.lat] });
     }
 
+    // Ślad samochodzika (zapełnianie mapy śladem)
+    const chkDrop = chkDropPoints || document.getElementById('chk-playback-drop-points');
+    if (chkDrop && chkDrop.checked && trackData.length > 0) {
+      ensurePlaybackTrailLayers();
+      const trailSrc = m.getSource('playback-trail-source');
+      if (trailSrc && index > 0) {
+        const coords = [];
+        for (let i = 0; i <= index; i++) {
+          coords.push([trackData[i].lon, trackData[i].lat]);
+        }
+        trailSrc.setData({
+          type: 'FeatureCollection',
+          features: [{
+            type: 'Feature',
+            geometry: {
+              type: 'LineString',
+              coordinates: coords
+            }
+          }]
+        });
+      }
+    }
+
+    // Statystyki na bieżąco w HUD (dystans, średnia prędkość, unikalne km siatki przestrzennej)
+    if (hudDist) {
+      const curDist = cumDistKm[index] !== undefined ? cumDistKm[index] : 0;
+      hudDist.innerText = `${curDist.toFixed(2)} km`;
+    }
+    if (hudAvgSpeed) {
+      const spdSum = cumSpeedSum[index] !== undefined ? cumSpeedSum[index] : 0;
+      const curAvg = (index >= 0 && spdSum > 0) ? (spdSum / (index + 1)) : 0;
+      hudAvgSpeed.innerText = `${curAvg.toFixed(1)} km/h`;
+    }
+    if (hudUniqueKm) {
+      const curUniq = cumUniqueKm[index] !== undefined ? cumUniqueKm[index] : 0;
+      hudUniqueKm.innerText = `${curUniq.toFixed(2)} km`;
+    }
+
     const d = new Date(pt.timestamp);
     if (hudTime) hudTime.innerText = isNaN(d.getTime()) ? (pt.timestamp || '--:--:--') : d.toTimeString().split(' ')[0];
     const spd = (pt.speed_kmh !== null && pt.speed_kmh !== undefined && !isNaN(Number(pt.speed_kmh)))
@@ -354,6 +427,16 @@
     }
     updateGraphicalGForces(pt.g_x, pt.g_y, pt.g_z, index);
     updateSatellitesDisplay(pt);
+
+    if (slider && !isUserSeeking) {
+      if (slider.max != trackData.length - 1) {
+        slider.max = trackData.length - 1;
+      }
+      slider.value = index;
+    }
+    if (hudProgressInfo && trackData.length > 0) {
+      hudProgressInfo.innerText = `${index + 1} / ${trackData.length} epok`;
+    }
   }
 
   function drawPlaybackHudGG(pt) {
@@ -482,10 +565,19 @@
   };
 
   function getSelectedPlaybackDay() {
-    if (selYear && selMonth && selDay && selYear.value && selMonth.value && selDay.value) {
+    if (selYear && selMonth && selDay && selYear.value) {
       const y = selYear.value.trim();
-      const m = selMonth.value.trim().padStart(2, '0');
-      const d = selDay.value.trim().padStart(2, '0');
+      if (y === '0' || y === 'all') {
+        return '0';
+      }
+      const m = selMonth.value ? selMonth.value.trim().padStart(2, '0') : '0';
+      if (m === '00' || m === '0' || m === 'all') {
+        return y;
+      }
+      const d = selDay.value ? selDay.value.trim().padStart(2, '0') : '0';
+      if (d === '00' || d === '0' || d === 'all') {
+        return `${y}-${m}`;
+      }
       if (/^\d{4}$/.test(y) && /^\d{2}$/.test(m) && /^\d{2}$/.test(d)) {
         return `${y}-${m}-${d}`;
       }
@@ -500,11 +592,25 @@
     if (!selYear || !selMonth || !selDay || !datesTree) return;
     const y = selYear.value;
     const m = selMonth.value;
+
+    if (y === '0' || m === '0') {
+      selDay.innerHTML = '<option value="0">Wszystkie dni - cały miesiąc</option>';
+      selDay.disabled = true;
+      return;
+    }
+    selDay.disabled = false;
+
     const days = (y && m && datesTree[y] && datesTree[y][m])
       ? [...datesTree[y][m]].sort().reverse()
       : [];
 
     selDay.innerHTML = days.length ? '' : '<option value="">Brak dni</option>';
+    if (days.length > 0) {
+      const allOpt = document.createElement('option');
+      allOpt.value = '0';
+      allOpt.innerText = 'Wszystkie dni - cały miesiąc';
+      selDay.appendChild(allOpt);
+    }
     days.forEach(d => {
       const opt = document.createElement('option');
       opt.value = d;
@@ -512,7 +618,9 @@
       selDay.appendChild(opt);
     });
 
-    if (preselectDay) {
+    if (preselectDay === '0') {
+      selDay.value = '0';
+    } else if (preselectDay) {
       const dPad = String(preselectDay).padStart(2, '0');
       if (days.includes(dPad)) selDay.value = dPad;
       else if (days.length > 0) selDay.value = days[0];
@@ -524,9 +632,23 @@
   function updatePlaybackMonths(preselectMonth = null, preselectDay = null) {
     if (!selYear || !selMonth || !datesTree) return;
     const y = selYear.value;
-    const months = (y && datesTree[y]) ? Object.keys(datesTree[y]).sort().reverse() : [];
 
+    if (y === '0') {
+      selMonth.innerHTML = '<option value="0">Wszystkie miesiące - cały rok</option>';
+      selMonth.disabled = true;
+      updatePlaybackDays(preselectDay);
+      return;
+    }
+    selMonth.disabled = false;
+
+    const months = (y && datesTree[y]) ? Object.keys(datesTree[y]).sort().reverse() : [];
     selMonth.innerHTML = months.length ? '' : '<option value="">Brak</option>';
+    if (months.length > 0) {
+      const allOpt = document.createElement('option');
+      allOpt.value = '0';
+      allOpt.innerText = 'Wszystkie miesiące - cały rok';
+      selMonth.appendChild(allOpt);
+    }
     months.forEach(m => {
       const opt = document.createElement('option');
       opt.value = m;
@@ -534,7 +656,9 @@
       selMonth.appendChild(opt);
     });
 
-    if (preselectMonth) {
+    if (preselectMonth === '0') {
+      selMonth.value = '0';
+    } else if (preselectMonth) {
       const mPad = String(preselectMonth).padStart(2, '0');
       if (months.includes(mPad)) selMonth.value = mPad;
       else if (months.length > 0) selMonth.value = months[0];
@@ -550,6 +674,12 @@
     const years = Object.keys(datesTree).sort().reverse();
 
     selYear.innerHTML = years.length ? '' : '<option value="">Brak lat</option>';
+    if (years.length > 0) {
+      const allOpt = document.createElement('option');
+      allOpt.value = '0';
+      allOpt.innerText = 'Cała historia';
+      selYear.appendChild(allOpt);
+    }
     years.forEach(y => {
       const opt = document.createElement('option');
       opt.value = y;
@@ -557,7 +687,9 @@
       selYear.appendChild(opt);
     });
 
-    if (preselectYear && years.includes(String(preselectYear))) {
+    if (preselectYear === '0') {
+      selYear.value = '0';
+    } else if (preselectYear && years.includes(String(preselectYear))) {
       selYear.value = String(preselectYear);
     } else if (years.length > 0) {
       selYear.value = years[0];
@@ -675,6 +807,7 @@
     activeFetchController = new AbortController();
     const signal = activeFetchController.signal;
 
+    if (loadingBanner) loadingBanner.style.display = 'inline-flex';
     if (hudProgressInfo) hudProgressInfo.innerText = `Ładowanie trasy dla ${dayStr}...`;
     if (btnPlay) btnPlay.disabled = true;
 
@@ -694,10 +827,18 @@
       trackData = await res.json();
       currentIndex = 0;
 
+      // Wyczyszczenie warstwy śladu przy nowej trasie
+      const mTrail = getMap();
+      const trailSrc = mTrail?.getSource('playback-trail-source');
+      if (trailSrc) {
+        trailSrc.setData({ type: 'FeatureCollection', features: [] });
+      }
+
       if (!trackData || !trackData.length) {
         if (hudProgressInfo) hudProgressInfo.innerText = `0 epok (brak danych dla ${dayStr})`;
         if (hudDist) hudDist.innerText = '0.00 km';
         if (hudAvgSpeed) hudAvgSpeed.innerText = '0.0 km/h';
+        if (hudUniqueKm) hudUniqueKm.innerText = '0.00 km';
         if (hudSpeed) hudSpeed.innerText = '0.0 km/h';
         if (hudAltitude) hudAltitude.innerText = '-- m';
         if (hudTime) hudTime.innerText = '--:--:--';
@@ -733,6 +874,11 @@
       let maxGz = 0;
       let hasG = false;
 
+      cumDistKm = new Float64Array(trackData.length);
+      cumSpeedSum = new Float64Array(trackData.length);
+      cumUniqueKm = new Float64Array(trackData.length);
+      const visitedGridCells = new Set();
+
       for (let i = 0; i < trackData.length; i++) {
         const pt = trackData[i];
         const spd = Number(pt.speed_kmh) || 0;
@@ -764,12 +910,20 @@
         }
 
         if (i > 0) {
-          totalDistanceDayKm += getDistanceKm(trackData[i - 1].lat, trackData[i - 1].lon, trackData[i].lat, trackData[i].lon);
+          totalDistanceDayKm += getDistanceKm(trackData[i - 1].lat, trackData[i - 1].lon, pt.lat, pt.lon);
         }
+        cumDistKm[i] = totalDistanceDayKm;
+        cumSpeedSum[i] = speedSum;
+
+        const cellX = Math.floor(pt.lon * 4000.0);
+        const cellY = Math.floor(pt.lat * 4000.0);
+        visitedGridCells.add(`${cellX},${cellY}`);
+        cumUniqueKm[i] = visitedGridCells.size * 0.0235;
       }
       const avgSpeed = (speedSum / trackData.length).toFixed(1);
       if (hudDist) hudDist.innerText = `${totalDistanceDayKm.toFixed(2)} km`;
       if (hudAvgSpeed) hudAvgSpeed.innerText = `${avgSpeed} km/h`;
+      if (hudUniqueKm) hudUniqueKm.innerText = `${(visitedGridCells.size * 0.0235).toFixed(2)} km`;
       if (hudMaxSpeed) hudMaxSpeed.innerText = `${maxSpeed.toFixed(1)} km/h`;
       if (hudMaxAltitude) hudMaxAltitude.innerText = hasAltitude ? `${maxAltitude.toFixed(1)} m` : '-- m';
       if (hudMaxG) hudMaxG.innerText = hasG ? `${maxGTotal.toFixed(3)} G` : '--';
@@ -805,6 +959,7 @@
       console.error('Szczegóły błędu pobierania trasy playback:', err);
       if (hudProgressInfo) hudProgressInfo.innerText = `Błąd API: ${err.message}`;
     } finally {
+      if (loadingBanner) loadingBanner.style.display = 'none';
       if (btnPlay) btnPlay.disabled = false;
     }
   }
@@ -872,6 +1027,25 @@
     if (trackData[currentIndex]) updateSatellitesDisplay(trackData[currentIndex]);
   }
 
+  function updatePlaybackButtonState(active) {
+    document.querySelectorAll('#btn-open-playback, .btn-trigger-playback').forEach(btn => {
+      const span = btn.querySelector('span');
+      if (active) {
+        if (span) span.innerText = 'Zakończ replay';
+        else btn.innerText = 'Zakończ replay';
+        btn.style.background = 'rgba(239, 68, 68, 0.2)';
+        btn.style.borderColor = 'rgba(239, 68, 68, 0.5)';
+        btn.style.color = '#f87171';
+      } else {
+        if (span) span.innerText = 'Replay trasy';
+        else btn.innerText = 'Replay trasy';
+        btn.style.background = 'rgba(56, 189, 248, 0.16)';
+        btn.style.borderColor = 'rgba(56, 189, 248, 0.45)';
+        btn.style.color = '#38bdf8';
+      }
+    });
+  }
+
   function openPlaybackMode() {
     if (isPlaybackActive) return;
     isPlaybackActive = true;
@@ -879,14 +1053,12 @@
     // Zamknięcie innych paneli, aby nie zasłaniały widoku
     if (typeof window.collapseRightMenu === 'function') window.collapseRightMenu();
     if (typeof window.collapseMenu === 'function') window.collapseMenu();
-    if (btnOpenPlayback) btnOpenPlayback.innerText = 'Zakończ replay';
+    updatePlaybackButtonState(true);
     const routePlanner = document.getElementById('route-planner-panel');
     if (routePlanner && routePlanner.classList.contains('active')) {
       const btnRouteClose = document.getElementById('btn-route-close');
       if (btnRouteClose) btnRouteClose.click();
     }
-    const pointPanel = document.getElementById('point-panel');
-    if (pointPanel) pointPanel.classList.remove('active');
 
     document.body.classList.add('playback-mode');
     if (topBarEl) topBarEl.style.display = 'flex';
@@ -929,8 +1101,9 @@
     isPlaybackActive = false;
 
     pausePlayback();
+    if (loadingBanner) loadingBanner.style.display = 'none';
     document.body.classList.remove('playback-mode');
-    if (btnOpenPlayback) btnOpenPlayback.innerText = 'Replay trasy';
+    updatePlaybackButtonState(false);
 
     if (topBarEl) topBarEl.style.display = 'none';
     if (hudPanelEl) hudPanelEl.style.display = 'none';
@@ -946,8 +1119,10 @@
     if (m && typeof m.getSource === 'function') {
       const linesSrc = m.getSource('satellites-lines-source');
       const ptsSrc = m.getSource('satellites-points-source');
+      const trailSrc = m.getSource('playback-trail-source');
       if (linesSrc) linesSrc.setData({ type: 'FeatureCollection', features: [] });
       if (ptsSrc) ptsSrc.setData({ type: 'FeatureCollection', features: [] });
+      if (trailSrc) trailSrc.setData({ type: 'FeatureCollection', features: [] });
 
       const cfg = window.LayerManager?.getStoredConfig?.() || {};
       if (!cfg.settings3D?.map3D && typeof m.getPitch === 'function' && m.getPitch() > 0) {
@@ -956,16 +1131,19 @@
     }
   }
 
-  // Podpiecie zdarzen glownych odtwarzacza
-  if (btnOpenPlayback) {
-    btnOpenPlayback.addEventListener('click', () => {
+  // Podpiecie zdarzen glownych odtwarzacza (delegacja gwarantuje dzialanie rowniez w dynamicznie generowanym drzewie warstw)
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('#btn-open-playback, .btn-trigger-playback');
+    if (btn) {
+      e.preventDefault();
+      e.stopPropagation();
       if (isPlaybackActive) {
         closePlaybackMode();
       } else {
         openPlaybackMode();
       }
-    });
-  }
+    }
+  });
 
   if (btnClosePlayback) {
     btnClosePlayback.addEventListener('click', closePlaybackMode);
@@ -978,8 +1156,12 @@
     });
   }
 
+  let isUserSeeking = false;
   if (slider) {
+    slider.addEventListener('mousedown', () => { isUserSeeking = true; });
+    slider.addEventListener('touchstart', () => { isUserSeeking = true; }, { passive: true });
     slider.addEventListener('input', (e) => {
+      isUserSeeking = true;
       pausePlayback();
       currentIndex = parseInt(e.target.value, 10);
       if (trackData[currentIndex]) {
@@ -987,6 +1169,11 @@
         renderCarAt(currentIndex, true);
       }
     });
+    slider.addEventListener('change', () => {
+      isUserSeeking = false;
+    });
+    slider.addEventListener('mouseup', () => { isUserSeeking = false; });
+    slider.addEventListener('touchend', () => { isUserSeeking = false; });
   }
 
   if (selYear) {
@@ -1046,6 +1233,18 @@
       const curDay = getSelectedPlaybackDay();
       if (window.ExportManager && typeof window.ExportManager.open === 'function') {
         window.ExportManager.open({ scope: 'day', day: curDay });
+      }
+    });
+  }
+
+  if (chkDropPoints) {
+    chkDropPoints.addEventListener('change', () => {
+      if (!chkDropPoints.checked) {
+        const m = getMap();
+        const trailSrc = m?.getSource('playback-trail-source');
+        if (trailSrc) trailSrc.setData({ type: 'FeatureCollection', features: [] });
+      } else if (trackData.length > 0 && currentIndex > 0) {
+        renderCarAt(currentIndex);
       }
     });
   }

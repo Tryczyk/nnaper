@@ -198,17 +198,17 @@ function computeEdgeCostJS(e, avoidPoints, avoidMode, prefs) {
   // CZĘŚĆ 1: WALIDACJA SKŁADNI I KONTRAKTÓW FRONTENDU
   // ---------------------------------------------------------------------------
   const jsFiles = [
-    'maps/runtime-config.js',
-    'maps/runtime-config.local.js',
-    'maps/layers.js',
-    'maps/layer-manager.js',
-    'maps/auth-manager.js',
-    'maps/app.js',
-    'maps/route-inline.js',
-    'maps/playback-inline.js',
-    'maps/export-manager.js',
-    'maps/parser-manager.js',
-    'maps/features-manager.js'
+    'web/runtime-config.js',
+    'web/runtime-config.local.js',
+    'web/layers.js',
+    'web/layer-manager.js',
+    'web/auth-manager.js',
+    'web/app.js',
+    'web/route-manager.js',
+    'web/playback-manager.js',
+    'web/export-manager.js',
+    'web/parser-manager.js',
+    'web/features-manager.js'
   ];
 
   for (const relPath of jsFiles) {
@@ -221,8 +221,8 @@ function computeEdgeCostJS(e, avoidPoints, avoidMode, prefs) {
     });
   }
 
-  await runSuite('Ikony znaków drogowych (D-6, A-11a, D-51, D-51a, Apple sygnalizacja) i warstwy w maps/layers.js', () => {
-    const layersContent = fs.readFileSync(path.join(rootDir, 'maps/layers.js'), 'utf8');
+  await runSuite('Ikony znaków drogowych (D-6, A-11a, D-51, D-51a, Apple sygnalizacja) i warstwy w web/layers.js', () => {
+    const layersContent = fs.readFileSync(path.join(rootDir, 'web/layers.js'), 'utf8');
     const requiredLayers = [
       'Infrastruktura drogowa/Sygnalizacja drogowa',
       'Infrastruktura drogowa/Progi zwalniające',
@@ -257,7 +257,7 @@ function computeEdgeCostJS(e, avoidPoints, avoidMode, prefs) {
   });
 
   await runSuite('Usunięcie przycisku "Przywróć domyślne kolory i warstwy" oraz re-aplikacja presetu przy ponownym wyborze', () => {
-    const lmContent = fs.readFileSync(path.join(rootDir, 'maps/layer-manager.js'), 'utf8');
+    const lmContent = fs.readFileSync(path.join(rootDir, 'web/layer-manager.js'), 'utf8');
     countAssert(!lmContent.includes('btn-reset-all-layers'), 'Przycisk btn-reset-all-layers powinien być usunięty');
     countAssert(!lmContent.includes('Przywróć domyślne kolory i warstwy'), 'Tekst przycisku resetu powinien być usunięty');
     countAssert(lmContent.includes('presetSelect.selectedIndex = -1'), 'Brak obsługi ponownego wyboru tego samego presetu');
@@ -265,20 +265,20 @@ function computeEdgeCostJS(e, avoidPoints, avoidMode, prefs) {
   });
 
   await runSuite('Uchwyt zwijania/rozwijania ("ten cosiek") przy planowaniu trasy, unikanie autostrad, tryb MAX=11 i GPX 1:1', () => {
-    const htmlContent = fs.readFileSync(path.join(rootDir, 'maps/map.html'), 'utf8');
-    const cssContent = fs.readFileSync(path.join(rootDir, 'maps/styles.css'), 'utf8');
-    const routeContent = fs.readFileSync(path.join(rootDir, 'maps/route-inline.js'), 'utf8');
+    const htmlContent = fs.readFileSync(path.join(rootDir, 'web/index.html'), 'utf8');
+    const cssContent = fs.readFileSync(path.join(rootDir, 'web/styles.css'), 'utf8');
+    const routeContent = fs.readFileSync(path.join(rootDir, 'web/route-manager.js'), 'utf8');
 
-    countAssert(htmlContent.includes('id="btn-toggle-route-planner"'), 'Brak uchwytu #btn-toggle-route-planner w map.html');
-    countAssert(htmlContent.includes('id="btn-route-download-gpx"'), 'Brak przycisku #btn-route-download-gpx w map.html');
+    countAssert(htmlContent.includes('id="btn-toggle-route-planner"'), 'Brak uchwytu #btn-toggle-route-planner w index.html');
+    countAssert(htmlContent.includes('id="btn-route-download-gpx"'), 'Brak przycisku #btn-route-download-gpx w index.html');
     countAssert(cssContent.includes('.route-planner-panel.collapsed'), 'Brak stylu .route-planner-panel.collapsed w styles.css');
-    countAssert(routeContent.includes('chk-route-avoid-highways'), 'Brak przełącznika unikania autostrad w route-inline.js');
+    countAssert(routeContent.includes('chk-route-avoid-highways'), 'Brak przełącznika unikania autostrad w route-manager.js');
     countAssert(routeContent.includes('max="11"'), 'Suwaki przeszkód powinny mieć max="11" (tryb MAX / Minimum totalne)');
     countAssert(routeContent.includes('Minimum totalne'), 'Brak opisu trybu Minimum totalne');
   });
 
-  await runSuite('Statystyki konta i 4 skrajne punkty geograficzne (N/S/E/W) w maps/auth-manager.js', () => {
-    const authContent = fs.readFileSync(path.join(rootDir, 'maps/auth-manager.js'), 'utf8');
+  await runSuite('Statystyki konta i 4 skrajne punkty geograficzne (N/S/E/W) w web/auth-manager.js', () => {
+    const authContent = fs.readFileSync(path.join(rootDir, 'web/auth-manager.js'), 'utf8');
     countAssert(authContent.includes('north_point'), 'Brak obsługi north_point');
     countAssert(authContent.includes('south_point'), 'Brak obsługi south_point');
     countAssert(authContent.includes('east_point'), 'Brak obsługi east_point');
@@ -358,6 +358,31 @@ function computeEdgeCostJS(e, avoidPoints, avoidMode, prefs) {
     const profileList = Array.isArray(profiles.json) ? profiles.json : profiles.json?.profiles;
     countAssert(profiles.status === 200 && Array.isArray(profileList) && profileList.length >= 1, 'Błąd GET /api/auth/profiles');
     testProfileId = profileList[0].profile_id;
+
+    // Test tworzenia i usuwania profilu
+    const newProfile = await httpRequest('POST', `/api/auth/profiles?token=${encodeURIComponent(testToken)}`, {
+      name: 'Rowerowy Test'
+    });
+    countAssert(newProfile.status === 200 && newProfile.json?.profile?.profile_id, 'Błąd POST /api/auth/profiles');
+    const createdProfileId = newProfile.json.profile.profile_id;
+
+    const delProfile = await httpRequest('DELETE', `/api/auth/profiles/${createdProfileId}?token=${encodeURIComponent(testToken)}`);
+    countAssert(delProfile.status === 200, `Błąd DELETE /api/auth/profiles: ${delProfile.status}`);
+
+    // Test usuwania konta (tworzymy osobnego tymczasowego usera i go usuwamy)
+    const tempUser = 'temp_del_' + Date.now();
+    const regTemp = await httpRequest('POST', '/api/auth/register', {
+      username: tempUser,
+      password: 'password123'
+    });
+    countAssert(regTemp.status === 200 && regTemp.json?.token, 'Błąd rejestracji tymczasowego użytkownika');
+    const tempToken = regTemp.json.token;
+
+    const delAccount = await httpRequest('DELETE', `/api/auth/account?token=${encodeURIComponent(tempToken)}`);
+    countAssert(delAccount.status === 200 && delAccount.json?.status === 'ok', `Błąd DELETE /api/auth/account: ${delAccount.status}`);
+
+    const verifyDel = await httpRequest('GET', `/api/auth/me?token=${encodeURIComponent(tempToken)}`);
+    countAssert(verifyDel.status === 401 || !verifyDel.json?.authenticated, 'Usunięty użytkownik nie powinien być zautoryzowany');
   });
 
   await runSuite('API: Statystyki konta (/api/stats) oraz weryfikacja 4 punktów skrajnych N/S/E/W na bazie głównego konta', async () => {
@@ -372,6 +397,7 @@ function computeEdgeCostJS(e, avoidPoints, avoidMode, prefs) {
     countAssert(st.status === 200 && st.json, `Błąd /api/stats: ${st.status} ${st.text}`);
     countAssert(elapsedMs < 5000, `/api/stats odpowiada zbyt wolno: ${elapsedMs} ms`);
     countAssert(typeof st.json.max_speed_kmh === 'number', 'Brak max_speed_kmh w /api/stats');
+    countAssert(typeof st.json.avg_speed_kmh === 'number', 'Brak avg_speed_kmh w /api/stats');
     countAssert(typeof st.json.total_km === 'number', 'Brak total_km w /api/stats');
     countAssert(typeof st.json.unique_km === 'number', 'Brak unique_km w /api/stats');
 

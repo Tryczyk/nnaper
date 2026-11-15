@@ -10,6 +10,8 @@ data/
 *.dll
 *.so
 *.dylib
+/nnaper
+/nnaper.exe
 /nnaper-server
 /nnaper-server.exe
 /nnaper-parser
@@ -24,7 +26,7 @@ osm_data/
 
 # Środowisko i konfiguracje lokalne
 .env
-maps/runtime-config.local.js
+web/runtime-config.local.js
 .agents/
 
 # Systemowe pliki tymczasowe

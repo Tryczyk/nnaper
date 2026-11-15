@@ -775,10 +775,10 @@
 
       <details id="route-prefs-details" class="route-advanced-box route-clean-details">
         <summary class="route-clean-summary">
-          Wagi przeszkód drogowych
+          Wagi przeszkód drogowych (priorytet 1–5)
         </summary>
         <div style="font-size:10px; color:#94a3b8; margin:4px 0 6px 0; line-height:1.35;">
-          Poziom <strong>MAX</strong> na końcu suwaka oznacza <strong>Unikaj zupełnie (Minimum totalne)</strong> — przejazd tylko gdy fizycznie niezbędny.
+          Skala priorytetu niechęci <strong>1–5</strong> („Czego nie chcę najbardziej”: 0 = neutralne, 1–5 = koszty 1000–5000 per przeszkoda). Poziom <strong>MAX</strong> na końcu suwaka oznacza <strong>Unikaj zupełnie (Minimum totalne)</strong> — eliminacja przeszkody (przejazd tylko gdy fizycznie niezbędny).
         </div>
         <div class="route-clean-sliders-list">
           <div class="route-compact-slider-row">
@@ -938,11 +938,15 @@
         if (num >= 11) {
           val.innerText = 'MAX';
           val.style.color = '#f43f5e';
-          val.title = 'Unikaj zupełnie (Minimum totalne)';
+          val.title = 'Unikaj zupełnie (Minimum totalne) - eliminacja przeszkody';
+        } else if (num === 0) {
+          val.innerText = '0';
+          val.style.color = '';
+          val.title = 'Neutralne (brak dodatkowej kary)';
         } else {
           val.innerText = String(num);
           val.style.color = '';
-          val.title = '';
+          val.title = `Priorytet niecheci: ${num} (kara ${num * 1000} per przeszkoda)`;
         }
         routePreferences[prefKey] = num;
         scheduleInlineRouteCalculation();

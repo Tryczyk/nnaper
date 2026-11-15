@@ -418,8 +418,8 @@ func ComputeDeterministicSquareTriangle(lat, lon float64) (key string, coords []
 	return key, coords, areaM2
 }
 
-// HandleGetFogOfWar zwraca odkryte przez użytkownika działki (zarówno z tabeli fog_parcels przypisanej do ulic,
-// jak i deterministyczne trójkątne działki 1/4 kwadratu 1km x 1km po obu stronach przejechanych dróg).
+// HandleGetFogOfWar zwraca stan odkrywania mapy (zasłaniające trójkąty mgły na nieodkrytych działkach,
+// znikające po przejechaniu przyległej drogi) wraz ze statystykami odkrytego obszaru.
 func (s *Service) HandleGetFogOfWar(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	token := r.URL.Query().Get("token")
@@ -443,98 +443,80 @@ func (s *Service) HandleGetFogOfWar(w http.ResponseWriter, r *http.Request) {
 		args = []interface{}{userID}
 	}
 
-	var features []map[string]interface{}
-	seenKeys := make(map[string]bool)
-	totalAreaM2 := 0.0
-
-	// 1. Pobieramy odkryte działki bezpośrednio z tabeli fog_parcels (przypisane do ulic po obu stronach drogi)
-	parcelQuery := fmt.Sprintf(`
-		SELECT DISTINCT
-			fp.parcel_id,
-			ST_AsGeoJSON(fp.parcel_geom)::text,
-			fp.area_m2
-		FROM fog_parcels fp
-		WHERE EXISTS (
-			SELECT 1 FROM epochs e
-			WHERE %s
-			  AND ST_DWithin(fp.road_geom, COALESCE(e.geom_snapped, e.geom), 0.00045)
-		)
-		LIMIT 15000;
-	`, whereProfile)
-
-	pRows, err := s.pool.Query(ctx, parcelQuery, args...)
-	if err == nil {
-		for pRows.Next() {
-			var pid int
-			var geoStr string
-			var area float64
-			if err := pRows.Scan(&pid, &geoStr, &area); err == nil {
-				var geomObj map[string]interface{}
-				if json.Unmarshal([]byte(geoStr), &geomObj) == nil {
-					key := fmt.Sprintf("db_%d", pid)
-					seenKeys[key] = true
-					totalAreaM2 += area
-					features = append(features, map[string]interface{}{
-						"type":     "Feature",
-						"geometry": geomObj,
-						"properties": map[string]interface{}{
-							"parcel_id": key,
-							"area_m2":   math.Round(area),
-						},
-					})
-				}
+	bboxStr := strings.TrimSpace(r.URL.Query().Get("bbox"))
+	var minLon, minLat, maxLon, maxLat float64
+	hasBbox := false
+	if bboxStr != "" {
+		parts := strings.Split(bboxStr, ",")
+		if len(parts) == 4 {
+			p0, e0 := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+			p1, e1 := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+			p2, e2 := strconv.ParseFloat(strings.TrimSpace(parts[2]), 64)
+			p3, e3 := strconv.ParseFloat(strings.TrimSpace(parts[3]), 64)
+			if e0 == nil && e1 == nil && e2 == nil && e3 == nil {
+				minLon, minLat, maxLon, maxLat = p0, p1, p2, p3
+				hasBbox = true
 			}
 		}
-		pRows.Close()
 	}
 
-	// 2. Uzupełniamy deterministycznymi trójkątami równoramiennymi (1/4 kwadratu 1km x 1km o podstawie 1km i ramionach ~0.7km)
-	// wyznaczanymi z obu stron przejechanych dróg (próbkowanie punktów na siatce ~100m)
-	ptsQuery := fmt.Sprintf(`
-		SELECT DISTINCT
-			round(ST_Y(COALESCE(e.geom_snapped, e.geom))::numeric, 3) AS lat,
-			round(ST_X(COALESCE(e.geom_snapped, e.geom))::numeric, 3) AS lon
-		FROM epochs e
-		WHERE %s
-		LIMIT 25000;
-	`, whereProfile)
+	var features []map[string]interface{}
+	if hasBbox {
+		// Pobieramy nieodwiedzone trójkątne działki w widocznym oknie mapy (zasłaniające mgłą nieodkryty teren)
+		qArgs := append([]interface{}{minLon, minLat, maxLon, maxLat}, args...)
+		shiftedWhere := strings.ReplaceAll(whereProfile, "$1", "$5")
+		shiftedWhere = strings.ReplaceAll(shiftedWhere, "$2", "$6")
 
-	ptRows, err := s.pool.Query(ctx, ptsQuery, args...)
-	if err == nil {
-		// Offsety ~60m w 4 kierunkach zapewniają, że przejazd po drodze stanowiącej granicę dwóch kwadratów 1km x 1km
-		// odkrywa trójkątne działki przypisane z obu stron tej drogi!
-		offsets := [][2]float64{
-			{0, 0},
-			{0.0005, 0},
-			{-0.0005, 0},
-			{0, 0.0008},
-			{0, -0.0008},
-		}
-		for ptRows.Next() {
-			var lat, lon float64
-			if err := ptRows.Scan(&lat, &lon); err == nil {
-				for _, off := range offsets {
-					k, polyCoords, area := ComputeDeterministicSquareTriangle(lat+off[0], lon+off[1])
-					if !seenKeys[k] {
-						seenKeys[k] = true
-						totalAreaM2 += area
+		unvisitedQuery := fmt.Sprintf(`
+			SELECT fp.parcel_id, ST_AsGeoJSON(fp.parcel_geom)::text, fp.area_m2
+			FROM fog_parcels fp
+			WHERE fp.parcel_geom && ST_MakeEnvelope($1, $2, $3, $4, 4326)
+			  AND NOT EXISTS (
+			    SELECT 1 FROM epochs e
+			    WHERE %s
+			      AND e.geom && fp.road_geom
+			      AND ST_DWithin(fp.road_geom, e.geom, 0.00045)
+			  )
+			LIMIT 3500;
+		`, shiftedWhere)
+
+		pRows, err := s.pool.Query(ctx, unvisitedQuery, qArgs...)
+		if err == nil {
+			defer pRows.Close()
+			for pRows.Next() {
+				var pid int
+				var geoStr string
+				var area float64
+				if err := pRows.Scan(&pid, &geoStr, &area); err == nil {
+					var geomObj map[string]interface{}
+					if json.Unmarshal([]byte(geoStr), &geomObj) == nil {
 						features = append(features, map[string]interface{}{
-							"type": "Feature",
-							"geometry": map[string]interface{}{
-								"type":        "Polygon",
-								"coordinates": [][][2]float64{polyCoords},
-							},
+							"type":     "Feature",
+							"geometry": geomObj,
 							"properties": map[string]interface{}{
-								"parcel_id": k,
-								"area_m2":   area,
+								"parcel_id": fmt.Sprintf("fog_%d", pid),
+								"area_m2":   math.Round(area),
 							},
 						})
 					}
 				}
 			}
 		}
-		ptRows.Close()
 	}
+
+	var discCount int
+	var discAreaKM2 float64
+	statQuery := fmt.Sprintf(`
+		SELECT count(*), COALESCE(round((sum(fp.area_m2) / 1000000.0)::numeric, 2), 0)::float8
+		FROM fog_parcels fp
+		WHERE EXISTS (
+		  SELECT 1 FROM epochs e
+		  WHERE %s
+		    AND e.geom && fp.road_geom
+		    AND ST_DWithin(fp.road_geom, e.geom, 0.00045)
+		);
+	`, whereProfile)
+	_ = s.pool.QueryRow(ctx, statQuery, args...).Scan(&discCount, &discAreaKM2)
 
 	if features == nil {
 		features = []map[string]interface{}{}
@@ -542,8 +524,8 @@ func (s *Service) HandleGetFogOfWar(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"discovered_count":    len(features),
-		"discovered_area_km2": math.Round((totalAreaM2/1_000_000.0)*100) / 100.0,
+		"discovered_count":    discCount,
+		"discovered_area_km2": discAreaKM2,
 		"parcels":             features,
 	})
 }

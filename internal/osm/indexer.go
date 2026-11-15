@@ -811,6 +811,51 @@ func saveIndexedDataToDB(
 		DELETE FROM osm_infrastructure i
 		WHERE i.category IN ('traffic_signals', 'speed_bump', 'crossing')
 		  AND NOT EXISTS (SELECT 1 FROM dedup d WHERE d.keep_id = i.id);
+
+		-- Generowanie dokladnie 2 bramek (poczatek i koniec) dla kazdego odcinkowego pomiaru predkosci (OPP)
+		DELETE FROM osm_infrastructure WHERE category = 'average_speed_point';
+
+		WITH sec_pts AS (
+			SELECT 
+				name,
+				max(maxspeed) AS maxspeed,
+				(ST_DumpPoints(ST_Collect(geom))).geom AS pt
+			FROM osm_infrastructure
+			WHERE category = 'average_speed'
+			GROUP BY name
+		),
+		distinct_pts AS (
+			SELECT DISTINCT name, maxspeed, pt FROM sec_pts
+		),
+		pairs AS (
+			SELECT 
+				p1.name,
+				p1.maxspeed,
+				p1.pt AS pt1,
+				p2.pt AS pt2,
+				ROW_NUMBER() OVER (PARTITION BY p1.name ORDER BY ST_Distance(p1.pt::geography, p2.pt::geography) DESC) AS rnk
+			FROM distinct_pts p1
+			JOIN distinct_pts p2 ON p1.name = p2.name AND p1.pt < p2.pt
+		),
+		top_pairs AS (
+			SELECT name, maxspeed, pt1, pt2 FROM pairs WHERE rnk = 1
+		),
+		gates AS (
+			SELECT name, maxspeed, pt1 AS geom, 'start' AS subtype FROM top_pairs
+			UNION ALL
+			SELECT name, maxspeed, pt2 AS geom, 'end' AS subtype FROM top_pairs
+		)
+		INSERT INTO osm_infrastructure (osm_id, osm_type, category, subtype, name, maxspeed, tags, geom)
+		SELECT 
+			9910000 + ROW_NUMBER() OVER () AS osm_id,
+			'node' AS osm_type,
+			'average_speed_point' AS category,
+			subtype,
+			'Poczatek/koniec OPP (' || name || ')' AS name,
+			maxspeed,
+			jsonb_build_object('enforcement', 'average_speed_point', 'maxspeed', maxspeed, 'name', name),
+			geom
+		FROM gates;
 	`)
 
 	// 2. Punkty POI

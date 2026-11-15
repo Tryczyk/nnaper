@@ -21,487 +21,9 @@
     return (typeof window.getActiveProfileId === 'function') ? window.getActiveProfileId() : (localStorage.getItem('nnaper_active_profile_id') || '');
   }
 
-  /* ============================================================================
-   * 1. MANUALNA EDYCJA POJEDYNCZEGO PUNKTU GPS + DODAWANIE NOWEGO PUNKTU
-   * ============================================================================ */
-  let manualDragMarker = null;
-
-  function clearManualDragMarker() {
-    if (manualDragMarker) {
-      manualDragMarker.remove();
-      manualDragMarker = null;
-    }
-  }
-
-  window.bindManualEpochEditor = function (epochData) {
-    clearManualDragMarker();
-    const btnDrag = document.getElementById('btn-drag-epoch-map');
-    const btnSave = document.getElementById('btn-save-epoch-edit');
-    const btnClone = document.getElementById('btn-clone-new-epoch');
-    const inpLat = document.getElementById('edit-epoch-lat');
-    const inpLon = document.getElementById('edit-epoch-lon');
-    const inpSpeed = document.getElementById('edit-epoch-speed');
-    const inpTs = document.getElementById('edit-epoch-ts');
-    const inpGx = document.getElementById('edit-epoch-gx');
-    const inpGy = document.getElementById('edit-epoch-gy');
-    const inpGz = document.getElementById('edit-epoch-gz');
-    const feedback = document.getElementById('edit-epoch-feedback');
-
-    if (btnDrag && window.map) {
-      btnDrag.addEventListener('click', () => {
-        if (manualDragMarker) {
-          clearManualDragMarker();
-          btnDrag.innerText = 'Przeciągnij na mapie';
-          return;
-        }
-        const startLat = parseFloat(inpLat?.value || epochData.latitude);
-        const startLon = parseFloat(inpLon?.value || epochData.longitude);
-        if (!Number.isFinite(startLat) || !Number.isFinite(startLon)) return;
-
-        manualDragMarker = new maplibregl.Marker({ color: '#38bdf8', draggable: true })
-          .setLngLat([startLon, startLat])
-          .addTo(window.map);
-
-        btnDrag.innerText = 'Zakończ przeciąganie';
-        if (feedback) feedback.innerText = 'Przeciągnij niebieski znacznik na mapie, a następnie kliknij "Zapisz zmiany punktu".';
-
-        manualDragMarker.on('drag', () => {
-          const pos = manualDragMarker.getLngLat();
-          if (inpLat) inpLat.value = pos.lat.toFixed(6);
-          if (inpLon) inpLon.value = pos.lng.toFixed(6);
-        });
-      });
-    }
-
-    if (btnSave) {
-      btnSave.addEventListener('click', async () => {
-        const token = getAuthTokenSafe();
-        if (!token) {
-          if (feedback) feedback.innerText = 'Zaloguj się, aby edytować punkty.';
-          return;
-        }
-        const payload = {
-          latitude: parseFloat(inpLat?.value),
-          longitude: parseFloat(inpLon?.value),
-          speed_kmh: parseFloat(inpSpeed?.value || '0'),
-          timestamp: (inpTs?.value || '').trim()
-        };
-        if (inpGx && inpGx.value !== '') payload.g_x = parseFloat(inpGx.value);
-        if (inpGy && inpGy.value !== '') payload.g_y = parseFloat(inpGy.value);
-        if (inpGz && inpGz.value !== '') payload.g_z = parseFloat(inpGz.value);
-
-        btnSave.disabled = true;
-        if (feedback) feedback.innerText = 'Zapisywanie zmian...';
-        try {
-          const res = await fetch(`${apiBase}/api/epoch/${epochData.epoch_id}?token=${encodeURIComponent(token)}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-          });
-          const data = await res.json().catch(() => ({}));
-          if (!res.ok) throw new Error(data.error || 'Błąd zapisu punktu');
-
-          clearManualDragMarker();
-          if (typeof window.forceRefreshTrackTiles === 'function') window.forceRefreshTrackTiles();
-          window.dispatchEvent(new CustomEvent('nnaper_epochs_deleted', { detail: { epoch_id: epochData.epoch_id } }));
-          if (feedback) feedback.innerText = 'Zapisano pomyślnie!';
-          setTimeout(() => {
-            if (typeof window.loadPointFullDetails === 'function') {
-              window.loadPointFullDetails(epochData.epoch_id);
-            }
-          }, 400);
-        } catch (err) {
-          if (feedback) feedback.innerText = 'Błąd: ' + err.message;
-        } finally {
-          btnSave.disabled = false;
-        }
-      });
-    }
-
-    if (btnClone) {
-      btnClone.addEventListener('click', async () => {
-        const token = getAuthTokenSafe();
-        if (!token) {
-          if (feedback) feedback.innerText = 'Zaloguj się, aby dodawać punkty.';
-          return;
-        }
-        const profileId = getActiveProfileIdSafe();
-        const payload = {
-          profile_id: profileId,
-          latitude: parseFloat(inpLat?.value || epochData.latitude) + 0.00015,
-          longitude: parseFloat(inpLon?.value || epochData.longitude) + 0.00015,
-          speed_kmh: parseFloat(inpSpeed?.value || '0'),
-          timestamp: (inpTs?.value || new Date().toISOString().replace('T', ' ').substring(0, 19)).trim()
-        };
-        if (feedback) feedback.innerText = 'Dodawanie nowego punktu...';
-        try {
-          const res = await fetch(`${apiBase}/api/epoch?token=${encodeURIComponent(token)}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-          });
-          const data = await res.json().catch(() => ({}));
-          if (!res.ok) throw new Error(data.error || 'Błąd tworzenia punktu');
-
-          if (typeof window.forceRefreshTrackTiles === 'function') window.forceRefreshTrackTiles();
-          if (typeof window.autoBuildTree === 'function') window.autoBuildTree();
-          window.dispatchEvent(new CustomEvent('nnaper_epochs_deleted', { detail: { created: data.epoch_id } }));
-          if (data.epoch_id && typeof window.loadPointFullDetails === 'function') {
-            window.loadPointFullDetails(data.epoch_id);
-          }
-        } catch (err) {
-          if (feedback) feedback.innerText = 'Błąd: ' + err.message;
-        }
-      });
-    }
-  };
-
-  /* ============================================================================
-   * 2. BATCHOWE EDYTOWANIE PUNKTÓW (ZAZNACZANIE RAMKĄ, PRZESUWANIE O WEKTOR, USUWANIE)
-   * ============================================================================ */
-  let batchModeActive = false;
-  let batchSelectedPoints = [];
-  let boxStartPoint = null;
-  let boxSelectionDiv = null;
-  let vectorDragMode = false;
-  let vectorDragStartLngLat = null;
-
-  function ensureBatchLayers() {
-    if (!window.map) return;
-    if (!window.map.getSource('batch-selected-source')) {
-      window.map.addSource('batch-selected-source', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] }
-      });
-    }
-    if (!window.map.getLayer('batch-selected-points-layer')) {
-      window.map.addLayer({
-        id: 'batch-selected-points-layer',
-        type: 'circle',
-        source: 'batch-selected-source',
-        paint: {
-          'circle-radius': 6.5,
-          'circle-color': '#f59e0b',
-          'circle-stroke-width': 2,
-          'circle-stroke-color': '#ffffff'
-        }
-      });
-    }
-    if (!window.map.getSource('batch-vector-source')) {
-      window.map.addSource('batch-vector-source', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] }
-      });
-    }
-    if (!window.map.getLayer('batch-vector-line-layer')) {
-      window.map.addLayer({
-        id: 'batch-vector-line-layer',
-        type: 'line',
-        source: 'batch-vector-source',
-        paint: {
-          'line-color': '#38bdf8',
-          'line-width': 3,
-          'line-dasharray': [2, 2]
-        }
-      });
-    }
-  }
-
-  function renderBatchSelectedOnMap(deltaLat = 0, deltaLon = 0) {
-    if (!window.map) return;
-    ensureBatchLayers();
-    const src = window.map.getSource('batch-selected-source');
-    if (!src) return;
-    const features = batchSelectedPoints.map(pt => ({
-      type: 'Feature',
-      geometry: {
-        type: 'Point',
-        coordinates: [pt.lon + deltaLon, pt.lat + deltaLat]
-      },
-      properties: { epoch_id: pt.epoch_id }
-    }));
-    src.setData({ type: 'FeatureCollection', features });
-  }
-
-  function updateBatchToolbarUI() {
-    const toolbar = document.getElementById('batch-edit-toolbar');
-    const countEl = document.getElementById('batch-selected-count');
-    if (!toolbar) return;
-    toolbar.style.display = batchModeActive ? 'flex' : 'none';
-    if (countEl) countEl.innerText = `${batchSelectedPoints.length} zaznaczonych punktów`;
-    const btnToggle = document.getElementById('btn-toggle-batch-edit');
-    if (btnToggle) {
-      btnToggle.classList.toggle('active', batchModeActive);
-      btnToggle.setAttribute('aria-pressed', batchModeActive ? 'true' : 'false');
-    }
-  }
-
-  function getCurrentlyActiveDays() {
-    if (!window.dayNodesRegistry) return [];
-    const days = [];
-    window.dayNodesRegistry.forEach((dayItem) => {
-      if (dayItem.dayHeader?.checkbox?.checked || dayItem.dayHeader?.checkbox?.indeterminate) {
-        days.push(dayItem.dateStr);
-      }
-    });
-    return days;
-  }
-
-  async function selectPointsInBox(lngLat1, lngLat2, append = false) {
-    const token = getAuthTokenSafe();
-    if (!token) {
-      const countEl = document.getElementById('batch-selected-count');
-      if (countEl) countEl.innerText = 'Zaloguj się, aby zaznaczać punkty GPS';
-      return;
-    }
-    const minLon = Math.min(lngLat1.lng, lngLat2.lng);
-    const maxLon = Math.max(lngLat1.lng, lngLat2.lng);
-    const minLat = Math.min(lngLat1.lat, lngLat2.lat);
-    const maxLat = Math.max(lngLat1.lat, lngLat2.lat);
-    const profileId = getActiveProfileIdSafe();
-    const activeDays = getCurrentlyActiveDays();
-
-    try {
-      const res = await fetch(`${apiBase}/api/epochs/box-select?token=${encodeURIComponent(token)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          profile_id: profileId,
-          min_lat: minLat,
-          max_lat: maxLat,
-          min_lon: minLon,
-          max_lon: maxLon,
-          days: activeDays
-        })
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.detail || data.error || 'Błąd zaznaczania punktów');
-      const incoming = Array.isArray(data.points) ? data.points : [];
-      if (append) {
-        const existingIds = new Set(batchSelectedPoints.map(p => p.epoch_id));
-        incoming.forEach(p => {
-          if (!existingIds.has(p.epoch_id)) batchSelectedPoints.push(p);
-        });
-      } else {
-        batchSelectedPoints = incoming;
-      }
-      renderBatchSelectedOnMap();
-      updateBatchToolbarUI();
-    } catch (err) {
-      console.error('Box select error:', err);
-    }
-  }
-
-  async function translateSelectedPointsByVector(deltaLat, deltaLon) {
-    if (batchSelectedPoints.length === 0) {
-      alert('Najpierw zaznacz punkty ramką na mapie (prawym lub środkowym przyciskiem myszy).');
-      return;
-    }
-    const token = getAuthTokenSafe();
-    const profileId = getActiveProfileIdSafe();
-    const ids = batchSelectedPoints.map(p => p.epoch_id);
-
-    try {
-      const res = await fetch(`${apiBase}/api/epochs/translate-batch?token=${encodeURIComponent(token)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          profile_id: profileId,
-          epoch_ids: ids,
-          delta_lat: deltaLat,
-          delta_lon: deltaLon
-        })
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.detail || data.error || 'Błąd przesuwania punktów');
-
-      batchSelectedPoints = batchSelectedPoints.map(p => ({
-        ...p,
-        lat: p.lat + deltaLat,
-        lon: p.lon + deltaLon
-      }));
-      renderBatchSelectedOnMap();
-      if (typeof window.forceRefreshTrackTiles === 'function') window.forceRefreshTrackTiles();
-      window.dispatchEvent(new CustomEvent('nnaper_epochs_deleted', { detail: { translated: data.updated_count } }));
-    } catch (err) {
-      alert('Błąd przesuwania punktów: ' + err.message);
-    }
-  }
-
-  async function deleteSelectedPointsBatch() {
-    if (batchSelectedPoints.length === 0) {
-      alert('Brak zaznaczonych punktów do usunięcia.');
-      return;
-    }
-    if (!window.confirm(`Czy na pewno chcesz bezpowrotnie usunąć ${batchSelectedPoints.length} zaznaczonych punktów GPS?`)) {
-      return;
-    }
-    const token = getAuthTokenSafe();
-    const profileId = getActiveProfileIdSafe();
-    const ids = batchSelectedPoints.map(p => p.epoch_id);
-    try {
-      const res = await fetch(`${apiBase}/api/epochs/delete-batch?token=${encodeURIComponent(token)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          profile_id: profileId,
-          epoch_ids: ids
-        })
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.detail || data.error || 'Błąd usuwania punktów');
-
-      batchSelectedPoints = [];
-      renderBatchSelectedOnMap();
-      updateBatchToolbarUI();
-      if (typeof window.forceRefreshTrackTiles === 'function') window.forceRefreshTrackTiles();
-      if (typeof window.autoBuildTree === 'function') window.autoBuildTree();
-      window.dispatchEvent(new CustomEvent('nnaper_epochs_deleted', { detail: { deleted: data.deleted_count } }));
-    } catch (err) {
-      alert('Błąd usuwania zaznaczonych punktów: ' + err.message);
-    }
-  }
-
-  let suppressNextContextMenu = false;
-
-  function setupBatchSelectionHandlers() {
-    if (!window.map) return;
-    const canvas = window.map.getCanvasContainer();
-    try { window.map.boxZoom.disable(); } catch (e) {}
-
-    boxSelectionDiv = document.createElement('div');
-    boxSelectionDiv.className = 'nnaper-box-selection-marquee';
-    boxSelectionDiv.style.display = 'none';
-    document.body.appendChild(boxSelectionDiv);
-
-    canvas.addEventListener('contextmenu', (e) => {
-      if (suppressNextContextMenu || batchModeActive) {
-        if (suppressNextContextMenu) {
-          e.preventDefault();
-          e.stopPropagation();
-          suppressNextContextMenu = false;
-        }
-      }
-    }, true);
-
-    canvas.addEventListener('mousedown', (e) => {
-      // Tryb rysowania wektora przesunięcia na mapie (lewy przycisk myszy po kliknięciu "Wektor myszką")
-      if (e.button === 0 && batchModeActive && vectorDragMode && batchSelectedPoints.length > 0) {
-        e.preventDefault();
-        window.map.dragPan.disable();
-        const rect = canvas.getBoundingClientRect();
-        vectorDragStartLngLat = window.map.unproject([e.clientX - rect.left, e.clientY - rect.top]);
-        return;
-      }
-
-      // Zaznaczanie ramką innym przyciskiem myszy: Prawy przycisk myszy (button === 2) lub Środkowy przycisk myszy (button === 1)
-      // dzięki czemu lewy przycisk myszy (button === 0) zawsze swobodnie przesuwa mapę!
-      if (batchModeActive && (e.button === 2 || e.button === 1)) {
-        e.preventDefault();
-        try { window.map.dragRotate.disable(); } catch (err) {}
-        boxStartPoint = { x: e.clientX, y: e.clientY, append: e.ctrlKey || e.shiftKey, button: e.button };
-        boxSelectionDiv.style.left = `${e.clientX}px`;
-        boxSelectionDiv.style.top = `${e.clientY}px`;
-        boxSelectionDiv.style.width = '0px';
-        boxSelectionDiv.style.height = '0px';
-        boxSelectionDiv.style.display = 'block';
-      }
-    });
-
-    window.addEventListener('mousemove', (e) => {
-      if (vectorDragStartLngLat && window.map) {
-        const rect = canvas.getBoundingClientRect();
-        const curLngLat = window.map.unproject([e.clientX - rect.left, e.clientY - rect.top]);
-        const dLat = curLngLat.lat - vectorDragStartLngLat.lat;
-        const dLon = curLngLat.lng - vectorDragStartLngLat.lng;
-        renderBatchSelectedOnMap(dLat, dLon);
-
-        const vecSrc = window.map.getSource('batch-vector-source');
-        if (vecSrc) {
-          vecSrc.setData({
-            type: 'FeatureCollection',
-            features: [{
-              type: 'Feature',
-              geometry: {
-                type: 'LineString',
-                coordinates: [
-                  [vectorDragStartLngLat.lng, vectorDragStartLngLat.lat],
-                  [curLngLat.lng, curLngLat.lat]
-                ]
-              }
-            }]
-          });
-        }
-        const inpN = document.getElementById('batch-vec-north-m');
-        const inpE = document.getElementById('batch-vec-east-m');
-        if (inpN) inpN.value = (dLat * 111320).toFixed(1);
-        const cosLat = Math.cos((vectorDragStartLngLat.lat * Math.PI) / 180);
-        if (inpE) inpE.value = (dLon * 111320 * cosLat).toFixed(1);
-        return;
-      }
-
-      if (!boxStartPoint) return;
-      const minX = Math.min(boxStartPoint.x, e.clientX);
-      const maxX = Math.max(boxStartPoint.x, e.clientX);
-      const minY = Math.min(boxStartPoint.y, e.clientY);
-      const maxY = Math.max(boxStartPoint.y, e.clientY);
-      boxSelectionDiv.style.left = `${minX}px`;
-      boxSelectionDiv.style.top = `${minY}px`;
-      boxSelectionDiv.style.width = `${maxX - minX}px`;
-      boxSelectionDiv.style.height = `${maxY - minY}px`;
-    });
-
-    window.addEventListener('mouseup', async (e) => {
-      if (vectorDragStartLngLat && window.map) {
-        const rect = canvas.getBoundingClientRect();
-        const endLngLat = window.map.unproject([e.clientX - rect.left, e.clientY - rect.top]);
-        const dLat = endLngLat.lat - vectorDragStartLngLat.lat;
-        const dLon = endLngLat.lng - vectorDragStartLngLat.lng;
-        vectorDragStartLngLat = null;
-        vectorDragMode = false;
-        window.map.dragPan.enable();
-        const btnVecDrag = document.getElementById('btn-batch-drag-vector');
-        if (btnVecDrag) btnVecDrag.classList.remove('active');
-        const vecSrc = window.map.getSource('batch-vector-source');
-        if (vecSrc) vecSrc.setData({ type: 'FeatureCollection', features: [] });
-        if (Math.abs(dLat) > 1e-7 || Math.abs(dLon) > 1e-7) {
-          await translateSelectedPointsByVector(dLat, dLon);
-        }
-        return;
-      }
-
-      if (!boxStartPoint) return;
-      const start = boxStartPoint;
-      boxStartPoint = null;
-      boxSelectionDiv.style.display = 'none';
-      if (window.map) {
-        try { window.map.dragPan.enable(); } catch (err) {}
-        try { window.map.dragRotate.enable(); } catch (err) {}
-      }
-      const dx = Math.abs(e.clientX - start.x);
-      const dy = Math.abs(e.clientY - start.y);
-      if (dx < 5 && dy < 5) return;
-
-      if (start.button === 2) {
-        suppressNextContextMenu = true;
-      }
-
-      const rect = canvas.getBoundingClientRect();
-      const p1 = window.map.unproject([start.x - rect.left, start.y - rect.top]);
-      const p2 = window.map.unproject([e.clientX - rect.left, e.clientY - rect.top]);
-      await selectPointsInBox(p1, p2, start.append);
-    });
-  }
-
-  window.toggleBatchEditMode = function (forceState) {
-    batchModeActive = typeof forceState === 'boolean' ? forceState : !batchModeActive;
-    if (!batchModeActive) {
-      batchSelectedPoints = [];
-      vectorDragMode = false;
-      renderBatchSelectedOnMap();
-    }
-    updateBatchToolbarUI();
-  };
+  // Usunieto manualna i batchowa edycje punktow
+  window.bindManualEpochEditor = function () {};
+  window.toggleBatchEditMode = function () {};
 
   /* ============================================================================
    * 3. INSPEKCJA PUNKTÓW POI PO KLIKNIĘCIU / NAJECHANIU (WYŁĄCZNIE WARSTWY POI)
@@ -605,7 +127,7 @@
     }
 
     window.map.on('mousemove', (e) => {
-      if (batchModeActive || drawingModeActive) return;
+      if (drawingModeActive) return;
       const activeLayers = getActivePoiLayers();
       if (activeLayers.length === 0) {
         poiHoverPopup.remove();
@@ -636,7 +158,7 @@
     });
 
     window.map.on('click', async (e) => {
-      if (batchModeActive || drawingModeActive) return;
+      if (drawingModeActive) return;
       const routePlanner = document.getElementById('route-planner-panel');
       if (routePlanner && routePlanner.classList.contains('active')) return;
       if (document.body.classList.contains('playback-mode')) return;
@@ -813,11 +335,11 @@
         console.warn('Geolocation API niedostępne lub odrzucone:', err.message);
         let msg = 'Nie udało się ustalić Twojej lokalizacji.';
         if (err.code === 1) { // PERMISSION_DENIED
-          msg = 'Dostęp do lokalizacji jest zablokowany. Upewnij się, że usługa lokalizacji jest włączona w ustawieniach systemu operacyjnego (np. Ustawienia Windows -> Prywatność i zabezpieczenia -> Lokalizacja) oraz zezwolono na dostęp w przeglądarce.';
+          msg = 'Dostęp do lokalizacji jest zablokowany. Zezwól na dostęp w przeglądarce.';
         } else if (err.code === 2) { // POSITION_UNAVAILABLE
-          msg = 'Brak sygnału pozycji GPS/Wi-Fi w systemie komputera. Sprawdź, czy usługi lokalizacji systemu są aktywne.';
+          msg = 'Nie można ustalić aktualnej pozycji urządzenia.';
         } else if (err.code === 3) { // TIMEOUT
-          msg = 'Przekroczono limit czasu oczekiwania na ustalenie pozycji urządzenia.';
+          msg = 'Przekroczono czas oczekiwania na ustalenie pozycji.';
         }
         alert(msg);
         if (typeof callback === 'function') callback(null);
@@ -896,77 +418,54 @@
   window.toggleHeatmap = toggleHeatmap;
 
   /* ============================================================================
-   * 6. ODKRYWANIE MAPY (MGŁA WOJNY + TRÓJKĄTNE DZIAŁKI PRZYDROŻNE)
+   * 6. ODKRYWANIE MAPY (MGŁA WOJNY - ZASŁANIAJĄCE TRÓJKĄTY DZIAŁEK)
    * ============================================================================ */
   let fogOfWarActive = false;
+  let fogMoveListenerAttached = false;
 
   async function refreshFogOfWarData() {
     if (!fogOfWarActive || !window.map) return;
     const token = getAuthTokenSafe();
     const profileId = getActiveProfileIdSafe();
     try {
-      const res = await fetch(`${apiBase}/api/fog-of-war?token=${encodeURIComponent(token)}&profile_id=${encodeURIComponent(profileId)}`);
+      const b = window.map.getBounds();
+      const bboxStr = `${b.getWest()},${b.getSouth()},${b.getEast()},${b.getNorth()}`;
+      const res = await fetch(`${apiBase}/api/fog-of-war?token=${encodeURIComponent(token)}&profile_id=${encodeURIComponent(profileId)}&bbox=${encodeURIComponent(bboxStr)}`);
       if (!res.ok) return;
       const data = await res.json();
 
-      const parcels = data.parcels || data.discovered_parcels || [];
-      const outerWorld = [[-180, -85], [180, -85], [180, 85], [-180, 85], [-180, -85]];
-      const holes = [];
-      parcels.forEach(f => {
-        if (f && f.geometry && f.geometry.type === 'Polygon' && Array.isArray(f.geometry.coordinates) && f.geometry.coordinates[0]) {
-          holes.push(f.geometry.coordinates[0]);
-        }
-      });
-      const fogPolygon = data.fog_polygon || {
+      const unvisitedParcels = data.parcels || [];
+      const parcelsGeoJSON = {
         type: 'FeatureCollection',
-        features: [{
-          type: 'Feature',
-          geometry: {
-            type: 'Polygon',
-            coordinates: [outerWorld, ...holes]
-          },
-          properties: {}
-        }]
+        features: unvisitedParcels
       };
-
-      if (!window.map.getSource('nnaper-fog-mask-source')) {
-        window.map.addSource('nnaper-fog-mask-source', {
-          type: 'geojson',
-          data: fogPolygon
-        });
-        window.map.addLayer({
-          id: 'nnaper-fog-mask-layer',
-          type: 'fill',
-          source: 'nnaper-fog-mask-source',
-          paint: {
-            'fill-color': '#020617',
-            'fill-opacity': 0.82
-          }
-        });
-      } else {
-        window.map.getSource('nnaper-fog-mask-source').setData(fogPolygon);
-      }
 
       if (!window.map.getSource('nnaper-fog-parcels-source')) {
         window.map.addSource('nnaper-fog-parcels-source', {
           type: 'geojson',
-          data: { type: 'FeatureCollection', features: parcels }
+          data: parcelsGeoJSON
+        });
+        window.map.addLayer({
+          id: 'nnaper-fog-mask-layer',
+          type: 'fill',
+          source: 'nnaper-fog-parcels-source',
+          paint: {
+            'fill-color': '#020617',
+            'fill-opacity': 0.84
+          }
         });
         window.map.addLayer({
           id: 'nnaper-fog-parcels-outline',
           type: 'line',
           source: 'nnaper-fog-parcels-source',
           paint: {
-            'line-color': '#38bdf8',
-            'line-width': 1.2,
-            'line-opacity': 0.55
+            'line-color': '#0284c7',
+            'line-width': 1.0,
+            'line-opacity': 0.50
           }
         });
       } else {
-        window.map.getSource('nnaper-fog-parcels-source').setData({
-          type: 'FeatureCollection',
-          features: parcels
-        });
+        window.map.getSource('nnaper-fog-parcels-source').setData(parcelsGeoJSON);
       }
 
       const badge = document.getElementById('nnaper-fog-stats-badge');
@@ -1000,6 +499,13 @@
       }
       if (badge) badge.style.display = 'none';
       return;
+    }
+
+    if (window.map && !fogMoveListenerAttached) {
+      fogMoveListenerAttached = true;
+      window.map.on('moveend', () => {
+        if (fogOfWarActive) refreshFogOfWarData();
+      });
     }
 
     if (window.map?.getLayer('nnaper-fog-mask-layer')) {
@@ -1415,6 +921,8 @@
     if (panel) panel.style.display = drawingModeActive ? 'flex' : 'none';
     const btn = document.getElementById('btn-open-drawing');
     if (btn) btn.classList.toggle('active', drawingModeActive);
+    const mapBtn = document.getElementById('btn-map-draw-control');
+    if (mapBtn) mapBtn.classList.toggle('active', drawingModeActive);
     if (!drawingModeActive) {
       currentDrawPoints = [];
       renderDrawingsOnMap();
@@ -1430,7 +938,6 @@
     { key: 'show_3d_buildings', label: 'Budynki 3D', selector: '#btn-toggle-3d-buildings' },
     { key: 'show_heatmap', label: 'Heatmapa punktów', selector: '#btn-toggle-heatmap' },
     { key: 'show_fog', label: 'Odkrywanie mapy', selector: '#btn-toggle-fog' },
-    { key: 'show_batch_edit', label: 'Edycja grupowa punktów', selector: '#btn-toggle-batch-edit' },
     { key: 'show_timelapse', label: 'Timelapse eksploracji', selector: '#btn-open-timelapse' },
     { key: 'show_drawing', label: 'Rysowanie po mapie', selector: '#btn-open-drawing' },
     { key: 'show_route_sliders', label: 'Suwaki przeszkód w planerze', selector: '.route-advanced-box' }
@@ -1532,38 +1039,7 @@
    * 10. INICJALIZACJA ELEMENTÓW DOM I BINDOWANIE ZDARZEŃ
    * ============================================================================ */
   function injectFloatingUiPanels() {
-    // 1. Pasek narzędzi edycji grupowej (Batch Edit)
-    const batchBar = document.createElement('div');
-    batchBar.id = 'batch-edit-toolbar';
-    batchBar.className = 'nnaper-floating-bar';
-    batchBar.style.display = 'none';
-    batchBar.innerHTML = `
-      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; width:100%;">
-        <strong style="color:#f59e0b; font-size:12.5px;">Edycja grupowa punktów</strong>
-        <span id="batch-selected-count" style="font-size:11.5px; color:#38bdf8; font-weight:600;">0 zaznaczonych punktów</span>
-        <button type="button" id="btn-batch-close" style="background:transparent; border:none; color:#94a3b8; font-size:16px; cursor:pointer;">&times;</button>
-      </div>
-      <div style="font-size:11px; color:#cbd5e1;">
-        Przeciągnij <strong>prawym przyciskiem myszy</strong> lub <strong>środkowym przyciskiem</strong> po mapie, aby zaznaczyć punkty ramką. Lewy przycisk myszy normalnie przesuwa mapę. Przytrzymaj <code>Ctrl</code>, aby dodać do zaznaczenia.
-      </div>
-      <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
-        <label style="font-size:11px; color:#94a3b8; display:flex; align-items:center; gap:4px;">
-          Północ m:
-          <input type="number" id="batch-vec-north-m" value="25" step="1" style="width:62px; background:#0f172a; color:#f8fafc; border:1px solid #334155; border-radius:4px; padding:3px 5px; font-size:11.5px;" />
-        </label>
-        <label style="font-size:11px; color:#94a3b8; display:flex; align-items:center; gap:4px;">
-          Wschód m:
-          <input type="number" id="batch-vec-east-m" value="25" step="1" style="width:62px; background:#0f172a; color:#f8fafc; border:1px solid #334155; border-radius:4px; padding:3px 5px; font-size:11.5px;" />
-        </label>
-        <button type="button" id="btn-batch-apply-vector" class="route-action-btn" style="padding:4px 9px; font-size:11.5px; background:#0284c7; color:#fff; border:none;">Przesuń o wektor</button>
-        <button type="button" id="btn-batch-drag-vector" class="route-action-btn" style="padding:4px 9px; font-size:11.5px;" title="Narysuj wektor przesunięcia myszką na mapie">Wektor myszką</button>
-        <button type="button" id="btn-batch-add-point" class="route-action-btn" style="padding:4px 9px; font-size:11.5px; color:#34d399; border-color:rgba(52,211,153,0.4);">+ Nowy punkt</button>
-        <button type="button" id="btn-batch-delete" class="route-action-btn" style="padding:4px 9px; font-size:11.5px; background:rgba(239,68,68,0.18); color:#f87171; border-color:rgba(239,68,68,0.4);">Usuń zaznaczone</button>
-      </div>
-    `;
-    document.body.appendChild(batchBar);
-
-    // 2. Legenda Heatmapy
+    // 1. Legenda Heatmapy
     const heatLegend = document.createElement('div');
     heatLegend.id = 'nnaper-heatmap-legend';
     heatLegend.className = 'nnaper-floating-badge';
@@ -1653,7 +1129,7 @@
         <div class="settings-modal-header">
           <div>
             <h3 class="settings-modal-title">Ustawienia</h3>
-            <p class="settings-modal-subtitle">Konto użytkownika, presety warstw i widoczność narzędzi</p>
+            <p class="settings-modal-subtitle">Konto użytkownika i dane logowania</p>
           </div>
           <button type="button" id="btn-close-settings-modal" class="export-close-btn">&times;</button>
         </div>
@@ -1684,68 +1160,21 @@
             </div>
           </div>
 
-          <div class="settings-card-section">
-            <div class="settings-section-heading">Presety warstw mapy</div>
-            <div id="settings-presets-list" class="settings-presets-grid"></div>
-            <div style="display:flex; gap:8px; margin-top:8px;">
-              <input type="text" id="settings-new-preset-name" class="settings-dark-input" placeholder="Nazwa nowego presetu..." style="flex:1;" />
-              <button type="button" id="btn-settings-create-preset" class="export-btn-primary" style="padding:6px 12px; font-size:12px; white-space:nowrap;">+ Zapisz preset</button>
+          <div class="settings-card-section" style="border-top: 1px solid rgba(239, 68, 68, 0.2); margin-top: 16px; padding-top: 14px;">
+            <div class="settings-section-heading" style="color: #f87171;">Strefa niebezpieczna</div>
+            <p style="font-size: 11.5px; color: #94a3b8; margin: 4px 0 10px 0;">
+              Usunięcie konta bezpowrotnie kasuje Twoje dane logowania, wszystkie profile, zapisane rysunki oraz trasy GPS.
+            </p>
+            <div style="display:flex; justify-content: flex-end;">
+              <button type="button" id="btn-delete-account" class="export-btn-danger" style="padding: 6px 14px; font-size: 12px; background: #991b1b; color: #fecaca; border: 1px solid #ef4444; border-radius: 5px; cursor: pointer; font-weight: 600;">
+                Usuń konto
+              </button>
             </div>
-          </div>
-
-          <div class="settings-card-section">
-            <div class="settings-section-heading">Widoczne elementy interfejsu</div>
-            <div id="settings-ui-toggles-list" class="settings-ui-toggles-grid"></div>
           </div>
         </div>
       </div>
     `;
     document.body.appendChild(settingsModal);
-
-    // Bindowanie akcji paska Batch Edit
-    document.getElementById('btn-batch-close')?.addEventListener('click', () => window.toggleBatchEditMode(false));
-    document.getElementById('btn-batch-apply-vector')?.addEventListener('click', async () => {
-      const northM = parseFloat(document.getElementById('batch-vec-north-m')?.value || '0');
-      const eastM = parseFloat(document.getElementById('batch-vec-east-m')?.value || '0');
-      const refLat = batchSelectedPoints[0]?.lat || (window.map ? window.map.getCenter().lat : 54.35);
-      const dLat = northM / 111320.0;
-      const dLon = eastM / (111320.0 * Math.cos((refLat * Math.PI) / 180.0));
-      await translateSelectedPointsByVector(dLat, dLon);
-    });
-    document.getElementById('btn-batch-drag-vector')?.addEventListener('click', (e) => {
-      if (batchSelectedPoints.length === 0) {
-        alert('Najpierw zaznacz punkty ramką na mapie.');
-        return;
-      }
-      vectorDragMode = !vectorDragMode;
-      e.currentTarget.classList.toggle('active', vectorDragMode);
-    });
-    document.getElementById('btn-batch-delete')?.addEventListener('click', deleteSelectedPointsBatch);
-    document.getElementById('btn-batch-add-point')?.addEventListener('click', async () => {
-      const token = getAuthTokenSafe();
-      if (!token) {
-        alert('Zaloguj się, aby dodać nowy punkt.');
-        return;
-      }
-      const center = window.map ? window.map.getCenter() : { lat: 54.352, lng: 18.646 };
-      const profileId = getActiveProfileIdSafe();
-      const res = await fetch(`${apiBase}/api/epoch?token=${encodeURIComponent(token)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          profile_id: profileId,
-          latitude: center.lat,
-          longitude: center.lng,
-          speed_kmh: 0,
-          timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19)
-        })
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data.epoch_id) {
-        if (typeof window.forceRefreshTrackTiles === 'function') window.forceRefreshTrackTiles();
-        if (typeof window.loadPointFullDetails === 'function') window.loadPointFullDetails(data.epoch_id);
-      }
-    });
 
     // Bindowanie akcji paska Timelapse
     document.getElementById('btn-timelapse-close')?.addEventListener('click', () => {
@@ -1830,9 +1259,44 @@
       }
     });
 
+    document.getElementById('btn-delete-account')?.addEventListener('click', async () => {
+      const token = getAuthTokenSafe();
+      if (!token) {
+        alert('Musisz być zalogowany, aby usunąć konto.');
+        return;
+      }
+      if (!confirm('Czy na pewno chcesz BEZPOWROTNIE usunąć swoje konto oraz WSZYSTKIE profile i trasy GPS?\n\nTej operacji NIE MOŻNA cofnąć!')) {
+        return;
+      }
+      const btn = document.getElementById('btn-delete-account');
+      if (btn) {
+        btn.disabled = true;
+        btn.innerText = 'Usuwanie konta...';
+      }
+      try {
+        const res = await fetch(`${apiBase}/api/auth/account?token=${encodeURIComponent(token)}`, {
+          method: 'DELETE'
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || data.error || 'Błąd podczas usuwania konta.');
+        alert('Twoje konto oraz wszystkie dane zostały bezpowrotnie usunięte.');
+        if (window.AuthManager && typeof window.AuthManager.logout === 'function') {
+          window.AuthManager.logout();
+        } else {
+          localStorage.clear();
+          location.reload();
+        }
+      } catch (err) {
+        alert('Błąd usuwania konta: ' + err.message);
+        if (btn) {
+          btn.disabled = false;
+          btn.innerText = 'Usuń konto';
+        }
+      }
+    });
+
     // Bindowanie przycisków w prawym menu
     document.getElementById('btn-locate-user')?.addEventListener('click', () => window.locateUserOnMap());
-    document.getElementById('btn-toggle-batch-edit')?.addEventListener('click', () => window.toggleBatchEditMode());
     document.getElementById('btn-open-timelapse')?.addEventListener('click', () => window.openTimelapsePanel());
     document.getElementById('btn-open-drawing')?.addEventListener('click', () => window.toggleDrawingStudio());
     document.getElementById('btn-open-settings')?.addEventListener('click', () => window.openSettingsModal());
@@ -1847,7 +1311,6 @@
     if (!window.map) return;
 
     const onMapReady = () => {
-      setupBatchSelectionHandlers();
       setupPoiAndInfraInspector();
       loadDrawings();
 

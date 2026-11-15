@@ -3437,9 +3437,9 @@ ${placemarks}
       chartRow.style.display = (!isPlannedRoute && isSingleDayOrActive && isGraphicWithChart) ? 'flex' : 'none';
     }
 
-    // Wykres przeciążeń G / Diagram G-G: TYLKO dla HTML oraz SVG (dla 1 dnia / aktywnych z telemetrią G)
+    // Wykres przeciążeń G / Diagram G-G: dołączany domyślnie w plikach telemetrycznych
     if (gforceRow) {
-      gforceRow.style.display = (!isPlannedRoute && isSingleDayOrActive && (activeFormat === 'html' || activeFormat === 'svg')) ? 'flex' : 'none';
+      gforceRow.style.display = 'none';
     }
 
     // Parametry animacji GIF: TYLKO dla formatu GIF
@@ -3449,7 +3449,7 @@ ${placemarks}
 
     // Cała sekcja 3 (Opcje stylu i wykresów):
     // Wyświetlana tylko wtedy, gdy przynajmniej jedna opcja jest faktycznie dostępna.
-    const hasAnyOption = isStaticVisual || (activeFormat === 'html' && isSingleDayOrActive && !isPlannedRoute);
+    const hasAnyOption = isStaticVisual;
     if (exportOptionsBox) {
       exportOptionsBox.style.display = hasAnyOption ? 'block' : 'none';
       const exportOptionsTitle = exportOptionsBox.querySelector('.export-section-title');
@@ -3595,6 +3595,11 @@ ${placemarks}
   }
 
   function openExportModal(params = {}) {
+    const token = (typeof window.getAuthToken === 'function' ? window.getAuthToken() : '') || localStorage.getItem('nnaper_auth_token') || '';
+    if (!token && params.scope !== 'planned') {
+      alert('Musisz być zalogowany, aby eksportować zarejestrowane trasy.');
+      return;
+    }
     if (modalBackdrop) modalBackdrop.style.display = 'flex';
     if (statusBox) statusBox.style.display = 'none';
 

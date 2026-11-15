@@ -36,6 +36,35 @@
     </div>
 
     <div class="menu-body">
+      <!-- Widok i nakładki -->
+      <div class="left-panel-group" id="group-view-overlays">
+        <div class="left-panel-group-title">Widok i nakładki</div>
+        <div class="left-toggles-grid">
+          <button id="btn-toggle-heatmap" class="menu-toggle-btn" type="button"
+            aria-pressed="false"
+            title="Włącz kafelkową heatmapę zagęszczenia punktów GPS">
+            <span class="menu-toggle-label">Heatmapa</span>
+            <span class="toggle-switch"></span>
+          </button>
+          <button id="btn-toggle-fog" class="menu-toggle-btn" type="button"
+            aria-pressed="false"
+            title="Włącz mechanikę odkrywania mapy">
+            <span class="menu-toggle-label">Odkrywanie mapy</span>
+            <span class="toggle-switch"></span>
+          </button>
+          <button id="btn-toggle-3d-map" class="menu-toggle-btn" type="button"
+            aria-pressed="false"
+            title="Włącz lub wyłącz widok 3D">
+            <span class="menu-toggle-label">Mapa 3D</span>
+            <span class="toggle-switch"></span>
+          </button>
+          <button id="btn-toggle-3d-buildings" class="menu-toggle-btn" type="button"
+            aria-pressed="false" title="Włącz lub wyłącz trójwymiarowe bryły budynków">
+            <span class="menu-toggle-label">Budynki 3D</span>
+            <span class="toggle-switch"></span>
+          </button>
+        </div>
+      </div>
       <div id="tree-container"></div>
 
       <!-- Inteligentne Studio Stylizacji Wyglądu Mapy (osadzone w panelu warstw) -->
@@ -264,80 +293,40 @@
                                             title="Pokaż Twoją aktualną pozycję GPS na mapie">
                                             Moja lokalizacja
                                           </button>
-                                          <button id="btn-open-playback" class="menu-action-btn">
-                                            Replay trasy
-                                          </button>
-                                          <button id="btn-open-timelapse" class="menu-action-btn"
-                                            title="Uruchom timelapse chronologicznego zapełniania się mapy">
-                                            Timelapse
-                                          </button>
                                         </div>
                                       </div>
 
                                       <div class="right-panel-group">
                                         <div class="right-panel-group-title">Narzędzia i dane</div>
                                         <div class="right-tools-grid">
-                                          <button id="btn-toggle-batch-edit" class="menu-action-btn"
-                                            title="Zaznaczaj punkty ramką jak na pulpicie, przesuwaj o wektor lub usuwaj">
-                                            Edycja punktów
-                                          </button>
                                           <button id="btn-open-drawing" class="menu-action-btn"
                                             title="Rysuj wielokąty i ścieżki na mapie z pomiarem pola powierzchni, obwodu i długości">
                                             Rysowanie
-                                          </button>
-                                          <button id="btn-open-export" class="menu-action-btn"
-                                            title="Otwórz panel eksportu trasy">
-                                            Eksport trasy
                                           </button>
                                           <button id="btn-open-parser" class="menu-action-btn"
                                             title="Otwórz panel importu i parsowania plików GPS">
                                             Parsowanie plików
                                           </button>
                                         </div>
-                                        <button id="btn-open-settings" class="menu-action-btn right-settings-btn"
-                                          title="Ustawienia konta, presety mapy i widoczność przełączników">
-                                          Panel ustawień
-                                        </button>
                                       </div>
 
-                                      <div class="right-panel-group">
-                                        <div class="right-panel-group-title">Widok i nakładki</div>
-                                        <div class="right-toggles-grid">
-                                          <button id="btn-toggle-heatmap" class="menu-toggle-btn" type="button"
-                                            aria-pressed="false"
-                                            title="Włącz kafelkową heatmapę zagęszczenia punktów GPS">
-                                            <span class="menu-toggle-label">Heatmapa</span>
-                                            <span class="toggle-switch"></span>
-                                          </button>
-                                          <button id="btn-toggle-fog" class="menu-toggle-btn" type="button"
-                                            aria-pressed="false"
-                                            title="Włącz mechanikę odkrywania mapy">
-                                            <span class="menu-toggle-label">Odkrywanie mapy</span>
-                                            <span class="toggle-switch"></span>
-                                          </button>
-                                          <button id="btn-toggle-3d-map" class="menu-toggle-btn" type="button"
-                                            aria-pressed="false"
-                                            title="Włącz lub wyłącz widok 3D">
-                                            <span class="menu-toggle-label">Mapa 3D</span>
-                                            <span class="toggle-switch"></span>
-                                          </button>
-                                          <button id="btn-toggle-3d-buildings" class="menu-toggle-btn" type="button"
-                                            aria-pressed="false" title="Włącz lub wyłącz trójwymiarowe bryły budynków">
-                                            <span class="menu-toggle-label">Budynki 3D</span>
-                                            <span class="toggle-switch"></span>
-                                          </button>
-                                        </div>
-                                      </div>
+
                                     </div>
                                   </div>
 
                                   <div id="search-container">
-                                    <input type="text" id="search-input" placeholder="Szukaj adresu lub miejsca..."
-                                      autocomplete="off" />
+                                    <input type="search" id="search-input" name="search_address_query" placeholder="Szukaj adresu lub miejsca..."
+                                      autocomplete="off" autocapitalize="off" spellcheck="false"
+                                      data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" />
                                     <div id="search-suggestions"></div>
                                   </div>
 
                                   <!-- Zintegrowany Odtwarzacz Trasy (Playback) -->
+                                  <div id="playback-loading-banner">
+                                    <div class="playback-loading-spinner"></div>
+                                    <span>Trwa ładowanie trasy replayu... Proszę czekać</span>
+                                  </div>
+
                                   <div id="playback-top-bar" style="display: none;">
                                     <button id="btn-close-playback" type="button"
                                       title="Zamknij odtwarzacz i wróć do zwykłej mapy">← Wróć do
@@ -436,13 +425,14 @@
                                         </div>
                                       </div>
 
-                                      <div class="hud-divider"><span>Statystyki dnia</span></div>
+                                      <div class="hud-divider"><span>Statystyki replayu</span></div>
 
-                                      <div class="hud-row"><span class="hud-label">Dystans dnia:</span><span
-                                          id="playback-hud-dist" class="hud-val">0.0
-                                          km</span></div>
+                                      <div class="hud-row"><span class="hud-label">Przejechane km:</span><span
+                                          id="playback-hud-dist" class="hud-val">0.00 km</span></div>
                                       <div class="hud-row"><span class="hud-label">Śr. prędkość:</span><span
                                           id="playback-hud-avg-speed" class="hud-val">0.0 km/h</span></div>
+                                      <div class="hud-row"><span class="hud-label">Unikalne km:</span><span
+                                          id="playback-hud-unique-km" class="hud-val" style="color: #10b981;">0.00 km</span></div>
                                       <div class="hud-row"><span class="hud-label">Maks. prędkość:</span><span
                                           id="playback-hud-max-speed" class="hud-val">0.0 km/h</span></div>
                                       <div class="hud-row"><span class="hud-label">Maks. wysokość:</span><span
@@ -478,24 +468,13 @@
                                         <input type="checkbox" id="chk-playback-follow" checked
                                           style="accent-color: #38bdf8;" /> Śledź kamerą
                                       </label>
+                                      <label
+                                        style="font-size: 12px; display: flex; align-items: center; gap: 4px; cursor: pointer;">
+                                        <input type="checkbox" id="chk-playback-drop-points"
+                                          style="accent-color: #38bdf8;" /> Zapełniaj mapę śladem
+                                      </label>
                                     </div>
                                   </div>
-
-                                <!-- Panel inspekcji i trwałego usuwania pojedynczego punktu GPS (epoki) -->
-                                <div id="point-panel">
-                                  <div class="point-header">
-                                    <div style="display: flex; align-items: center; gap: 8px;">
-                                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
-                                      <h3 style="margin: 0;">Szczegóły punktu GPS</h3>
-                                    </div>
-                                    <button class="action-btn" id="btn-close-point"
-                                      title="Zamknij podgląd punktu">&times;</button>
-                                  </div>
-                                  <div class="point-body" id="pp-content">
-                                    <div style="color:#94a3b8;">Kliknij punkt na trasie, aby wyświetlić szczegóły
-                                      telemetrii.</div>
-                                  </div>
-                                </div>
 
                                 <div id="route-planner-panel" class="route-planner-panel" aria-hidden="true">
                                   <button id="btn-toggle-route-planner" class="menu-toggle-handle route-planner-toggle-handle"
@@ -724,7 +703,6 @@
                                             <div style="display: flex; align-items: center; gap: 8px;">
                                               <select id="export-opt-color-mode" class="export-select-sm">
                                                 <option value="speed" selected>Według prędkości (gradient)</option>
-                                                <option value="altitude">Według wysokości (gradient)</option>
                                                 <option value="single">Jednolity kolor</option>
                                               </select>
                                               <input type="color" id="export-opt-single-color" value="#06b6d4"
@@ -733,79 +711,32 @@
                                             </div>
                                           </div>
                                           <div class="export-opt-row" id="opt-speed-overlap-row">
-                                            <span>Wspólne odcinki dróg:</span>
+                                            <span title="Gdy zarejestrowane punkty trasy nakładają się na tej samej drodze (wielokrotny przejazd), wybierz który przejazd ma być wyświetlany na wierzchu.">Nakładające się punkty:</span>
                                             <select id="export-opt-speed-overlap" class="export-select-sm"
-                                              title="Wybierz, jak określać kolor drogi, gdy przejechano nią wielokrotnie">
+                                              title="Gdy zarejestrowane punkty trasy nakładają się na tej samej drodze (wielokrotny przejazd), wybierz który przejazd ma być wyświetlany na wierzchu.">
                                               <option value="max" selected>Maksymalna prędkość (Vmax - szybszy ma
                                                 pierwszeństwo)</option>
                                               <option value="avg">Średnia prędkość (Vśr z przejazdów)</option>
                                               <option value="last">Ostatni przejazd (chronologicznie)</option>
                                             </select>
                                           </div>
-                                          <div class="export-opt-row" id="opt-gforce-row" style="display: none;">
-                                            <span>Diagram G-G:</span>
-                                            <label class="sidebar-chk-label"
-                                              title="Dołącz interaktywny Diagram G-G (koło tarcia / przeciążenia 2D) w pliku HTML">
-                                              <input type="checkbox" id="export-opt-include-gforce" checked />
-                                              <span>Dołącz Diagram G-G (przeciążenia 2D)</span>
-                                            </label>
-                                          </div>
+                                          <input type="checkbox" id="export-opt-include-gforce" checked style="display: none;" />
 
                                           <div class="export-opt-row" id="opt-gif-speed-row"
-                                            style="display: none; flex-direction: column; align-items: stretch; gap: 10px;">
-                                            <div
-                                              style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
-                                              <span style="font-weight: 500;">Płynność i rozmiar animacji GIF:</span>
-                                              <span id="gif-calc-info"
-                                                style="font-size: 11px; color: #38bdf8; font-family: ui-monospace, monospace; font-weight: 600;">Maks.
-                                                płynność (25-30 FPS) • do 5.0 MB</span>
-                                            </div>
-                                            <div style="display: flex; align-items: center; gap: 8px;">
-                                              <label for="export-opt-gif-preset"
-                                                style="font-size: 11.5px; color: #94a3b8; white-space: nowrap;">Profil:</label>
-                                              <select id="export-opt-gif-preset" class="export-select-sm"
-                                                style="flex: 1;" title="Wybierz gotowy profil lub dopasuj parametry">
-                                                <option value="auto-5mb" selected>Auto: Maksymalna płynność (limit 5.0
-                                                  MB)</option>
-                                                <option value="messenger-2mb">Komunikatory (limit 2.0 MB)</option>
-                                                <option value="discord-8mb">Discord (limit 8.0 MB)</option>
-                                                <option value="hq-15mb">Wysoka jakość (limit 15.0 MB)</option>
-                                                <option value="unlimited">Bez limitu wagi (Maks. 30 FPS)</option>
-                                                <option value="custom">Własne parametry (ręczne klatki/czas)</option>
-                                              </select>
-                                            </div>
-                                            <div
-                                              style="display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; background: rgba(15, 23, 42, 0.45); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.05);">
-                                              <label
-                                                style="display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: #cbd5e1;">
-                                                <span>Maks. waga:</span>
-                                                <input type="number" id="export-opt-gif-max-mb" class="export-select-sm"
-                                                  style="width: 60px; text-align: center; font-weight: 600; color: #38bdf8;"
-                                                  min="0" max="100" step="0.5" value="5.0"
-                                                  title="Maksymalny rozmiar pliku wyjściowego w MB (np. 5.0). Program automatycznie dopasuje płynność, by nie przekroczyć tego limitu. Wpisz 0 dla braku limitu." />
-                                                <span style="font-size: 11px; color: #64748b;">MB</span>
-                                              </label>
-                                              <label
-                                                style="display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: #cbd5e1;">
-                                                <span>Czas:</span>
-                                                <input type="number" id="export-opt-gif-duration"
-                                                  class="export-select-sm" style="width: 55px; text-align: center;"
-                                                  min="0.5" max="60" step="0.5" value="4.0"
-                                                  title="Czas trwania animacji w sekundach (0.5 - 60s)" />
-                                                <span style="font-size: 11px; color: #64748b;">s</span>
-                                              </label>
-                                              <label id="gif-frames-wrapper"
-                                                style="display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: #cbd5e1;">
-                                                <span>Klatki:</span>
-                                                <input type="number" id="export-opt-gif-frames" class="export-select-sm"
-                                                  style="width: 60px; text-align: center;" min="10" max="300" step="5"
-                                                  value="100"
-                                                  title="Liczba klatek (w trybie Auto wyliczana automatycznie dla maks. płynności)" />
-                                                <span id="gif-frames-badge"
-                                                  style="font-size: 9.5px; background: #0284c7; color: #fff; padding: 1px 5px; border-radius: 4px; font-weight: 700; cursor: pointer; user-select: none;"
-                                                  title="Kliknij, aby przełączyć tryb Auto / Ręczny">AUTO</span>
-                                              </label>
-                                            </div>
+                                            style="display: none; align-items: center; justify-content: space-between; gap: 10px;">
+                                            <span>Długość i jakość animacji:</span>
+                                            <select id="export-opt-gif-preset" class="export-select-sm"
+                                              style="flex: 1;" title="Wybierz profil animacji GIF">
+                                              <option value="auto-5mb" selected>Standardowa (4 s • do 5 MB)</option>
+                                              <option value="messenger-2mb">Krótka (3 s • lekki plik do 2 MB)</option>
+                                              <option value="discord-8mb">Długa / Discord (5 s • do 8 MB)</option>
+                                              <option value="hq-15mb">Wysoka jakość (6 s • płynna)</option>
+                                            </select>
+                                            <input type="hidden" id="export-opt-gif-max-mb" value="5.0" />
+                                            <input type="hidden" id="export-opt-gif-duration" value="4.0" />
+                                            <input type="hidden" id="export-opt-gif-frames" value="100" />
+                                            <span id="gif-calc-info" style="display: none;"></span>
+                                            <span id="gif-frames-badge" style="display: none;"></span>
                                           </div>
                                         </div>
                                       </div>
@@ -886,12 +817,7 @@
                                         <div class="dropzone-desc">
                                           Obsługiwane formaty: <code>.txt</code>, <code>.log</code>, <code>.nmea</code>
                                           (pełna telemetria NMEA + czujniki G + satelity), <code>.gpx</code>,
-                                          <code>.csv</code>
-                                          <button type="button" id="btn-csv-info" class="csv-info-btn"
-                                            title="Kliknij, aby sprawdzić wymagane formatowanie i kolumny pliku CSV">
-                                            <span>Format CSV</span>
-                                          </button>
-                                          (współrzędne tras)
+                                          <code>.csv</code> (współrzędne tras)
                                         </div>
                                         <div class="dropzone-actions">
                                           <button type="button" id="btn-choose-files" class="parser-action-btn">
@@ -907,15 +833,12 @@
                                         </div>
                                       </div>
 
-                                      <!-- Karta ze specyfikacją i formatowaniem CSV -->
-                                      <div id="parser-csv-info-card" class="parser-csv-info-card"
-                                        style="display: none;">
+                                      <!-- Karta ze specyfikacją i formatowaniem CSV na stałe -->
+                                      <div id="parser-csv-info-card" class="parser-csv-info-card">
                                         <div class="csv-info-header">
                                           <div class="csv-info-title">
                                             <strong>Wymagany format i kolumny plików CSV</strong>
                                           </div>
-                                          <button type="button" id="btn-close-csv-info" class="csv-info-close"
-                                            title="Zamknij podgląd formatowania">&times;</button>
                                         </div>
                                         <div class="csv-info-body">
                                           <p class="csv-info-lead">
@@ -1095,8 +1018,8 @@
   <script src="layers.js?v=20261110_v52_all_fixes"></script>
   <script src="layer-manager.js?v=20261110_v52_all_fixes"></script>
   <script src="app.js?v=20261110_v52_all_fixes"></script>
-  <script src="playback-inline.js?v=20261110_v52_all_fixes"></script>
-  <script src="route-inline.js?v=20261110_v52_all_fixes"></script>
+  <script src="playback-manager.js?v=20261110_v52_all_fixes"></script>
+  <script src="route-manager.js?v=20261110_v52_all_fixes"></script>
   <script src="export-manager.js?v=20261110_v52_all_fixes"></script>
   <script src="parser-manager.js?v=20261110_v52_all_fixes"></script>
   <script src="features-manager.js?v=20261110_v52_all_fixes"></script>

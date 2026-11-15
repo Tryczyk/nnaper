@@ -356,9 +356,60 @@ func (m *Manager) runBackgroundJob(jobID, filePath, filename, userID, profileID,
 		m.recordHistory(userID, filename, fileSize, stats.Epochs, profileID, profileName)
 		m.tiles.ClearCache()
 		_, _ = m.pool.Exec(context.Background(), `
-			UPDATE profiles 
-			SET epochs_count = (SELECT count(*) FROM epochs WHERE profile_id = $1::uuid)
-			WHERE profile_id = $1::uuid
+			WITH filtered AS (
+				SELECT
+					e.timestamp,
+					COALESCE(e.geom_snapped, e.geom) AS pt,
+					e.geom_snapped,
+					e.geom_line,
+					LEAST(COALESCE(e.speed_kmh, 0), 300.0) AS speed_kmh
+				FROM epochs e
+				WHERE e.profile_id = $1::uuid
+			),
+			agg AS (
+				SELECT
+					count(*) AS epochs_count,
+					count(DISTINCT timestamp::date) AS days_count,
+					COALESCE(round(max(speed_kmh)::numeric, 2), 0) AS max_speed_kmh,
+					COALESCE(round(avg(speed_kmh)::numeric, 2), 0) AS avg_speed_kmh,
+					COALESCE(round((sum(ST_Length(geom_line) * 85.0))::numeric, 2), 0) AS total_km,
+					COALESCE(round((count(DISTINCT CASE WHEN geom_snapped IS NOT NULL THEN ((floor(ST_X(geom_snapped) * 4000.0)::bigint << 32) | (floor(ST_Y(geom_snapped) * 4000.0)::bigint & 4294967295)) END) * 0.0235)::numeric, 2), 0) AS unique_km,
+					round(min(ST_Y(pt))::numeric, 6) AS min_lat,
+					round(max(ST_Y(pt))::numeric, 6) AS max_lat,
+					round(min(ST_X(pt))::numeric, 6) AS min_lon,
+					round(max(ST_X(pt))::numeric, 6) AS max_lon,
+					(max(ARRAY[ST_Y(pt), ST_X(pt)]))[1] AS north_lat,
+					(max(ARRAY[ST_Y(pt), ST_X(pt)]))[2] AS north_lon,
+					(min(ARRAY[ST_Y(pt), ST_X(pt)]))[1] AS south_lat,
+					(min(ARRAY[ST_Y(pt), ST_X(pt)]))[2] AS south_lon,
+					(max(ARRAY[ST_X(pt), ST_Y(pt)]))[2] AS east_lat,
+					(max(ARRAY[ST_X(pt), ST_Y(pt)]))[1] AS east_lon,
+					(min(ARRAY[ST_X(pt), ST_Y(pt)]))[2] AS west_lat,
+					(min(ARRAY[ST_X(pt), ST_Y(pt)]))[1] AS west_lon
+				FROM filtered
+			)
+			UPDATE profiles p
+			SET epochs_count = agg.epochs_count,
+				days_count = agg.days_count,
+				max_speed_kmh = agg.max_speed_kmh,
+				avg_speed_kmh = agg.avg_speed_kmh,
+				total_km = agg.total_km,
+				unique_km = agg.unique_km,
+				min_lat = agg.min_lat,
+				max_lat = agg.max_lat,
+				min_lon = agg.min_lon,
+				max_lon = agg.max_lon,
+				north_lat = agg.north_lat,
+				north_lon = agg.north_lon,
+				south_lat = agg.south_lat,
+				south_lon = agg.south_lon,
+				east_lat = agg.east_lat,
+				east_lon = agg.east_lon,
+				west_lat = agg.west_lat,
+				west_lon = agg.west_lon,
+				stats_updated_at = NOW()
+			FROM agg
+			WHERE p.profile_id = $1::uuid;
 		`, profileID)
 	}
 }

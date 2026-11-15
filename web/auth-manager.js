@@ -147,6 +147,17 @@
       });
     }
 
+    logout() {
+      saveStoredSession(null);
+      setCachedProfiles(null);
+      window.setActiveProfileId('');
+      try {
+        localStorage.removeItem('nnaper_auth_user');
+      } catch (e) {}
+      this.render();
+      location.reload();
+    }
+
     async verifySessionWithBackend() {
       const session = getStoredSession();
       if (!session || !session.token) return;
@@ -189,7 +200,7 @@
       // 1. Awatar profilowy (kliknięcie pozwala wybrać nowe zdjęcie)
       const avatarWrapper = document.createElement('div');
       avatarWrapper.className = 'auth-avatar-wrapper';
-      avatarWrapper.title = 'Kliknij w profilowe, aby przesłać własne zdjęcie';
+      avatarWrapper.title = 'Zmień zdjęcie profilowe';
       avatarWrapper.setAttribute('role', 'button');
       avatarWrapper.setAttribute('tabindex', '0');
 
@@ -284,13 +295,41 @@
       usernameEl.innerText = user.username || 'Użytkownik';
       usernameEl.title = user.username || '';
 
-      const hintEl = document.createElement('div');
-      hintEl.className = 'auth-avatar-hint';
-      hintEl.innerText = 'Kliknij w profilowe, aby zmienić';
-
       userDetails.appendChild(usernameEl);
-      userDetails.appendChild(hintEl);
       card.appendChild(userDetails);
+
+      // 2.1. Przycisk "Ustawienia konta" zaraz pod profilowym
+      const settingsBtn = document.createElement('button');
+      settingsBtn.type = 'button';
+      settingsBtn.id = 'btn-open-settings';
+      settingsBtn.className = 'menu-action-btn';
+      settingsBtn.style.cssText = 'width: 100%; margin-top: 6px; padding: 6px 10px; font-size: 11.5px; font-weight: 600; background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.3); color: #38bdf8; border-radius: 6px; cursor: pointer; text-align: center;';
+      settingsBtn.innerText = 'Ustawienia konta';
+      settingsBtn.title = 'Ustawienia konta i interfejsu';
+      settingsBtn.onclick = () => {
+        if (typeof window.openSettingsModal === 'function') {
+          window.openSettingsModal();
+        }
+      };
+      card.appendChild(settingsBtn);
+
+      // 2.2. Przycisk wylogowania zaraz pod "Ustawienia konta"
+      const logoutBtn = document.createElement('button');
+      logoutBtn.type = 'button';
+      logoutBtn.className = 'auth-btn-logout';
+      logoutBtn.style.marginTop = '5px';
+      logoutBtn.innerText = 'Wyloguj się';
+      logoutBtn.title = 'Wyloguj się z konta';
+      logoutBtn.onclick = async () => {
+        try {
+          await fetch(`${getApiBaseUrl()}/api/auth/logout`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+        } catch (e) { }
+        this.logout();
+      };
+      card.appendChild(logoutBtn);
 
       // 2.5. Profile aktywności wewnątrz konta
       const profilesContainer = document.createElement('div');
@@ -306,9 +345,9 @@
       statsBox.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:4px;">
           <span style="font-weight:700; color:#38bdf8; font-size:11px; text-transform:uppercase; letter-spacing:0.04em;">Statystyki konta</span>
-          <button type="button" id="btn-refresh-account-stats" title="Odśwież statystyki" style="background:none; border:none; color:#94a3b8; cursor:pointer; font-size:11px; padding:0 2px;">Odśwież</button>
         </div>
         <div id="account-stats-content" style="display:flex; flex-direction:column; gap:4px;">
+          <div style="display:flex; justify-content:space-between;"><span style="color:#94a3b8;">Średnia prędkość:</span><strong id="stat-avg-speed" style="color:#38bdf8;">-- km/h</strong></div>
           <div style="display:flex; justify-content:space-between;"><span style="color:#94a3b8;">Max prędkość:</span><strong id="stat-max-speed">-- km/h</strong></div>
           <div style="display:flex; justify-content:space-between;"><span style="color:#94a3b8;">Przejechane km:</span><strong id="stat-total-km">-- km</strong></div>
           <div style="display:flex; justify-content:space-between;"><span style="color:#94a3b8;">Unikalne km:</span><strong id="stat-unique-km" style="color:#10b981;">-- km</strong></div>
@@ -386,11 +425,13 @@
           if (!res.ok) return;
           const st = await res.json();
           lastStatsData = st;
+          const elAvgSpd = statsBox.querySelector('#stat-avg-speed');
           const elMaxSpd = statsBox.querySelector('#stat-max-speed');
           const elTotKm = statsBox.querySelector('#stat-total-km');
           const elUniqKm = statsBox.querySelector('#stat-unique-km');
           const elLat = statsBox.querySelector('#stat-lat-range');
           const elLon = statsBox.querySelector('#stat-lon-range');
+          if (elAvgSpd) elAvgSpd.innerText = `${Number(st.avg_speed_kmh || 0).toFixed(1)} km/h`;
           if (elMaxSpd) elMaxSpd.innerText = `${Number(st.max_speed_kmh || 0).toFixed(1)} km/h`;
           if (elTotKm) elTotKm.innerText = `${Number(st.total_km || 0).toFixed(2)} km`;
           if (elUniqKm) elUniqKm.innerText = `${Number(st.unique_km || 0).toFixed(2)} km`;
@@ -438,38 +479,6 @@
       const refreshBtn = statsBox.querySelector('#btn-refresh-account-stats');
       if (refreshBtn) refreshBtn.onclick = loadStats;
 
-      // 2.7. Przycisk otwierający Panel Ustawień Konta i Interfejsu
-      const settingsBtn = document.createElement('button');
-      settingsBtn.type = 'button';
-      settingsBtn.id = 'btn-open-account-settings';
-      settingsBtn.className = 'menu-action-btn';
-      settingsBtn.style.cssText = 'width: 100%; margin-top: 8px; padding: 7px 10px; font-size: 12px; font-weight: 600; background: rgba(56, 189, 248, 0.14); border: 1px solid rgba(56, 189, 248, 0.35); color: #38bdf8; border-radius: 6px; cursor: pointer;';
-      settingsBtn.innerText = 'Ustawienia konta i interfejsu';
-      settingsBtn.onclick = () => {
-        if (typeof window.openSettingsModal === 'function') {
-          window.openSettingsModal();
-        }
-      };
-      card.appendChild(settingsBtn);
-
-      // 3. Przycisk wylogowania
-      const logoutBtn = document.createElement('button');
-      logoutBtn.type = 'button';
-      logoutBtn.className = 'auth-btn-logout';
-      logoutBtn.innerText = 'Wyloguj się';
-      logoutBtn.title = 'Wyloguj się z konta';
-      logoutBtn.onclick = async () => {
-        try {
-          await fetch(`${getApiBaseUrl()}/api/auth/logout`, {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}` }
-          });
-        } catch (e) { }
-        saveStoredSession(null);
-        this.render();
-      };
-
-      card.appendChild(logoutBtn);
       container.appendChild(card);
     }
 
@@ -702,7 +711,7 @@
           new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout pobierania profili')), 10000))
         ]);
         const fresh = await fetchWithTimeout;
-        if (fresh && fresh.length > 0) {
+        if (fresh && Array.isArray(fresh)) {
           this.renderProfilesUI(container, fresh, token);
         } else if (!cached || cached.length === 0) {
           // Brak profili – wyrenderuj UI z pustą listą (użytkownik może dodać nowy profil)
@@ -799,17 +808,27 @@
         const activeObj = profiles && profiles.find(p => p.profile_id === activeId);
         if (activeObj) {
           deleteRow.style.display = 'block';
+          delBtn.disabled = false;
           delBtn.innerText = `Usuń profil "${activeObj.name}"`;
           delBtn.onclick = async () => {
             if (confirm(`Czy na pewno chcesz usunąć profil "${activeObj.name}" oraz WSZYSTKIE przypisane do niego trasy?`)) {
               try {
+                delBtn.disabled = true;
+                delBtn.innerText = 'Usuwanie profilu i śladów...';
                 await window.deleteUserProfile(activeObj.profile_id);
-                window.setActiveProfileId('');
-                cachedProfiles = null;
-                await this.populateProfilesUI(container, token);
+                setCachedProfiles(null);
+                const updated = await window.fetchUserProfiles(true);
+                const nextId = updated && updated.length > 0 ? updated[0].profile_id : '';
+                window.setActiveProfileId(nextId);
+                this.renderProfilesUI(container, updated || [], token);
                 if (typeof window.loadAvailableDates === 'function') window.loadAvailableDates();
+                if (typeof window.refreshAccountStats === 'function') window.refreshAccountStats();
+                window.dispatchEvent(new CustomEvent('nnaper_profile_changed', { detail: { profile_id: nextId } }));
+                alert(`Profil "${activeObj.name}" został pomyślnie usunięty.`);
               } catch (err) {
                 alert('Błąd usuwania profilu: ' + err.message);
+                delBtn.disabled = false;
+                delBtn.innerText = `Usuń profil "${activeObj.name}"`;
               }
             }
           };
@@ -971,7 +990,7 @@
       const res = await fetch(`${getApiBaseUrl()}/api/auth/profiles?token=${encodeURIComponent(token)}`);
       if (!res.ok) return getCachedProfiles() || [];
       const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) {
+      if (Array.isArray(data)) {
         setCachedProfiles(data);
       }
       return data;
@@ -1008,6 +1027,23 @@
       throw new Error(err.detail || 'Błąd usuwania profilu');
     }
     setCachedProfiles(null);
+    return await res.json();
+  };
+
+  window.deleteUserAccount = async function () {
+    const token = window.getAuthToken?.() || '';
+    if (!token) throw new Error('Wymagane logowanie');
+    const res = await fetch(`${getApiBaseUrl()}/api/auth/account?token=${encodeURIComponent(token)}`, {
+      method: 'DELETE'
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || err.error || 'Błąd usuwania konta');
+    }
+    setCachedProfiles(null);
+    if (window.AuthManager && typeof window.AuthManager.logout === 'function') {
+      window.AuthManager.logout();
+    }
     return await res.json();
   };
 

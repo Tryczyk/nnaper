@@ -80,6 +80,66 @@ if (typeof window.registerInfrastructureMapIcons === 'function') {
   window.registerInfrastructureMapIcons(map);
 }
 
+class MapPaletteControl {
+  onAdd(map) {
+    this._map = map;
+    this._container = document.createElement('div');
+    this._container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
+
+    // 1. Przycisk Rysowania po mapie (nad paletką)
+    const btnDraw = document.createElement('button');
+    btnDraw.type = 'button';
+    btnDraw.id = 'btn-map-draw-control';
+    btnDraw.className = 'map-custom-ctrl-btn';
+    btnDraw.title = 'Rysowanie po mapie (obszary, ścieżki, pomiary)';
+    btnDraw.setAttribute('aria-label', 'Rysowanie po mapie');
+    btnDraw.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 6.5l5.5-2.5 5 2.5 5-2.5v12l-5 2.5-5-2.5L3 18V6.5z"/>
+      <path d="M8.5 4v11.5"/>
+      <path d="M13.5 6.5V18"/>
+      <path d="M12 14l-1.5 3.5 3.5-1.5 6.5-6.5a1.414 1.414 0 0 0-2-2L12 14z" fill="currentColor" fill-opacity="0.18"/>
+      <path d="M17 9l2 2"/>
+    </svg>`;
+    btnDraw.onclick = () => {
+      if (typeof window.toggleDrawingStudio === 'function') {
+        window.toggleDrawingStudio();
+      }
+    };
+    this._container.appendChild(btnDraw);
+
+    // 2. Przycisk Paletki kolorów
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.id = 'btn-map-palette-control';
+    btn.className = 'map-custom-ctrl-btn';
+    btn.title = 'Studio stylów i kolorów mapy';
+    btn.setAttribute('aria-label', 'Studio stylów i kolorów mapy');
+    btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/>
+      <circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/>
+      <circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/>
+      <circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/>
+      <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/>
+    </svg>`;
+    btn.onclick = () => {
+      if (window.LayerManager && typeof window.LayerManager.openStyleStudio === 'function') {
+        window.LayerManager.openStyleStudio();
+      }
+    };
+    this._container.appendChild(btn);
+    return this._container;
+  }
+  onRemove() {
+    if (this._container && this._container.parentNode) {
+      this._container.parentNode.removeChild(this._container);
+    }
+    this._map = undefined;
+  }
+}
+
+const paletteControl = new MapPaletteControl();
+map.addControl(paletteControl, 'bottom-right');
+
 const navControl = new maplibregl.NavigationControl({ showCompass: true });
 map.addControl(navControl, 'bottom-right');
 
@@ -927,7 +987,6 @@ async function buildInlineTimeFilter(container) {
                 }
                 const resData = await res.json();
 
-                if (pointPanelEl) pointPanelEl.classList.remove('active');
                 clearSatelliteLayers();
 
                 window.dispatchEvent(new CustomEvent('nnaper_epochs_deleted', { detail: { day: dateStr } }));
@@ -1457,221 +1516,8 @@ function autoBuildTree() {
     }
   }
 
-  /* ------------------- POBIERANIE PEŁNYCH DANYCH Z BAZY ------------------- */
-  const pointPanelEl = document.getElementById('point-panel');
-  const btnClosePoint = document.getElementById('btn-close-point');
-
-  if (btnClosePoint) {
-    btnClosePoint.addEventListener('click', () => {
-      if (pointPanelEl) pointPanelEl.classList.remove('active');
-      clearSatelliteLayers();
-    });
-  }
-
-  async function loadPointFullDetails(epochId) {
-    collapseMenu();
-    collapseRightMenu();
-    if (pointPanelEl) pointPanelEl.classList.add('active');
-
-    const content = document.getElementById('pp-content');
-    if (content) content.innerHTML = '<div style="color:#94a3b8;">Odpytywanie bazy danych...</div>';
-
-    try {
-      const token = (typeof window.getAuthToken === 'function') ? window.getAuthToken() : '';
-      const res = await fetch(`${apiBaseUrl}/api/epoch/${epochId}?token=${encodeURIComponent(token)}`);
-      if (!res.ok) throw new Error('Błąd odpytania serwera');
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-
-      const e = data;
-      const allSatellites = data.satellites || [];
-
-      if (e.longitude && e.latitude) {
-        activeSatelliteContext = {
-          pointLon: parseFloat(e.longitude),
-          pointLat: parseFloat(e.latitude),
-          satellitesList: allSatellites
-        };
-        renderSatelliteRays();
-      }
-
-      const formatG = (val) => {
-        if (val === null || val === undefined || isNaN(Number(val))) return 'Brak danych';
-        const num = Number(val);
-        const sign = num > 0 ? '+' : '';
-        return `${sign}${num.toFixed(3)} G`;
-      };
-
-      const altStr = (e.altitude !== null && e.altitude !== undefined && !isNaN(Number(e.altitude)))
-        ? `${Number(e.altitude).toFixed(1)} m`
-        : 'Brak danych';
-
-      const spdStr = (e.speed_kmh !== null && e.speed_kmh !== undefined && !isNaN(Number(e.speed_kmh)))
-        ? `${Number(e.speed_kmh).toFixed(1)} km/h`
-        : '0.0 km/h';
-
-      let snapStatusHtml = '<span style="color:#94a3b8;">Surowy GPS</span>';
-      if (e.snapped_latitude !== null && e.snapped_latitude !== undefined) {
-        snapStatusHtml = `<span style="color:#10b981;font-weight:600;">Dociągnięty do drogi</span> (${Number(e.snapped_latitude).toFixed(6)}, ${Number(e.snapped_longitude).toFixed(6)})`;
-      }
-
-      let html = `
-      <div class="sat-mode-switch">
-        <span>Tryb wizualizacji satelitów:</span>
-        <select id="sel-sat-mode">
-          <option value="local" ${currentSatMode === 'local' ? 'selected' : ''}>1. Lokalny / Skyplot (Nieboskłon)</option>
-          <option value="subpoint" ${currentSatMode === 'subpoint' ? 'selected' : ''}>2. Model Sferyczny (Orbita MEO 20 200 km)</option>
-        </select>
-      </div>
-
-      <div class="section-box">
-        <h4>Szczegóły Epoki (GPS / Telemetria)</h4>
-        <table class="kv-table">
-          <tr><td>ID Epoki</td><td>${e.epoch_id}</td></tr>
-          <tr><td>Czas pomiaru</td><td>${e.timestamp || 'Brak'}</td></tr>
-          <tr><td>Współrzędne GPS</td><td>${Number(e.latitude).toFixed(6)}, ${Number(e.longitude).toFixed(6)}</td></tr>
-          <tr><td>Snap do drogi</td><td>${snapStatusHtml}</td></tr>
-          <tr><td>Wysokość n.p.m.</td><td>${altStr}</td></tr>
-          <tr><td>Prędkość</td><td>${spdStr}</td></tr>
-          <tr><td>Przeciążenie X</td><td>${formatG(e.g_x)}</td></tr>
-          <tr><td>Przeciążenie Y</td><td>${formatG(e.g_y)}</td></tr>
-          <tr><td>Przeciążenie Z</td><td>${formatG(e.g_z)}</td></tr>
-        </table>
-      </div>
-
-      <div class="section-box">
-        <h4>Satelity w zasięgu (${allSatellites.length})</h4>
-        <div style="display:flex; flex-wrap:wrap; gap:4px; margin-top:4px;">
-    `;
-
-      if (allSatellites.length > 0) {
-        allSatellites.forEach(sat => {
-          html += `
-          <span class="sat-badge">
-            <strong style="color:#38bdf8;">PRN ${sat.prn}:</strong> El: ${sat.elevation}°, Az: ${sat.azimuth}°
-          </span>
-        `;
-        });
-      } else {
-        html += `<span style="color:#64748b;">Brak wpisów satelitów w tej epoce.</span>`;
-      }
-
-      html += `
-        </div>
-      </div>
-
-      <div class="section-box" style="margin-top: 8px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-          <h4 style="margin:0;">Manualna edycja punktu</h4>
-          <button type="button" id="btn-drag-epoch-map" class="route-action-btn" style="padding:3px 8px; font-size:11px; background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.4); color:#38bdf8;">Przeciągnij na mapie</button>
-        </div>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; font-size:11.5px;">
-          <label style="display:flex; flex-direction:column; gap:2px; color:#94a3b8;">
-            Szerokość (Lat)
-            <input type="number" id="edit-epoch-lat" step="0.000001" value="${Number(e.latitude).toFixed(6)}" style="background:#0f172a; color:#f8fafc; border:1px solid #334155; border-radius:4px; padding:4px 6px; font-size:12px;" />
-          </label>
-          <label style="display:flex; flex-direction:column; gap:2px; color:#94a3b8;">
-            Długość (Lon)
-            <input type="number" id="edit-epoch-lon" step="0.000001" value="${Number(e.longitude).toFixed(6)}" style="background:#0f172a; color:#f8fafc; border:1px solid #334155; border-radius:4px; padding:4px 6px; font-size:12px;" />
-          </label>
-          <label style="display:flex; flex-direction:column; gap:2px; color:#94a3b8;">
-            Prędkość (km/h)
-            <input type="number" id="edit-epoch-speed" step="0.1" value="${e.speed_kmh !== null && e.speed_kmh !== undefined ? Number(e.speed_kmh).toFixed(1) : '0.0'}" style="background:#0f172a; color:#f8fafc; border:1px solid #334155; border-radius:4px; padding:4px 6px; font-size:12px;" />
-          </label>
-          <label style="display:flex; flex-direction:column; gap:2px; color:#94a3b8;">
-            Czas pomiaru
-            <input type="text" id="edit-epoch-ts" value="${e.timestamp || ''}" style="background:#0f172a; color:#f8fafc; border:1px solid #334155; border-radius:4px; padding:4px 6px; font-size:12px;" />
-          </label>
-          <label style="display:flex; flex-direction:column; gap:2px; color:#94a3b8;">
-            G-X
-            <input type="number" id="edit-epoch-gx" step="0.01" value="${e.g_x !== null && e.g_x !== undefined ? Number(e.g_x).toFixed(3) : ''}" style="background:#0f172a; color:#f8fafc; border:1px solid #334155; border-radius:4px; padding:4px 6px; font-size:12px;" />
-          </label>
-          <label style="display:flex; flex-direction:column; gap:2px; color:#94a3b8;">
-            G-Y / G-Z
-            <div style="display:flex; gap:4px;">
-              <input type="number" id="edit-epoch-gy" step="0.01" value="${e.g_y !== null && e.g_y !== undefined ? Number(e.g_y).toFixed(3) : ''}" style="width:50%; background:#0f172a; color:#f8fafc; border:1px solid #334155; border-radius:4px; padding:4px;" />
-              <input type="number" id="edit-epoch-gz" step="0.01" value="${e.g_z !== null && e.g_z !== undefined ? Number(e.g_z).toFixed(3) : ''}" style="width:50%; background:#0f172a; color:#f8fafc; border:1px solid #334155; border-radius:4px; padding:4px;" />
-            </div>
-          </label>
-        </div>
-        <div style="display:flex; gap:6px; margin-top:8px;">
-          <button type="button" id="btn-save-epoch-edit" class="route-action-btn" style="flex:1; background:#0284c7; color:#fff; border:none; padding:6px 10px; border-radius:6px; font-weight:600; cursor:pointer;">Zapisz zmiany punktu</button>
-          <button type="button" id="btn-clone-new-epoch" class="route-action-btn" style="background:rgba(16,185,129,0.16); color:#34d399; border:1px solid rgba(16,185,129,0.4); padding:6px 10px; border-radius:6px; font-weight:600; cursor:pointer;" title="Utwórz nowy punkt obok bieżącego">+ Dodaj nowy</button>
-        </div>
-        <div id="edit-epoch-feedback" style="font-size:11px; margin-top:4px; color:#38bdf8;"></div>
-      </div>
-
-      <div class="point-actions-box">
-        <button type="button" class="btn-delete-epoch" id="btn-delete-epoch" data-epoch-id="${e.epoch_id}">
-          Trwale usuń ten punkt z bazy
-        </button>
-        <div class="point-actions-hint">
-          Punkt oraz powiązane z nim rekordy satelitów zostaną bezpowrotnie usunięte z bazy danych.
-        </div>
-      </div>
-    `;
-
-      if (content) content.innerHTML = html;
-
-      if (typeof window.bindManualEpochEditor === 'function') {
-        window.bindManualEpochEditor(e);
-      }
-
-      const btnDelEpoch = document.getElementById('btn-delete-epoch');
-      if (btnDelEpoch) {
-        btnDelEpoch.addEventListener('click', async () => {
-          const confirmDelete = window.confirm(
-            `Czy na pewno chcesz bezpowrotnie usunąć ten punkt GPS z bazy danych?\n\n` +
-            `ID epoki: ${e.epoch_id}\n` +
-            `Czas pomiaru: ${e.timestamp || 'Brak'}\n` +
-            `Współrzędne: ${Number(e.latitude).toFixed(6)}, ${Number(e.longitude).toFixed(6)}\n\n` +
-            `Tej operacji nie można cofnąć.`
-          );
-          if (!confirmDelete) return;
-
-          btnDelEpoch.disabled = true;
-          btnDelEpoch.innerText = 'Usuwanie...';
-
-          try {
-            const token = (typeof window.getAuthToken === 'function') ? window.getAuthToken() : '';
-            const delRes = await fetch(`${apiBaseUrl}/api/epoch/${e.epoch_id}?token=${encodeURIComponent(token)}`, {
-              method: 'DELETE'
-            });
-            if (!delRes.ok) {
-              const errJson = await delRes.json().catch(() => ({}));
-              throw new Error(errJson.detail || errJson.error || 'Błąd usuwania punktu');
-            }
-
-            if (pointPanelEl) pointPanelEl.classList.remove('active');
-            clearSatelliteLayers();
-
-            window.dispatchEvent(new CustomEvent('nnaper_epochs_deleted', { detail: { epoch_id: e.epoch_id } }));
-
-            forceRefreshTrackTiles();
-            autoBuildTree();
-
-            alert('Punkt GPS został trwale usunięty z bazy danych.');
-          } catch (delErr) {
-            alert('Nie udało się usunąć punktu: ' + delErr.message);
-            btnDelEpoch.disabled = false;
-            btnDelEpoch.innerText = 'Trwale usuń ten punkt z bazy';
-          }
-        });
-      }
-
-      const selMode = document.getElementById('sel-sat-mode');
-      if (selMode) {
-        selMode.addEventListener('change', (e) => {
-          currentSatMode = e.target.value;
-          renderSatelliteRays();
-        });
-      }
-
-    } catch (err) {
-      if (content) content.innerHTML = `<span style="color:#ef4444;">Błąd pobierania danych: ${err.message}</span>`;
-    }
-  }
-  window.loadPointFullDetails = loadPointFullDetails;
+  // Panel szczegolow punktu GPS zostal trwale usuniety
+  window.loadPointFullDetails = () => {};
 
   /* ------------------- INICJALIZACJA ------------------- */
   map.on('load', () => {
@@ -1699,58 +1545,6 @@ function autoBuildTree() {
       }
     });
 
-    // Obsługa kliknięcia w punkty śladu GPS w celu inspekcji i trwałego usuwania
-    map.on('click', (e) => {
-      const routePlanner = document.getElementById('route-planner-panel');
-      if (routePlanner && routePlanner.classList.contains('active')) return;
-      if (document.body.classList.contains('playback-mode')) return;
-      if (window.LayerManager && typeof window.LayerManager.isStyleStudioOpen === 'function' && window.LayerManager.isStyleStudioOpen()) return;
-
-      const queryLayers = [];
-      trackMonthLayers.forEach(({ layerId }) => {
-        if (map.getLayer(layerId) && map.getLayoutProperty(layerId, 'visibility') !== 'none') {
-          queryLayers.push(layerId);
-        }
-      });
-      if (map.getLayer('GPS / Ślad trasy') && map.getLayoutProperty('GPS / Ślad trasy', 'visibility') !== 'none') {
-        queryLayers.push('GPS / Ślad trasy');
-      }
-
-      if (queryLayers.length === 0) return;
-
-      const bbox = [
-        [e.point.x - 6, e.point.y - 6],
-        [e.point.x + 6, e.point.y + 6]
-      ];
-      const features = map.queryRenderedFeatures(bbox, { layers: queryLayers });
-      if (features && features.length > 0) {
-        const f = features[0];
-        const epochId = f.properties && f.properties.epoch_id;
-        if (epochId) {
-          loadPointFullDetails(epochId);
-        }
-      }
-    });
-
-    map.on('mousemove', (e) => {
-      if (document.body.classList.contains('playback-mode')) return;
-      if (window.LayerManager && typeof window.LayerManager.isStyleStudioOpen === 'function' && window.LayerManager.isStyleStudioOpen()) return;
-      const queryLayers = [];
-      trackMonthLayers.forEach(({ layerId }) => {
-        if (map.getLayer(layerId) && map.getLayoutProperty(layerId, 'visibility') !== 'none') {
-          queryLayers.push(layerId);
-        }
-      });
-      if (queryLayers.length > 0) {
-        const bbox = [
-          [e.point.x - 6, e.point.y - 6],
-          [e.point.x + 6, e.point.y + 6]
-        ];
-        const features = map.queryRenderedFeatures(bbox, { layers: queryLayers });
-        map.getCanvas().style.cursor = (features && features.length > 0) ? 'pointer' : '';
-      }
-    });
-
     autoBuildTree();
   });
 
@@ -1764,6 +1558,18 @@ function autoBuildTree() {
   let searchResults = [];
   let highlightedSearchIndex = -1;
   let searchCompleted = false;
+
+  if (searchInput) {
+    try {
+      const stored = localStorage.getItem('nnaper_user');
+      const uName = stored ? (JSON.parse(stored)?.username || '') : '';
+      setTimeout(() => {
+        if (uName && searchInput.value && searchInput.value.trim() === uName.trim()) {
+          searchInput.value = '';
+        }
+      }, 100);
+    } catch (e) {}
+  }
 
   function getPolishPlaceLabel(value) {
     if (!value) return value;

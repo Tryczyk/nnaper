@@ -779,19 +779,6 @@
     actionBar.className = 'layer-tree-action-bar';
     actionBar.style.cssText = 'padding: 2px 2px 8px 2px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); margin-bottom: 8px; display: flex; flex-direction: column; gap: 6px;';
 
-    const btnOpenStudio = document.createElement('button');
-    btnOpenStudio.type = 'button';
-    btnOpenStudio.id = 'btn-open-style-studio';
-    btnOpenStudio.innerText = 'Dostosuj kolory i styl mapy';
-    btnOpenStudio.title = 'Włącz tryb edycji kolorów, obwódek i stylów obiektów na mapie';
-    btnOpenStudio.style.cssText = 'width: 100%; padding: 6px 10px; font-size: 11px; font-weight: 600; background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.35); color: #38bdf8; border-radius: 6px; cursor: pointer; transition: all 0.2s ease;';
-    btnOpenStudio.onmouseover = () => { btnOpenStudio.style.background = 'rgba(56, 189, 248, 0.22)'; };
-    btnOpenStudio.onmouseout = () => { btnOpenStudio.style.background = 'rgba(56, 189, 248, 0.12)'; };
-    btnOpenStudio.onclick = () => {
-      openStyleStudio();
-    };
-    actionBar.appendChild(btnOpenStudio);
-
     // Sekcja Presetów Warstw (domyślne + własne)
     const presetBox = document.createElement('div');
     presetBox.className = 'layer-presets-box';
@@ -1091,6 +1078,16 @@
           if (typeof options.onRenderGps === 'function') {
             const timeSection = document.createElement('div');
             timeSection.className = 'time-filter-section';
+
+            const replayBtn = document.createElement('button');
+            replayBtn.type = 'button';
+            replayBtn.id = 'btn-open-playback';
+            replayBtn.className = 'menu-action-btn btn-trigger-playback';
+            replayBtn.title = 'Uruchom odtwarzacz telemetryczny (Replay trasy)';
+            replayBtn.style.cssText = 'width: 100%; margin: 6px 0 10px 0; padding: 7px 10px; font-size: 12px; font-weight: 700; background: rgba(56, 189, 248, 0.16); border: 1px solid rgba(56, 189, 248, 0.45); color: #38bdf8; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.3); transition: all 0.2s;';
+            replayBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg><span>Replay trasy</span>`;
+            timeSection.appendChild(replayBtn);
+
             const timeTitle = document.createElement('span');
             timeTitle.className = 'time-filter-title';
             timeTitle.innerText = 'FILTR CZASU:';
@@ -1743,6 +1740,8 @@
       menuEl.classList.remove('collapsed');
     }
     if (tree) tree.style.display = 'none';
+    const overlays = document.getElementById('group-view-overlays');
+    if (overlays) overlays.style.display = 'none';
     panel.style.display = 'flex';
 
     if (studioMap) {
@@ -1766,6 +1765,8 @@
     const panel = document.getElementById('style-studio-panel');
     if (panel) panel.style.display = 'none';
     if (tree) tree.style.display = 'block';
+    const overlays = document.getElementById('group-view-overlays');
+    if (overlays) overlays.style.display = '';
     setPipetteMode(false);
   }
 

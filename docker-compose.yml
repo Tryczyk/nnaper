@@ -135,31 +135,7 @@ services:
       - PHOTON_BBOX=${PHOTON_BBOX:-14.1,53.9,19.9,55.9}
       - PHOTON_SEARCH_LIMIT=${PHOTON_SEARCH_LIMIT:-50}
       - PMTILES_FILE=${PMTILES_FILE:-pomorskie.pmtiles}
-    command: >
-      sh -c "printf '%s\\n' \\
-        \"window.NNAPER_CONFIG = Object.assign(window.NNAPER_CONFIG || {}, {\" \\
-        \"  API_BASE_URL: '$${API_PUBLIC_URL}',\" \\
-        \"  TILES_BASE_URL: '$${TILES_PUBLIC_URL}',\" \\
-        \"  OSRM_URL: '$${OSRM_PUBLIC_URL}',\" \\
-        \"  PHOTON_URL: '$${PHOTON_URL}',\" \\
-        \"  PHOTON_BBOX: '$${PHOTON_BBOX}',\" \\
-        \"  PHOTON_SEARCH_LIMIT: $${PHOTON_SEARCH_LIMIT},\" \\
-        \"  PMTILES_FILE: '$${PMTILES_FILE}'\" \\
-        \"});\" > /usr/share/caddy/maps/runtime-config.local.js && \\
-        printf '%s\\n' \\
-        \":8080 {\" \\
-        \"  root * /usr/share/caddy\" \\
-        \"  file_server\" \\
-        \"  header {\" \\
-        \"    Access-Control-Allow-Origin *\" \\
-        \"    Access-Control-Expose-Headers Content-Range, Accept-Ranges, Content-Length, ETag\" \\
-        \"  }\" \\
-        \"  @pmtiles path *.pmtiles\" \\
-        \"  header @pmtiles {\" \\
-        \"    Cache-Control no-store, no-cache, must-revalidate\" \\
-        \"  }\" \\
-        \"}\" > /etc/caddy/Caddyfile && \\
-        exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile"
+    command: ["sh", "/usr/share/caddy/entrypoint-caddy.sh"]
     restart: unless-stopped
 
   open-browser:
@@ -170,10 +146,10 @@ services:
         condition: service_started
     entrypoint: ["/bin/sh", "-c"]
     environment:
-      - PUBLIC_MAP_URL=${TILES_PUBLIC_URL:-http://localhost:8080}/maps/map.html
+      - PUBLIC_MAP_URL=${TILES_PUBLIC_URL:-http://localhost:8080}/web/index.html
     command: >
       "echo '[DOCKER] Oczekiwanie na serwer mapy (tryb offline-safe)...' &&
-       until wget -q --spider http://tiles-server:8080/maps/map.html 2>/dev/null; do
+       until wget -q --spider http://tiles-server:8080/web/index.html 2>/dev/null; do
          sleep 1;
        done &&
        echo '========================================================' &&
