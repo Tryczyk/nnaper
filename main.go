@@ -94,6 +94,7 @@ func main() {
 		api.Post("/auth/login", authService.HandleLogin)
 		api.Get("/auth/me", authService.HandleMe)
 		api.Post("/auth/avatar", authService.HandleAvatar)
+		api.Delete("/auth/avatar", authService.HandleAvatar)
 		api.Post("/auth/logout", authService.HandleLogout)
 		api.Get("/auth/profiles", authService.HandleListProfiles)
 		api.Post("/auth/profiles", authService.HandleCreateProfile)

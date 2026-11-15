@@ -15,27 +15,40 @@
   const PROFILES_STORAGE_KEY = 'nnaper_user_profiles_cache';
   let cachedProfiles = null;
 
-  function getCachedProfiles() {
-    if (cachedProfiles && Array.isArray(cachedProfiles)) {
-      return cachedProfiles;
+  function getCachedProfiles(userId) {
+    if (!userId) {
+      const s = getStoredSession();
+      userId = s?.user?.user_id;
+    }
+    const key = userId ? `${PROFILES_STORAGE_KEY}_${userId}` : PROFILES_STORAGE_KEY;
+    if (cachedProfiles && cachedProfiles._userId === userId && Array.isArray(cachedProfiles.data)) {
+      return cachedProfiles.data;
     }
     try {
-      const raw = localStorage.getItem(PROFILES_STORAGE_KEY);
+      const raw = localStorage.getItem(key);
       if (raw) {
-        cachedProfiles = JSON.parse(raw);
-        return cachedProfiles;
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          cachedProfiles = { _userId: userId, data: parsed };
+          return parsed;
+        }
       }
     } catch (e) {}
     return null;
   }
 
-  function setCachedProfiles(profiles) {
-    cachedProfiles = profiles;
+  function setCachedProfiles(profiles, userId) {
+    if (!userId) {
+      const s = getStoredSession();
+      userId = s?.user?.user_id;
+    }
+    const key = userId ? `${PROFILES_STORAGE_KEY}_${userId}` : PROFILES_STORAGE_KEY;
+    cachedProfiles = profiles ? { _userId: userId, data: profiles } : null;
     try {
       if (!profiles) {
-        localStorage.removeItem(PROFILES_STORAGE_KEY);
+        localStorage.removeItem(key);
       } else {
-        localStorage.setItem(PROFILES_STORAGE_KEY, JSON.stringify(profiles));
+        localStorage.setItem(key, JSON.stringify(profiles));
       }
     } catch (e) {}
   }
@@ -285,6 +298,36 @@
 
       card.appendChild(avatarWrapper);
       card.appendChild(fileInput);
+
+      // 1.5. Opcja usunięcia zdjęcia profilowego jeśli użytkownik ma wgrane własne zdjęcie
+      if (user.avatar_url) {
+        const removeAvatarBtn = document.createElement('button');
+        removeAvatarBtn.type = 'button';
+        removeAvatarBtn.id = 'btn-delete-avatar';
+        removeAvatarBtn.className = 'auth-btn-remove-avatar';
+        removeAvatarBtn.style.cssText = 'background:none; border:none; color:#f87171; font-size:10px; cursor:pointer; margin-top:2px; margin-bottom:2px; padding:2px 6px; text-decoration:underline; font-weight:500; display:block; text-align:center;';
+        removeAvatarBtn.innerText = 'Usuń zdjęcie';
+        removeAvatarBtn.title = 'Usuń zdjęcie profilowe i przywróć domyślny awatar';
+        removeAvatarBtn.onclick = async (ev) => {
+          ev.stopPropagation();
+          if (confirm('Czy na pewno chcesz usunąć zdjęcie profilowe i przywrócić domyślny awatar?')) {
+            try {
+              avatarWrapper.classList.add('loading');
+              await window.deleteUserAvatar();
+              user.avatar_url = null;
+              const s = getStoredSession() || {};
+              s.user = user;
+              saveStoredSession(s);
+              this.render();
+            } catch (err) {
+              alert('Błąd usuwania zdjęcia: ' + err.message);
+            } finally {
+              avatarWrapper.classList.remove('loading');
+            }
+          }
+        };
+        card.appendChild(removeAvatarBtn);
+      }
 
       // 2. Nazwa konta pod ludkiem
       const userDetails = document.createElement('div');
@@ -829,6 +872,15 @@
                 alert('Błąd usuwania profilu: ' + err.message);
                 delBtn.disabled = false;
                 delBtn.innerText = `Usuń profil "${activeObj.name}"`;
+                try {
+                  setCachedProfiles(null);
+                  const fresh = await window.fetchUserProfiles(true);
+                  const nextId = fresh && fresh.length > 0 ? fresh[0].profile_id : '';
+                  window.setActiveProfileId(nextId);
+                  this.renderProfilesUI(container, fresh || [], token);
+                  if (typeof window.loadAvailableDates === 'function') window.loadAvailableDates();
+                  if (typeof window.refreshAccountStats === 'function') window.refreshAccountStats();
+                } catch (e) {}
               }
             }
           };
@@ -1043,6 +1095,25 @@
     setCachedProfiles(null);
     if (window.AuthManager && typeof window.AuthManager.logout === 'function') {
       window.AuthManager.logout();
+    }
+    return await res.json();
+  };
+
+  window.deleteUserAvatar = async function () {
+    const token = window.getAuthToken?.() || '';
+    if (!token) throw new Error('Wymagane logowanie');
+    const res = await fetch(`${getApiBaseUrl()}/api/auth/avatar`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Błąd usuwania zdjęcia profilowego');
+    }
+    const session = getStoredSession();
+    if (session && session.user) {
+      session.user.avatar_url = null;
+      saveStoredSession(session);
     }
     return await res.json();
   };

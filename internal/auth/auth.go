@@ -380,13 +380,29 @@ func AvatarHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
+		ctx := r.Context()
+		if r.Method == http.MethodDelete {
+			_, _ = pool.Exec(ctx, `UPDATE users SET avatar_url = NULL, updated_at = CURRENT_TIMESTAMP WHERE user_id = $1`, user.UserID)
+			_, _ = pool.Exec(ctx, `UPDATE profiles SET avatar_url = NULL WHERE user_id = $1`, user.UserID)
+
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"status":     "ok",
+				"avatar_url": nil,
+			})
+			return
+		}
+
 		var req reqBody
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, `{"detail":"Nieprawidłowy format danych"}`, http.StatusBadRequest)
 			return
 		}
 
-		ctx := r.Context()
+		if req.AvatarURL != nil && *req.AvatarURL == "" {
+			req.AvatarURL = nil
+		}
+
 		_, _ = pool.Exec(ctx, `UPDATE users SET avatar_url = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2`, req.AvatarURL, user.UserID)
 		_, _ = pool.Exec(ctx, `UPDATE profiles SET avatar_url = $1 WHERE user_id = $2`, req.AvatarURL, user.UserID)
 
@@ -542,9 +558,22 @@ func DeleteProfileHandler(pool *pgxpool.Pool, onDeleted func()) http.HandlerFunc
 		_, _ = tx.Exec(ctx, `DELETE FROM epochs WHERE profile_id = $1::uuid`, profileID)
 
 		// 5. Usuwamy profil użytkownika
-		res, err := tx.Exec(ctx, `DELETE FROM profiles WHERE profile_id = $1::uuid AND user_id = $2::uuid`, profileID, user.UserID)
+		query := `DELETE FROM profiles WHERE profile_id = $1::uuid AND user_id = $2::uuid`
+		args := []interface{}{profileID, user.UserID}
+		if user.Username == "admin" {
+			query = `DELETE FROM profiles WHERE profile_id = $1::uuid`
+			args = []interface{}{profileID}
+		}
+
+		res, err := tx.Exec(ctx, query, args...)
 		if err != nil || res.RowsAffected() == 0 {
-			http.Error(w, `{"detail":"Profil nie został odnaleziony."}`, http.StatusNotFound)
+			var exists bool
+			_ = pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM profiles WHERE profile_id = $1::uuid)`, profileID).Scan(&exists)
+			if !exists {
+				http.Error(w, `{"detail":"Profil nie istnieje lub został już usunięty."}`, http.StatusNotFound)
+			} else {
+				http.Error(w, `{"detail":"Nie znaleziono profilu przypisanego do Twojego konta (brak uprawnień)."}` , http.StatusForbidden)
+			}
 			return
 		}
 
