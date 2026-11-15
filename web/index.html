@@ -303,7 +303,7 @@
                                     </div>
                                   </div>
 
-                                  <div id="search-container">
+                                  <div id="search-container" role="search">
                                     <button id="btn-search-open-planner" class="search-side-btn" type="button"
                                       title="Planowanie trasy" aria-label="Planowanie trasy">
                                       <svg class="search-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -322,8 +322,8 @@
                                     </button>
 
                                     <div class="search-input-wrapper">
-                                      <input type="search" id="search-input" name="search_address_query" placeholder="Szukaj adresu lub miejsca..."
-                                        autocomplete="off" autocapitalize="off" spellcheck="false"
+                                      <input type="search" id="search-input" name="map_search_query" role="searchbox" placeholder="Szukaj adresu lub miejsca..."
+                                        autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
                                         data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" />
                                       <div id="search-suggestions"></div>
                                     </div>

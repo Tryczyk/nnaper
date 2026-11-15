@@ -581,17 +581,31 @@
       suggestions.className = 'route-point-suggestions';
       if (point.place) {
         const input = document.createElement('input');
+        input.type = 'search';
+        input.setAttribute('role', 'searchbox');
         input.className = 'route-field';
         input.value = inlineRoutePlaceLabel(place);
         input.placeholder = 'Wpisz adres';
         input.autocomplete = 'off';
+        input.name = `route_stop_${index}`;
+        input.setAttribute('data-lpignore', 'true');
+        input.setAttribute('data-1p-ignore', 'true');
+        input.setAttribute('data-bwignore', 'true');
+        input.setAttribute('data-form-type', 'other');
         input.addEventListener('input', () => searchInlinePoint(input, point, suggestions));
         item.appendChild(input);
       } else {
         const input = document.createElement('input');
+        input.type = 'search';
+        input.setAttribute('role', 'searchbox');
         input.className = 'route-field';
         input.placeholder = index === 0 ? 'Wpisz miejsce startu' : 'Wpisz punkt trasy';
         input.autocomplete = 'off';
+        input.name = `route_stop_${index}`;
+        input.setAttribute('data-lpignore', 'true');
+        input.setAttribute('data-1p-ignore', 'true');
+        input.setAttribute('data-bwignore', 'true');
+        input.setAttribute('data-form-type', 'other');
         input.addEventListener('input', () => searchInlinePoint(input, point, suggestions));
         item.appendChild(input);
       }
