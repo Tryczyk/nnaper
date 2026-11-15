@@ -1615,7 +1615,15 @@ body.playback-mode #playback-bottom-controls {
   line-height: 1;
   user-select: none;
   filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.8));
-  transition: transform 0.08s linear;
+  pointer-events: none;
+  transition: none !important;
+  will-change: transform;
+}
+
+.car-marker.maplibregl-marker,
+.maplibregl-marker.car-marker {
+  transition: none !important;
+  animation: none !important;
 }
 
 /* ==================== MODAL EKSPORTU TRASY ==================== */

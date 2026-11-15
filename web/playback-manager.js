@@ -363,18 +363,20 @@
     if (!trackData[index] || !m) return;
     const pt = trackData[index];
 
+    const followCheckbox = chkFollow || document.getElementById('chk-playback-follow');
+    if (centerCamera || (followCheckbox && followCheckbox.checked)) {
+      m.jumpTo({ center: [pt.lon, pt.lat] });
+    }
+
     if (!carMarker) {
       const el = document.createElement('div');
       el.className = 'car-marker';
+      el.style.transition = 'none';
+      el.style.willChange = 'transform';
       el.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="#38bdf8" stroke="#0f172a" stroke-width="1.5"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="3" fill="#ffffff"/></svg>';
       carMarker = new maplibregl.Marker({ element: el }).setLngLat([pt.lon, pt.lat]).addTo(m);
     } else {
       carMarker.setLngLat([pt.lon, pt.lat]);
-    }
-
-    const followCheckbox = chkFollow || document.getElementById('chk-playback-follow');
-    if (centerCamera || (followCheckbox && followCheckbox.checked)) {
-      m.jumpTo({ center: [pt.lon, pt.lat] });
     }
 
     // Ślad samochodzika (zapełnianie mapy śladem)
