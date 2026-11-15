@@ -50,6 +50,8 @@ type RoutePreferences struct {
 	AversionCrossings      float64 `json:"aversion_crossings"`
 	AversionRoundabouts    float64 `json:"aversion_roundabouts"`
 	AversionTrafficSignals float64 `json:"aversion_traffic_signals"`
+	AversionHighways       float64 `json:"aversion_highways"`
+	AversionTraversed      float64 `json:"aversion_traversed"`
 	AvoidTraversed         bool    `json:"avoid_traversed"`
 	AvoidHighways          bool    `json:"avoid_highways"`
 	AutoExploratory        bool    `json:"auto_exploratory"`
@@ -252,8 +254,12 @@ func ComputeEdgeCost(e GraphEdge, avoidPoints []AvoidPoint, avoidMode string, pr
 	hitAvoid := false
 
 	// 0. Unikanie autostrad i dróg ekspresowych
-	if prefs.AvoidHighways && isHighwayClass(e.Highway) {
-		cost = cost*5000.0 + 2500000.0
+	if (prefs.AvoidHighways || prefs.AversionHighways > 0) && isHighwayClass(e.Highway) {
+		if prefs.AversionHighways > 0 {
+			cost += (cost*500.0 + 350000.0) * prefs.AversionHighways
+		} else {
+			cost = cost*5000.0 + 2500000.0
+		}
 	}
 
 	// 1. Sprawdzenie punktów unikania (dokładna odległość od każdego segmentu krawędzi do strefy unikania)
@@ -312,9 +318,13 @@ func ComputeEdgeCost(e GraphEdge, avoidPoints []AvoidPoint, avoidMode string, pr
 		}
 	}
 
-	// 3. Unikanie przebytych już dróg (bardzo silna kara za wjazd na drogę ze śladem GPS)
-	if prefs.AvoidTraversed && e.Traversed {
-		cost = cost*280.0 + 18000.0
+	// 3. Unikanie przebytych już dróg (kara za wjazd na drogę ze śladem GPS)
+	if (prefs.AvoidTraversed || prefs.AversionTraversed > 0) && e.Traversed {
+		if prefs.AversionTraversed > 0 {
+			cost += (cost*30.0 + 2000.0) * prefs.AversionTraversed
+		} else {
+			cost = cost*280.0 + 18000.0
+		}
 	} else if prefs.AutoExploratory && !e.Traversed {
 		// W trybie auto-eksploracji premiujemy nowe nieodwiedzone ulice
 		cost *= 0.45
@@ -427,6 +437,8 @@ func (g *Graph) findShortestPathSteps(
 	hasCustomWeights := len(avoidPoints) > 0 ||
 		prefs.AvoidTraversed ||
 		prefs.AvoidHighways ||
+		prefs.AversionTraversed > 0 ||
+		prefs.AversionHighways > 0 ||
 		prefs.AutoExploratory ||
 		prefs.AversionSpeedBumps > 0 ||
 		prefs.AversionCrossings > 0 ||
@@ -881,7 +893,7 @@ func (g *Graph) buildIntelligentAutoRoute(req RoutePlanRequest, targetKM float64
 		rankBonus := 0.0
 		for _, a := range adjs {
 			e := g.Edges[a.edgeIdx]
-			if req.Preferences.AvoidHighways && isHighwayClass(e.Highway) {
+			if (req.Preferences.AvoidHighways || req.Preferences.AversionHighways > 0) && isHighwayClass(e.Highway) {
 				isBad = true
 				break
 			}
@@ -889,7 +901,7 @@ func (g *Graph) buildIntelligentAutoRoute(req RoutePlanRequest, targetKM float64
 				untraversedLen += e.LengthM
 				switch highwayRank(e.Highway) {
 				case 5:
-					if !req.Preferences.AvoidHighways {
+					if !req.Preferences.AvoidHighways && req.Preferences.AversionHighways == 0 {
 						rankBonus += 15000.0
 					}
 				case 4:

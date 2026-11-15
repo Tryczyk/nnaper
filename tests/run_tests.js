@@ -152,7 +152,7 @@ function computeEdgeCostJS(e, avoidPoints, avoidMode, prefs) {
     }
   }
   let hitAvoid = false;
-  if (prefs.avoid_highways && ['motorway', 'motorway_link', 'trunk', 'trunk_link'].includes(e.highway)) {
+  if ((prefs.avoid_highways || prefs.aversion_highways > 0) && ['motorway', 'motorway_link', 'trunk', 'trunk_link'].includes(e.highway)) {
     cost = cost * 5000.0 + 2500000.0;
   }
   if (avoidPoints && avoidPoints.length > 0 && e.coords && e.coords.length >= 2) {
@@ -180,7 +180,7 @@ function computeEdgeCostJS(e, avoidPoints, avoidMode, prefs) {
   if (prefs.aversion_intersections > 0 && e.isIntersection) {
     cost += prefs.aversion_intersections >= 10.5 ? 2500000.0 : prefs.aversion_intersections * 30.0;
   }
-  if (prefs.avoid_traversed && e.traversed) {
+  if ((prefs.avoid_traversed || prefs.aversion_traversed > 0) && e.traversed) {
     cost = cost * 280.0 + 18000.0;
   } else if (prefs.auto_exploratory && !e.traversed) {
     cost *= 0.45;
@@ -272,9 +272,10 @@ function computeEdgeCostJS(e, avoidPoints, avoidMode, prefs) {
     countAssert(htmlContent.includes('id="btn-toggle-route-planner"'), 'Brak uchwytu #btn-toggle-route-planner w index.html');
     countAssert(htmlContent.includes('id="btn-route-download-gpx"'), 'Brak przycisku #btn-route-download-gpx w index.html');
     countAssert(cssContent.includes('.route-planner-panel.collapsed'), 'Brak stylu .route-planner-panel.collapsed w styles.css');
-    countAssert(routeContent.includes('chk-route-avoid-highways'), 'Brak przełącznika unikania autostrad w route-manager.js');
-    countAssert(routeContent.includes('max="5"'), 'Suwaki przeszkód powinny mieć max="5" (zakres 0-5 odpowiadający liczbie obiektów)');
-    countAssert(routeContent.includes('Wagi przeszkód drogowych'), 'Brak sekcji wagi przeszkód drogowych');
+    countAssert(routeContent.includes('rng-av-highways'), 'Brak suwaka unikania autostrad w route-manager.js');
+    countAssert(routeContent.includes('rng-av-traversed'), 'Brak suwaka unikania przebytych dróg w route-manager.js');
+    countAssert(routeContent.includes('max="7"'), 'Suwaki przeszkód powinny mieć max="7" (zakres 0-7 odpowiadający 7 obiektom)');
+    countAssert(routeContent.includes('Wagi unikania przeszkód i dróg'), 'Brak sekcji wagi przeszkód i dróg');
   });
 
   await runSuite('Statystyki konta i 4 skrajne punkty geograficzne (N/S/E/W) w web/auth-manager.js', () => {

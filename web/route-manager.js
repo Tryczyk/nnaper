@@ -62,6 +62,8 @@
   let routeAvoidMode = 'high_cost'; // 'high_cost' | 'exclude'
   let pickingAvoidPointOnMap = false;
   let routePreferences = {
+    aversion_traversed: 0,
+    aversion_highways: 0,
     aversion_speed_bumps: 0,
     aversion_intersections: 0,
     aversion_crossings: 0,
@@ -737,16 +739,6 @@
         <div id="route-avoid-list" style="display:flex; flex-direction:column; gap:4px;"></div>
       </div>
 
-      <label class="route-clean-toggle-row">
-        <span>Unikaj przebytych już dróg</span>
-        <input type="checkbox" id="chk-route-avoid-traversed" style="accent-color:#10b981;" />
-      </label>
-
-      <label class="route-clean-toggle-row">
-        <span>Unikaj autostrad i dróg ekspresowych</span>
-        <input type="checkbox" id="chk-route-avoid-highways" style="accent-color:#f59e0b;" />
-      </label>
-
       <div class="route-clean-section">
         <label class="route-clean-toggle-row" style="padding:0; border:none; background:none;">
           <span style="color:#38bdf8; font-weight:600;">Generator trasy automatycznej</span>
@@ -773,35 +765,45 @@
         </div>
       </div>
 
-      <details id="route-prefs-details" class="route-advanced-box route-clean-details">
+      <details id="route-prefs-details" class="route-advanced-box route-clean-details" open>
         <summary class="route-clean-summary">
-          Wagi przeszkód drogowych (0–5)
+          Wagi unikania przeszkód i dróg (0–7)
         </summary>
         <div class="route-clean-sliders-list">
           <div class="route-compact-slider-row">
+            <span class="route-compact-slider-label">Przebyte już drogi</span>
+            <input type="range" id="rng-av-traversed" class="route-aversion-range" min="0" max="7" step="1" value="0" />
+            <strong id="val-av-traversed" class="route-compact-slider-val">0</strong>
+          </div>
+          <div class="route-compact-slider-row">
+            <span class="route-compact-slider-label">Autostrady i ekspresówki</span>
+            <input type="range" id="rng-av-highways" class="route-aversion-range" min="0" max="7" step="1" value="0" />
+            <strong id="val-av-highways" class="route-compact-slider-val">0</strong>
+          </div>
+          <div class="route-compact-slider-row">
             <span class="route-compact-slider-label">Progi zwalniające</span>
-            <input type="range" id="rng-av-bumps" class="route-aversion-range" min="0" max="5" step="1" value="0" />
+            <input type="range" id="rng-av-bumps" class="route-aversion-range" min="0" max="7" step="1" value="0" />
             <strong id="val-av-bumps" class="route-compact-slider-val">0</strong>
           </div>
           <div class="route-compact-slider-row">
+            <span class="route-compact-slider-label">Sygnalizacja świetlna</span>
+            <input type="range" id="rng-av-signals" class="route-aversion-range" min="0" max="7" step="1" value="0" />
+            <strong id="val-av-signals" class="route-compact-slider-val">0</strong>
+          </div>
+          <div class="route-compact-slider-row">
             <span class="route-compact-slider-label">Skrzyżowania</span>
-            <input type="range" id="rng-av-inter" class="route-aversion-range" min="0" max="5" step="1" value="0" />
+            <input type="range" id="rng-av-inter" class="route-aversion-range" min="0" max="7" step="1" value="0" />
             <strong id="val-av-inter" class="route-compact-slider-val">0</strong>
           </div>
           <div class="route-compact-slider-row">
             <span class="route-compact-slider-label">Przejścia dla pieszych</span>
-            <input type="range" id="rng-av-cross" class="route-aversion-range" min="0" max="5" step="1" value="0" />
+            <input type="range" id="rng-av-cross" class="route-aversion-range" min="0" max="7" step="1" value="0" />
             <strong id="val-av-cross" class="route-compact-slider-val">0</strong>
           </div>
           <div class="route-compact-slider-row">
             <span class="route-compact-slider-label">Ronda</span>
-            <input type="range" id="rng-av-round" class="route-aversion-range" min="0" max="5" step="1" value="0" />
+            <input type="range" id="rng-av-round" class="route-aversion-range" min="0" max="7" step="1" value="0" />
             <strong id="val-av-round" class="route-compact-slider-val">0</strong>
-          </div>
-          <div class="route-compact-slider-row">
-            <span class="route-compact-slider-label">Sygnalizacja świetlna</span>
-            <input type="range" id="rng-av-signals" class="route-aversion-range" min="0" max="5" step="1" value="0" />
-            <strong id="val-av-signals" class="route-compact-slider-val">0</strong>
           </div>
         </div>
       </details>
@@ -860,20 +862,6 @@
       scheduleInlineRouteCalculation();
     });
 
-    const chkAvoidTrav = box.querySelector('#chk-route-avoid-traversed');
-    chkAvoidTrav.addEventListener('change', () => {
-      routePreferences.avoid_traversed = chkAvoidTrav.checked;
-      scheduleInlineRouteCalculation();
-    });
-
-    const chkAvoidHw = box.querySelector('#chk-route-avoid-highways');
-    if (chkAvoidHw) {
-      chkAvoidHw.addEventListener('change', () => {
-        routePreferences.avoid_highways = chkAvoidHw.checked;
-        scheduleInlineRouteCalculation();
-      });
-    }
-
     const chkAutoMode = box.querySelector('#chk-route-auto-mode');
     const autoParams = box.querySelector('#route-auto-params');
     const inpKm = box.querySelector('#inp-route-target-km');
@@ -927,14 +915,16 @@
     });
 
     const aversionSlidersConfig = [
+      { rngId: 'rng-av-traversed', valId: 'val-av-traversed', prefKey: 'aversion_traversed', boolKey: 'avoid_traversed' },
+      { rngId: 'rng-av-highways', valId: 'val-av-highways', prefKey: 'aversion_highways', boolKey: 'avoid_highways' },
       { rngId: 'rng-av-bumps', valId: 'val-av-bumps', prefKey: 'aversion_speed_bumps' },
+      { rngId: 'rng-av-signals', valId: 'val-av-signals', prefKey: 'aversion_traffic_signals' },
       { rngId: 'rng-av-inter', valId: 'val-av-inter', prefKey: 'aversion_intersections' },
       { rngId: 'rng-av-cross', valId: 'val-av-cross', prefKey: 'aversion_crossings' },
-      { rngId: 'rng-av-round', valId: 'val-av-round', prefKey: 'aversion_roundabouts' },
-      { rngId: 'rng-av-signals', valId: 'val-av-signals', prefKey: 'aversion_traffic_signals' }
+      { rngId: 'rng-av-round', valId: 'val-av-round', prefKey: 'aversion_roundabouts' }
     ];
 
-    const maxAversionObjects = aversionSlidersConfig.length; // 5
+    const maxAversionObjects = aversionSlidersConfig.length; // 7
 
     const getTakenAversionValues = (excludeRng) => {
       const taken = new Set();
@@ -989,6 +979,9 @@
         val.style.color = finalVal > 0 ? '#38bdf8' : '';
 
         routePreferences[item.prefKey] = finalVal;
+        if (item.boolKey) {
+          routePreferences[item.boolKey] = finalVal > 0;
+        }
         scheduleInlineRouteCalculation();
       });
     });
