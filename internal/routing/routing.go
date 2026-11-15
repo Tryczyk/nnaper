@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -332,7 +333,7 @@ func ComputeEdgeCost(e GraphEdge, avoidPoints []AvoidPoint, avoidMode string, pr
 
 	// 4. Unikanie jechania 2 razy tą samą drogą w ramach wyznaczanej trasy
 	if e.UsedCount > 0 {
-		cost = cost*350.0*float64(e.UsedCount) + 25000.0*float64(e.UsedCount)
+		cost = cost*1000.0*float64(e.UsedCount) + 100000.0*float64(e.UsedCount)
 	}
 
 	return cost, false, hitAvoid
@@ -817,6 +818,230 @@ func (g *Graph) extractOptimal10Waypoints(steps []prevStep, pathNodes []int64, s
 	return waypoints, legs
 }
 
+// buildCircularLoopRoute buduje idealną, spójną pętlę („kółko”) o zadanej długości targetKM wokół
+// wyznaczonego centrum geometrycznego. Trasa układa się w gładki obieg wielokąta foremnego
+// bez żadnych nawrotów o 180 stopni, ani ponownego przejeżdżania przez te same odcinki.
+func (g *Graph) buildCircularLoopRoute(req RoutePlanRequest, startNode int64, startCoord [2]float64, targetKM float64) (RoutePlanResponse, bool) {
+	cosLat := math.Max(0.2, math.Cos(startCoord[1]*math.Pi/180.0))
+
+	// Rzeczywisty dystans drogowy 6-wierzchołkowej pętli to około 14.6 * R => R = targetKM * 1000 / 14.6.
+	baseR := math.Max(350.0, (targetKM*1000.0)/14.6)
+
+	type loopCandidate struct {
+		anchorCoords [][2]float64
+		score        float64
+		bearingDeg   float64
+		clockwise    bool
+	}
+
+	buildAnchorsForR := func(R float64) []loopCandidate {
+		var cands []loopCandidate
+		for bDeg := 0.0; bDeg < 360.0; bDeg += 30.0 {
+			bRad := bDeg * math.Pi / 180.0
+			centerLon := startCoord[0] + (R*math.Sin(bRad))/(111320.0*cosLat)
+			centerLat := startCoord[1] + (R*math.Cos(bRad))/111320.0
+			startAngle := bRad + math.Pi
+
+			for _, clockwise := range []bool{true, false} {
+				dirSign := 1.0
+				if !clockwise {
+					dirSign = -1.0
+				}
+
+				var legCoords [][2]float64
+				legCoords = append(legCoords, startCoord)
+				valid := true
+				loopScore := 0.0
+
+				for step := 1; step <= 5; step++ {
+					stepAng := startAngle + dirSign*float64(step)*(2.0*math.Pi/6.0)
+					targetLon := centerLon + (R*math.Sin(stepAng))/(111320.0*cosLat)
+					targetLat := centerLat + (R*math.Cos(stepAng))/111320.0
+
+					nodeID, okNode := g.FindNearestNode(targetLon, targetLat)
+					if !okNode {
+						valid = false
+						break
+					}
+					nodeCoord := g.NodeCoords[nodeID]
+					dFromTarget := haversineM(targetLat, targetLon, nodeCoord[1], nodeCoord[0])
+					if dFromTarget > math.Max(2500.0, R*0.65) {
+						valid = false
+						break
+					}
+
+					prev := legCoords[len(legCoords)-1]
+					dFromPrev := haversineM(prev[1], prev[0], nodeCoord[1], nodeCoord[0])
+					if dFromPrev < math.Max(120.0, R*0.18) {
+						valid = false
+						break
+					}
+
+					if step >= 2 && step <= 4 {
+						dFromStart := haversineM(startCoord[1], startCoord[0], nodeCoord[1], nodeCoord[0])
+						if dFromStart < math.Max(200.0, R*0.30) {
+							valid = false
+							break
+						}
+					}
+
+					hitAvoid := false
+					for _, ap := range req.AvoidPoints {
+						rad := ap.RadiusM
+						if rad <= 0 {
+							rad = 300
+						}
+						if haversineM(ap.Lat, ap.Lon, nodeCoord[1], nodeCoord[0]) <= rad {
+							hitAvoid = true
+							break
+						}
+					}
+					if hitAvoid {
+						valid = false
+						break
+					}
+
+					adjs := g.Adj[nodeID]
+					if len(adjs) == 0 {
+						valid = false
+						break
+					}
+					for _, a := range adjs {
+						e := g.Edges[a.edgeIdx]
+						if (req.Preferences.AvoidHighways || req.Preferences.AversionHighways > 0) && isHighwayClass(e.Highway) {
+							loopScore -= 5000.0
+						}
+						if !e.Traversed {
+							loopScore += e.LengthM * 1.2
+						}
+						loopScore -= float64(e.SpeedBumps*25 + e.Crossings*10 + e.TrafficSignals*15)
+					}
+					loopScore -= dFromTarget * 1.5
+
+					legCoords = append(legCoords, nodeCoord)
+				}
+
+				if !valid || len(legCoords) != 6 {
+					continue
+				}
+
+				legCoords = append(legCoords, startCoord)
+				cands = append(cands, loopCandidate{
+					anchorCoords: legCoords,
+					score:        loopScore,
+					bearingDeg:   bDeg,
+					clockwise:    clockwise,
+				})
+			}
+		}
+		sort.Slice(cands, func(i, j int) bool {
+			return cands[i].score > cands[j].score
+		})
+		return cands
+	}
+
+	routeAnchors := func(anchors [][2]float64) (RoutePlanResponse, float64, bool) {
+		g.ResetUsedEdges()
+		var allSteps []prevStep
+		var allNodes []int64
+		totalAvoided := 0
+
+		for i := 0; i < len(anchors)-1; i++ {
+			p1 := anchors[i]
+			p2 := anchors[i+1]
+			legSteps, legNodes, avHits, okLeg := g.findShortestPathSteps(p1[0], p1[1], p2[0], p2[1], req.AvoidPoints, req.AvoidMode, req.Preferences)
+			if !okLeg || len(legSteps) == 0 {
+				return RoutePlanResponse{}, 0, false
+			}
+			_, _, _, _ = g.materializeSteps(legSteps, true)
+			totalAvoided += avHits
+			allSteps = append(allSteps, legSteps...)
+			if len(allNodes) == 0 {
+				allNodes = append(allNodes, legNodes...)
+			} else if len(legNodes) > 1 {
+				allNodes = append(allNodes, legNodes[1:]...)
+			}
+		}
+
+		if len(allSteps) == 0 {
+			return RoutePlanResponse{}, 0, false
+		}
+
+		fullCoords, distM, durS, obs := g.materializeSteps(allSteps, false)
+		waypoints10, legs10 := g.extractOptimal10Waypoints(allSteps, allNodes, anchors[0], anchors[len(anchors)-1])
+
+		resp := RoutePlanResponse{
+			Status:       "ok",
+			DistanceM:    math.Round(distM*10) / 10,
+			DurationS:    math.Round(durS*10) / 10,
+			Coordinates:  fullCoords,
+			Waypoints:    waypoints10,
+			Legs:         legs10,
+			Obstacles:    obs,
+			AvoidedCount: totalAvoided,
+		}
+		return resp, distM, true
+	}
+
+	candidates := buildAnchorsForR(baseR)
+	if len(candidates) == 0 {
+		return RoutePlanResponse{}, false
+	}
+
+	var bestResp RoutePlanResponse
+	bestDiffKM := math.MaxFloat64
+	foundAny := false
+	var bestCandidate *loopCandidate
+
+	// Testujemy do 8 najlepszych kandydatów przy bazowym promieniu
+	maxInitial := 8
+	if len(candidates) < maxInitial {
+		maxInitial = len(candidates)
+	}
+
+	for i := 0; i < maxInitial; i++ {
+		cand := candidates[i]
+		resp, distM, ok := routeAnchors(cand.anchorCoords)
+		if !ok {
+			continue
+		}
+		diffKM := math.Abs((distM / 1000.0) - targetKM)
+		if !foundAny || diffKM < bestDiffKM {
+			bestDiffKM = diffKM
+			bestResp = resp
+			foundAny = true
+			candCopy := cand
+			bestCandidate = &candCopy
+		}
+		if diffKM <= targetKM*0.12 {
+			g.ResetUsedEdges()
+			return bestResp, true
+		}
+	}
+
+	// Jeśli dystans odbiega o > 12%, wykonujemy precyzyjną kalibrację promienia R na zwycięskim azymucie
+	if foundAny && bestCandidate != nil && bestDiffKM > targetKM*0.12 && bestResp.DistanceM > 0 {
+		calibRatio := (targetKM * 1000.0) / bestResp.DistanceM
+		calibRatio = math.Max(0.5, math.Min(1.8, calibRatio))
+		calibR := baseR * calibRatio
+		calibCands := buildAnchorsForR(calibR)
+		for _, cc := range calibCands {
+			if cc.bearingDeg == bestCandidate.bearingDeg && cc.clockwise == bestCandidate.clockwise {
+				if calibResp, calibDistM, okCalib := routeAnchors(cc.anchorCoords); okCalib {
+					calibDiffKM := math.Abs((calibDistM / 1000.0) - targetKM)
+					if calibDiffKM < bestDiffKM {
+						bestResp = calibResp
+					}
+				}
+				break
+			}
+		}
+	}
+
+	g.ResetUsedEdges()
+	return bestResp, foundAny
+}
+
 // buildIntelligentAutoRoute buduje spójną, sensowną trasę o zadanej długości targetKM bezpośrednio po grafie drogowym g,
 // wybierając osiągalne węzły korytarzy drogowych (nigdy w morzu, nigdy w ślepych uliczkach), maksymalizując udział
 // nowych dróg (!e.Traversed) i minimalizując przeszkody, a następnie rozmieszcza wzdłuż wyznaczonej trasy do 10 znaczników.
@@ -831,6 +1056,14 @@ func (g *Graph) buildIntelligentAutoRoute(req RoutePlanRequest, targetKM float64
 		return RoutePlanResponse{}, false
 	}
 	startCoord := g.NodeCoords[startNode]
+
+	// Jeśli użytkownik zażądał pętli (kółka z powrotem do startu), uruchamiamy dedykowany generator
+	// gładkich pętli bez zawracania i dublowania dróg
+	if req.ReturnToStart || len(req.Points) == 1 {
+		if loopResp, okLoop := g.buildCircularLoopRoute(req, startNode, startCoord, targetKM); okLoop {
+			return loopResp, true
+		}
+	}
 
 	// 1. Obliczamy rzeczywiste odległości drogowe z punktu startowego (Dijkstra po długości dróg z wykluczeniem stref unikania i autostrad)
 	roadDist := map[int64]float64{startNode: 0}

@@ -1238,15 +1238,15 @@
       const sLon = Number(p0.lon);
       const sLat = Number(p0.lat);
       const targetKm = Math.max(2, autoRouteConfig.target_km || (autoRouteConfig.target_minutes || 25) * 0.7);
-      const loopRadiusKm = Math.max(0.5, targetKm / (2 * Math.PI * 1.42));
+      const loopRadiusKm = Math.max(0.5, targetKm / (2 * Math.PI * 1.35));
       const cosLat = Math.max(0.2, Math.cos((sLat * Math.PI) / 180));
-      const bearing = 0.78;
+      const bearing = 3.92;
       const centerLat = sLat + (Math.cos(bearing) * loopRadiusKm) / 111.32;
       const centerLon = sLon + (Math.sin(bearing) * loopRadiusKm) / (111.32 * cosLat);
       const startAngle = bearing + Math.PI;
       effectivePoints = [p0];
-      for (let i = 1; i <= 8; i++) {
-        const theta = startAngle + (2 * Math.PI * i) / 9.0;
+      for (let i = 1; i <= 5; i++) {
+        const theta = startAngle + (2 * Math.PI * i) / 6.0;
         const wLat = parseFloat((centerLat + (Math.cos(theta) * loopRadiusKm) / 111.32).toFixed(6));
         const wLon = parseFloat((centerLon + (Math.sin(theta) * loopRadiusKm) / (111.32 * cosLat)).toFixed(6));
         effectivePoints.push({
