@@ -940,7 +940,8 @@
     { key: 'show_fog', label: 'Odkrywanie mapy', selector: '#btn-toggle-fog' },
     { key: 'show_timelapse', label: 'Timelapse eksploracji', selector: '#btn-open-timelapse' },
     { key: 'show_drawing', label: 'Rysowanie po mapie', selector: '#btn-open-drawing' },
-    { key: 'show_route_sliders', label: 'Suwaki przeszkód w planerze', selector: '.route-advanced-box' }
+    { key: 'show_route_sliders', label: 'Suwaki przeszkód w planerze', selector: '.route-advanced-box' },
+    { key: 'show_map_scale', label: 'Dynamiczna skala mapy', selector: '.maplibregl-ctrl-scale' }
   ];
 
   function getStoredUiVisibility() {

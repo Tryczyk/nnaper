@@ -974,6 +974,45 @@ input:-webkit-autofill:active {
   z-index: 15 !important;
 }
 
+/* DYNAMICZNA SKALA MAPY (SCALE CONTROL) */
+.maplibregl-ctrl-bottom-left {
+  transition: left 0.28s cubic-bezier(0.4, 0, 0.2, 1), bottom 0.28s ease !important;
+  left: 292px !important;
+  bottom: 12px !important;
+  z-index: 15 !important;
+}
+
+#menu.collapsed ~ #map .maplibregl-ctrl-bottom-left,
+body:has(#menu.collapsed) .maplibregl-ctrl-bottom-left {
+  left: 14px !important;
+}
+
+body:has(#route-planner-panel.active:not(.collapsed)) .maplibregl-ctrl-bottom-left {
+  left: 374px !important;
+}
+
+body.playback-mode .maplibregl-ctrl-bottom-left {
+  left: 16px !important;
+  bottom: 16px !important;
+}
+
+.maplibregl-ctrl-scale {
+  background: rgba(15, 23, 42, 0.85) !important;
+  backdrop-filter: blur(8px) !important;
+  border: 2px solid #38bdf8 !important;
+  border-top: none !important;
+  border-radius: 0 0 5px 5px !important;
+  color: #f8fafc !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.03em !important;
+  padding: 1px 7px 3px 7px !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.55) !important;
+  box-sizing: border-box !important;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9) !important;
+  user-select: none !important;
+}
+
 .maplibregl-ctrl-group {
   background: rgba(15, 23, 42, 0.95) !important;
   border: 1px solid #334155 !important;

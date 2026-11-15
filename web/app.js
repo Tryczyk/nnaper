@@ -143,6 +143,14 @@ map.addControl(paletteControl, 'bottom-right');
 const navControl = new maplibregl.NavigationControl({ showCompass: true });
 map.addControl(navControl, 'bottom-right');
 
+// Dynamiczna skala mapy (ScaleControl)
+const scaleControl = new maplibregl.ScaleControl({
+  maxWidth: 120,
+  unit: 'metric'
+});
+map.addControl(scaleControl, 'bottom-left');
+window.scaleControl = scaleControl;
+
 map.on('error', (e) => {
   if (e?.error?.name === 'AbortError' || e?.error?.message === 'AbortError' || e?.status === 0) {
     return;
