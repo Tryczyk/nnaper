@@ -151,6 +151,8 @@
     routePlannerStats.innerText = '';
     renderInlineRouteMarkers();
     scheduleInlineRouteCalculation();
+    document.getElementById('btn-search-open-planner')?.classList.add('active');
+    document.getElementById('btn-open-planner-menu')?.classList.add('active');
   }
 
   function openInlineRoutePlannerFromStart(start) {
@@ -169,6 +171,38 @@
     routePlannerPanel.setAttribute('aria-hidden', 'false');
     routePlannerStats.innerText = '';
     renderInlineRouteMarkers();
+    document.getElementById('btn-search-open-planner')?.classList.add('active');
+    document.getElementById('btn-open-planner-menu')?.classList.add('active');
+  }
+
+  function openEmptyRoutePlanner() {
+    if (typeof window.closePlaybackMode === 'function') window.closePlaybackMode();
+    document.getElementById('btn-route-back-to-location').hidden = true;
+    inlinePointColorSequence = 0;
+    if (!inlineRouteState.points || inlineRouteState.points.length === 0) {
+      const p1 = { type: 'start', place: null };
+      assignPointColor(p1);
+      const p2 = { type: 'destination', place: null };
+      assignPointColor(p2, p1);
+      inlineRouteState.points = [p1, p2];
+    }
+    document.getElementById('menu')?.classList.add('route-planner-open');
+    window.collapseRightMenu?.();
+    routePlannerPanel.classList.remove('collapsed');
+    routePlannerPanel.classList.add('active');
+    routePlannerPanel.setAttribute('aria-hidden', 'false');
+    routePlannerStats.innerText = '';
+    renderInlineRouteMarkers();
+    document.getElementById('btn-search-open-planner')?.classList.add('active');
+    document.getElementById('btn-open-planner-menu')?.classList.add('active');
+  }
+
+  function toggleRoutePlanner() {
+    if (routePlannerPanel && routePlannerPanel.classList.contains('active')) {
+      closeInlineRoutePlanner();
+    } else {
+      openEmptyRoutePlanner();
+    }
   }
 
   function closeInlineRoutePlanner() {
@@ -196,6 +230,8 @@
       if (btnOpenGoogleUrl) btnOpenGoogleUrl.removeAttribute('href');
     }
     if (routeImportFeedback) routeImportFeedback.innerText = '';
+    document.getElementById('btn-search-open-planner')?.classList.remove('active');
+    document.getElementById('btn-open-planner-menu')?.classList.remove('active');
   }
 
   window.addEventListener('nnaper-route-destination-selected', event => {
@@ -227,6 +263,21 @@
       const isCollapsed = routePlannerPanel.classList.toggle('collapsed');
       btnToggleRoutePlanner.setAttribute('title', isCollapsed ? 'Rozwiń panel planowania trasy' : 'Zwiń panel planowania trasy');
       btnToggleRoutePlanner.setAttribute('aria-label', isCollapsed ? 'Rozwiń panel planowania trasy' : 'Zwiń panel planowania trasy');
+    });
+  }
+
+  if (btnOpenPlannerMenu) {
+    btnOpenPlannerMenu.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleRoutePlanner();
+    });
+  }
+
+  const btnSearchOpenPlanner = document.getElementById('btn-search-open-planner');
+  if (btnSearchOpenPlanner) {
+    btnSearchOpenPlanner.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleRoutePlanner();
     });
   }
 
@@ -1689,21 +1740,6 @@
     }
   });
 
-  if (btnOpenPlannerMenu) {
-    btnOpenPlannerMenu.addEventListener('click', () => {
-      if (typeof window.closePlaybackMode === 'function') window.closePlaybackMode();
-      document.getElementById('menu')?.classList.add('route-planner-open');
-      window.collapseRightMenu?.();
-      routePlannerPanel.classList.remove('collapsed');
-      routePlannerPanel.classList.add('active');
-      routePlannerPanel.setAttribute('aria-hidden', 'false');
-      inlineRouteState.points = [];
-      inlinePointColorSequence = 0;
-      renderInlineRouteMarkers();
-      routePlannerStats.innerText = '';
-      if (routeImportFeedback) routeImportFeedback.innerText = '';
-    });
-  }
 
   const btnRouteDownloadGpx = document.getElementById('btn-route-download-gpx');
   if (btnRouteDownloadGpx) {
@@ -1844,5 +1880,8 @@ ${trkptsXml}
   window.getGoogleMapsRouteUrl = getGoogleMapsRouteUrl;
   window.openInlineRoutePlanner = openInlineRoutePlanner;
   window.openInlineRoutePlannerFromStart = openInlineRoutePlannerFromStart;
+  window.openEmptyRoutePlanner = openEmptyRoutePlanner;
+  window.closeInlineRoutePlanner = closeInlineRoutePlanner;
+  window.toggleRoutePlanner = toggleRoutePlanner;
   window.getPlannedRouteData = getPlannedRouteData;
 })();

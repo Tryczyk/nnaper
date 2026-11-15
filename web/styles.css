@@ -353,7 +353,7 @@ html {
   top: 8px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 20;
+  z-index: 105;
   display: flex;
   align-items: center;
   gap: 8px;

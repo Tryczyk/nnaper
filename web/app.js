@@ -1782,31 +1782,10 @@ function autoBuildTree() {
   /* Przycisk po lewej: Planowanie trasy (deseczka z klipsem i listą) */
   const btnSearchOpenPlanner = document.getElementById('btn-search-open-planner');
   if (btnSearchOpenPlanner) {
-    btnSearchOpenPlanner.addEventListener('click', () => {
-      const routePlannerPanel = document.getElementById('route-planner-panel');
-      if (routePlannerPanel && routePlannerPanel.classList.contains('active')) {
-        const btnClose = document.getElementById('btn-route-close');
-        if (btnClose) {
-          btnClose.click();
-        } else {
-          routePlannerPanel.classList.remove('active');
-          routePlannerPanel.setAttribute('aria-hidden', 'true');
-          document.getElementById('menu')?.classList.remove('route-planner-open');
-        }
-        btnSearchOpenPlanner.classList.remove('active');
-      } else {
-        const btnOpen = document.getElementById('btn-open-planner-menu');
-        if (btnOpen) {
-          btnOpen.click();
-        } else if (routePlannerPanel) {
-          if (typeof window.closePlaybackMode === 'function') window.closePlaybackMode();
-          document.getElementById('menu')?.classList.add('route-planner-open');
-          window.collapseRightMenu?.();
-          routePlannerPanel.classList.remove('collapsed');
-          routePlannerPanel.classList.add('active');
-          routePlannerPanel.setAttribute('aria-hidden', 'false');
-        }
-        btnSearchOpenPlanner.classList.add('active');
+    btnSearchOpenPlanner.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (typeof window.toggleRoutePlanner === 'function') {
+        window.toggleRoutePlanner();
       }
     });
 
