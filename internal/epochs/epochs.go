@@ -51,7 +51,7 @@ func (s *Service) HandleGetEpoch(w http.ResponseWriter, r *http.Request) {
 			'longitude', round(ST_X(e.geom)::numeric, 6),
 			'snapped_latitude', CASE WHEN e.geom_snapped IS NOT NULL THEN round(ST_Y(e.geom_snapped)::numeric, 6) ELSE NULL END,
 			'snapped_longitude', CASE WHEN e.geom_snapped IS NOT NULL THEN round(ST_X(e.geom_snapped)::numeric, 6) ELSE NULL END,
-			'altitude', NULL,
+			'altitude', e.altitude_m,
 			'speed_kmh', LEAST(COALESCE(e.speed_kmh, 0), 220.0),
 			'g_x', e.g_x,
 			'g_y', e.g_y,
@@ -323,7 +323,7 @@ func (s *Service) HandlePlaybackDay(w http.ResponseWriter, r *http.Request) {
 				to_char(e.timestamp, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS timestamp,
 				round(ST_Y(%s)::numeric, 6) AS lat,
 				round(ST_X(%s)::numeric, 6) AS lon,
-				NULL::numeric AS altitude,
+				e.altitude_m AS altitude,
 				LEAST(COALESCE(e.speed_kmh, 0), 220.0) AS speed_kmh,
 				e.g_x,
 				e.g_y,
@@ -333,6 +333,20 @@ func (s *Service) HandlePlaybackDay(w http.ResponseWriter, r *http.Request) {
 			  AND %s
 			ORDER BY %s
 			LIMIT 35000
+		),
+		epoch_sats AS (
+			SELECT
+				s.epoch_id,
+				json_agg(
+					json_build_object(
+						'prn', s.prn,
+						'elevation', s.elevation,
+						'azimuth', s.azimuth
+					) ORDER BY s.prn ASC
+				) AS satellites
+			FROM satellite s
+			JOIN day_epochs de ON de.epoch_id = s.epoch_id
+			GROUP BY s.epoch_id
 		)
 		SELECT COALESCE(json_agg(
 			json_build_object(
@@ -345,10 +359,11 @@ func (s *Service) HandlePlaybackDay(w http.ResponseWriter, r *http.Request) {
 				'g_x', de.g_x,
 				'g_y', de.g_y,
 				'g_z', de.g_z,
-				'satellites', '[]'::json
+				'satellites', COALESCE(es.satellites, '[]'::json)
 			) ORDER BY de.timestamp ASC
 		)::text, '[]')
-		FROM day_epochs de;
+		FROM day_epochs de
+		LEFT JOIN epoch_sats es ON es.epoch_id = de.epoch_id;
 	`, activeGeom, activeGeom, whereProfile, whereTime, orderClauseCTE)
 
 	var resultJSON string
@@ -359,7 +374,7 @@ func (s *Service) HandlePlaybackDay(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Header().Set("Cache-Control", "public, max-age=3600")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(resultJSON))
 }

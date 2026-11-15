@@ -290,6 +290,7 @@
   function updateSatellitesDisplay(point) {
     const m = getMap();
     if (!m) return;
+    ensureSatelliteLayers();
     const mode = satViewSelect ? satViewSelect.value : 'local';
     const linesSrc = m.getSource('satellites-lines-source');
     const ptsSrc = m.getSource('satellites-points-source');
