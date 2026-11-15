@@ -4387,6 +4387,7 @@ gap: 8px;
   height: 100vh !important;
   max-height: 100vh !important;
   border-radius: 0 !important;
+  z-index: 100 !important;
 }
 
 #menu .menu-body,

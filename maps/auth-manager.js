@@ -312,8 +312,6 @@
           <div style="display:flex; justify-content:space-between;"><span style="color:#94a3b8;">Max prędkość:</span><strong id="stat-max-speed">-- km/h</strong></div>
           <div style="display:flex; justify-content:space-between;"><span style="color:#94a3b8;">Przejechane km:</span><strong id="stat-total-km">-- km</strong></div>
           <div style="display:flex; justify-content:space-between;"><span style="color:#94a3b8;">Unikalne km:</span><strong id="stat-unique-km" style="color:#10b981;">-- km</strong></div>
-          <div style="display:flex; justify-content:space-between; font-size:10.5px;"><span style="color:#94a3b8;">Min / Max Lat:</span><span id="stat-lat-range" style="font-family:monospace;">-- / --</span></div>
-          <div style="display:flex; justify-content:space-between; font-size:10.5px;"><span style="color:#94a3b8;">Min / Max Lon:</span><span id="stat-lon-range" style="font-family:monospace;">-- / --</span></div>
           <div style="margin-top:4px; padding-top:5px; border-top:1px dashed rgba(255,255,255,0.1); display:flex; flex-direction:column; gap:4px;">
             <label style="display:flex; align-items:center; justify-content:space-between; font-size:10.5px; color:#cbd5e1; cursor:pointer;">
               <span>Skrajne punkty na mapie (N/S/E/W):</span>
@@ -356,7 +354,7 @@
 
           const el = document.createElement('div');
           el.className = `extreme-point-marker extreme-point-${d.dir}`;
-          el.style.cssText = 'display:flex; flex-direction:column; align-items:center; pointer-events:auto; cursor:pointer; z-index:25;';
+          el.style.cssText = 'display:flex; flex-direction:column; align-items:center; pointer-events:auto; cursor:pointer; z-index:2;';
           el.title = `${d.title}: ${pt.lat.toFixed(5)}°, ${pt.lon.toFixed(5)}°`;
           el.innerHTML = `
             <div style="padding:2px 6px; border-radius:999px; background:rgba(15,23,42,0.94); border:1.5px solid ${d.color}; color:${d.color}; font-size:10px; font-weight:800; white-space:nowrap; box-shadow:0 2px 8px rgba(0,0,0,0.65); margin-bottom:2px;">

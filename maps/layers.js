@@ -260,17 +260,13 @@ const MAP_STYLE = {
       source: 'osm-infrastructure-source',
       'source-layer': 'osm-infrastructure',
       filter: ['==', 'category', 'average_speed_point'],
-      type: 'symbol',
-      layout: {
-        'icon-image': 'icon-infra-average-speed',
-        'icon-size': ['interpolate', ['linear'], ['zoom'], 8, 0.62, 11, 0.78, 14, 0.95, 17, 1.15],
-        'icon-allow-overlap': true,
-        'icon-ignore-placement': false,
-        'icon-pitch-alignment': 'viewport'
-      },
+      type: 'circle',
       paint: {
-        'icon-opacity': 1.0,
-        'text-color': '#d946ef'
+        'circle-color': '#d946ef',
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 3.5, 12, 5.5, 15, 7.5],
+        'circle-stroke-width': 1.5,
+        'circle-stroke-color': '#ffffff',
+        'circle-opacity': 0.95
       }
     },
     {
@@ -278,19 +274,14 @@ const MAP_STYLE = {
       source: 'osm-infrastructure-source',
       'source-layer': 'osm-infrastructure',
       filter: ['==', 'category', 'crossing'],
-      type: 'symbol',
+      type: 'circle',
       minzoom: 14,
-      layout: {
-        'icon-image': 'icon-infra-crossing',
-        'icon-size': ['interpolate', ['linear'], ['zoom'], 14, 0.6, 16, 0.85, 18, 1.1],
-        // Przejść jest bardzo dużo (27 tys.) - nakładające się znaki są wygaszane i pojawiają się po przybliżeniu
-        'icon-allow-overlap': false,
-        'icon-padding': 1,
-        'icon-pitch-alignment': 'viewport'
-      },
       paint: {
-        'icon-opacity': 0.96,
-        'text-color': '#38bdf8'
+        'circle-color': '#38bdf8',
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 3.5, 16, 4.5, 18, 6.0],
+        'circle-stroke-width': 1.5,
+        'circle-stroke-color': '#ffffff',
+        'circle-opacity': 0.95
       }
     },
     {
@@ -298,18 +289,14 @@ const MAP_STYLE = {
       source: 'osm-infrastructure-source',
       'source-layer': 'osm-infrastructure',
       filter: ['==', 'category', 'speed_bump'],
-      type: 'symbol',
+      type: 'circle',
       minzoom: 13,
-      layout: {
-        'icon-image': 'icon-infra-speed-bump',
-        'icon-size': ['interpolate', ['linear'], ['zoom'], 13, 0.55, 15, 0.8, 17, 1.0, 18, 1.15],
-        'icon-allow-overlap': false,
-        'icon-padding': 1,
-        'icon-pitch-alignment': 'viewport'
-      },
       paint: {
-        'icon-opacity': 0.98,
-        'text-color': '#f59e0b'
+        'circle-color': '#f59e0b',
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, 3.5, 15, 5.0, 17, 6.5],
+        'circle-stroke-width': 1.5,
+        'circle-stroke-color': '#ffffff',
+        'circle-opacity': 0.95
       }
     },
     {
@@ -317,17 +304,13 @@ const MAP_STYLE = {
       source: 'osm-infrastructure-source',
       'source-layer': 'osm-infrastructure',
       filter: ['==', 'category', 'traffic_signals'],
-      type: 'symbol',
-      layout: {
-        'icon-image': 'icon-infra-traffic-signals',
-        'icon-size': ['interpolate', ['linear'], ['zoom'], 11, 0.55, 13, 0.7, 15, 0.88, 17, 1.08],
-        'icon-allow-overlap': true,
-        'icon-ignore-placement': false,
-        'icon-pitch-alignment': 'viewport'
-      },
+      type: 'circle',
       paint: {
-        'icon-opacity': 0.98,
-        'text-color': '#22c55e'
+        'circle-color': '#22c55e',
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 3.5, 13, 5.0, 16, 6.5],
+        'circle-stroke-width': 1.5,
+        'circle-stroke-color': '#ffffff',
+        'circle-opacity': 0.95
       }
     },
     {
@@ -335,18 +318,13 @@ const MAP_STYLE = {
       source: 'osm-infrastructure-source',
       'source-layer': 'osm-infrastructure',
       filter: ['==', 'category', 'speed_camera'],
-      type: 'symbol',
-      layout: {
-        'icon-image': 'icon-infra-speed-camera',
-        'icon-size': ['interpolate', ['linear'], ['zoom'], 8, 0.62, 11, 0.78, 14, 0.95, 17, 1.15],
-        'icon-allow-overlap': true,
-        'icon-ignore-placement': false,
-        'symbol-z-order': 'source',
-        'icon-pitch-alignment': 'viewport'
-      },
+      type: 'circle',
       paint: {
-        'icon-opacity': 1.0,
-        'text-color': '#ef4444'
+        'circle-color': '#ef4444',
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 4.0, 11, 5.5, 14, 7.5, 17, 9.0],
+        'circle-stroke-width': 2.0,
+        'circle-stroke-color': '#ffffff',
+        'circle-opacity': 1.0
       }
     },
     {
@@ -404,110 +382,53 @@ window.MAP_STYLE = MAP_STYLE;
     <circle cx="30" cy="45.5" r="2.2" fill="#a4f5b8" opacity="0.75"/>
   </svg>`;
 
-  // Nowoczesne, uniwersalne ikony infrastruktury drogowej (standard międzynarodowy, styl Apple Maps / Google Maps)
-  // Próg zwalniający (profil drogi z łagodnym progiem + pojazd pokonujący próg na ciepłej tarczy ostrzegawczej)
+  // Ikony infrastruktury drogowej (odpowiadające oficjalnym piktogramom i znakom)
+  // Próg zwalniający: żółty trójkąt ostrzegawczy z czarną obwódką i sylwetką progu zwalniającego
   const SVG_A11A_SPEED_BUMP = `<svg id="A-11a" xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-    <defs>
-      <linearGradient id="bumpBg" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#f59e0b"/>
-        <stop offset="100%" stop-color="#d97706"/>
-      </linearGradient>
-    </defs>
-    <!-- Tarcza ostrzegawcza w ciepłym odcieniu bursztynowym z białą obwódką -->
-    <rect x="4" y="4" width="56" height="56" rx="16" ry="16" fill="url(#bumpBg)" stroke="#ffffff" stroke-width="3"/>
-    <rect x="7" y="7" width="50" height="50" rx="13" ry="13" fill="none" stroke="#fef3c7" stroke-width="1.2" opacity="0.6"/>
-    <!-- Profil jezdni z łagodnym progiem zwalniającym (międzynarodowy standard UNECE / ISO) -->
-    <path d="M10 46 L20 46 C24 46 26 35 32 35 C38 35 40 46 44 46 L54 46" stroke="#1c1917" stroke-width="5" stroke-linecap="round" fill="none"/>
-    <!-- Sylwetka pojazdu pokonującego próg -->
-    <path d="M24 23 L28 17 L36 17 L40 23 Z" fill="#1c1917"/>
-    <rect x="19" y="23" width="26" height="9" rx="3" fill="#1c1917"/>
-    <circle cx="24" cy="33" r="3.2" fill="#1c1917"/>
-    <circle cx="40" cy="33" r="3.2" fill="#1c1917"/>
-    <circle cx="24" cy="33" r="1.3" fill="#fde68a"/>
-    <circle cx="40" cy="33" r="1.3" fill="#fde68a"/>
+    <path d="M32 6 C34 6 36 9 37 11 L59 49 C60 51 60 54 58 56 C57 57 55 58 53 58 L11 58 C9 58 7 57 6 56 C4 54 4 51 5 49 L27 11 C28 9 30 6 32 6 Z" fill="#f59e0b" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"/>
+    <path d="M32 10 L54 48 C55 50 54 52 52 52 L12 52 C10 52 9 50 10 48 L32 10 Z" fill="none" stroke="#18181b" stroke-width="3" stroke-linejoin="round"/>
+    <path d="M16 48 L22 48 C25 48 26 36 32 36 C38 36 39 48 42 48 L48 48 L48 51 L16 51 Z" fill="#18181b"/>
   </svg>`;
 
-  // Przejście dla pieszych (międzynarodowy znak Vienna Convention E,12: błękitna tarcza, zebra i dynamiczna sylwetka pieszego)
+  // Przejście dla pieszych: sylwetka pieszego na pasach zebry w perspektywie (5 pasów) na białej tarczy
   const SVG_D6_CROSSING = `<svg id="D-6" xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-    <defs>
-      <linearGradient id="crossBg" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#0284c7"/>
-        <stop offset="100%" stop-color="#0369a1"/>
-      </linearGradient>
-    </defs>
-    <!-- Błękitna tarcza z białą obwódką -->
-    <rect x="4" y="4" width="56" height="56" rx="16" ry="16" fill="url(#crossBg)" stroke="#ffffff" stroke-width="3"/>
-    <rect x="7" y="7" width="50" height="50" rx="13" ry="13" fill="none" stroke="#38bdf8" stroke-width="1.2" opacity="0.6"/>
-    <!-- Pasy przejścia dla pieszych (zebra) -->
-    <rect x="14" y="43" width="36" height="3.2" rx="1.6" fill="#ffffff"/>
-    <rect x="16" y="48.5" width="32" height="3.2" rx="1.6" fill="#ffffff"/>
-    <rect x="18" y="54" width="28" height="2.8" rx="1.4" fill="#ffffff" opacity="0.85"/>
-    <!-- Sylwetka pieszego na pasach -->
-    <circle cx="34" cy="17" r="4.2" fill="#ffffff"/>
-    <path d="M31 22.5 C29.5 22.5 28 23.7 28 25.5 L27.5 32 L22 34.5 C21.2 34.9 20.8 35.9 21.2 36.7 C21.6 37.5 22.6 37.9 23.4 37.5 L28.5 34.8 L29.5 39 L24 47 C23.4 47.8 23.6 48.9 24.4 49.5 C25.2 50.1 26.3 49.9 26.9 49.1 L33 40 L34 34.5 L37 37.5 L40.5 45 C40.9 45.8 41.9 46.2 42.7 45.8 C43.5 45.4 43.9 44.4 43.5 43.6 L39.5 35 C39 34 38.2 33.2 37.2 32.7 L34.8 31.3 L35.2 25.5 C35.2 23.7 33.5 22.5 31 22.5 Z" fill="#ffffff"/>
+    <rect x="3" y="3" width="58" height="58" rx="14" ry="14" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+    <circle cx="34" cy="14" r="5" fill="#18181b"/>
+    <path d="M31 20 C29 20 27.5 21.5 27.5 23.5 L27 29.5 L22.5 32 C21.7 32.5 21.4 33.5 21.8 34.3 C22.2 35.1 23.2 35.4 24 35 L28 32.8 L29 37 L24 45.5 C23.4 46.4 23.7 47.6 24.6 48.2 C25.5 48.8 26.7 48.5 27.3 47.6 L33 38.5 L34 32.5 L37 35.5 L40.5 43.5 C40.9 44.4 41.9 44.8 42.8 44.4 C43.7 44 44.1 43 43.7 42.1 L39.5 33 C39 32 38.2 31.2 37.2 30.7 L35 29.5 L35.2 23.5 C35.2 21.5 33.2 20 31 20 Z" fill="#18181b"/>
+    <path d="M7 54 L12 42 L16 42 L11 54 Z" fill="#18181b"/>
+    <path d="M19 54 L22 42 L26 42 L23 54 Z" fill="#18181b"/>
+    <path d="M30 54 L31 42 L35 42 L34 54 Z" fill="#18181b"/>
+    <path d="M41 54 L40 42 L44 42 L45 54 Z" fill="#18181b"/>
+    <path d="M52 54 L49 42 L53 42 L56 54 Z" fill="#18181b"/>
   </svg>`;
 
-  // Fotoradar (uniwersalny piktogram kamery prędkości z obiektywem o wysokim kontraście, fleszem i falami radarowymi)
+  // Fotoradar: oficjalny piktogram fotoradaru (aparat z pierścieniami obiektywów, paskami chłodzenia i uchwytem) na białej tarczy
   const SVG_D51_SPEED_CAMERA = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-    <defs>
-      <linearGradient id="camBg" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#2c2d35"/>
-        <stop offset="100%" stop-color="#15161b"/>
-      </linearGradient>
-      <radialGradient id="lensGrad" cx="45%" cy="40%" r="55%">
-        <stop offset="0%" stop-color="#38bdf8"/>
-        <stop offset="60%" stop-color="#0284c7"/>
-        <stop offset="100%" stop-color="#033d6b"/>
-      </radialGradient>
-    </defs>
-    <!-- Nowoczesna ciemna tarcza z białą obwódką -->
-    <rect x="4" y="4" width="56" height="56" rx="16" ry="16" fill="url(#camBg)" stroke="#ffffff" stroke-width="3"/>
-    <rect x="7" y="7" width="50" height="50" rx="13" ry="13" fill="none" stroke="#475569" stroke-width="1.2" opacity="0.6"/>
-    <!-- Korpus aparatu / radaru -->
-    <path d="M22 23 L26 17 L38 17 L42 23 Z" fill="#f8fafc"/>
-    <rect x="12" y="23" width="40" height="26" rx="6" ry="6" fill="#f8fafc"/>
-    <!-- Obiektyw aparatu z antyrefleksem -->
-    <circle cx="32" cy="36" r="9.5" fill="#1e222a"/>
-    <circle cx="32" cy="36" r="7.5" fill="url(#lensGrad)"/>
-    <circle cx="32" cy="36" r="4.5" fill="#0f172a"/>
-    <circle cx="30" cy="34" r="1.8" fill="#ffffff" opacity="0.85"/>
-    <!-- Dioda ostrzegawcza / flesz -->
-    <circle cx="43.5" cy="28.5" r="2.8" fill="#ef4444"/>
-    <circle cx="42.5" cy="27.5" r="1" fill="#fca5a5" opacity="0.9"/>
-    <!-- Fale detekcji prędkości -->
-    <path d="M46 16 C50 18.5 53 22 53.5 26" fill="none" stroke="#ef4444" stroke-width="2.4" stroke-linecap="round"/>
-    <path d="M50 12 C56 15 59.5 20 60 26" fill="none" stroke="#ef4444" stroke-width="2.4" stroke-linecap="round" opacity="0.85"/>
+    <rect x="3" y="3" width="58" height="58" rx="14" ry="14" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+    <rect x="7" y="10" width="34" height="44" rx="8" ry="8" fill="#18181b"/>
+    <circle cx="21" cy="38" r="11" fill="#18181b" stroke="#ffffff" stroke-width="3.5"/>
+    <circle cx="15" cy="44" r="1.5" fill="#ffffff"/>
+    <circle cx="31" cy="22" r="5.5" fill="#18181b" stroke="#ffffff" stroke-width="2.8"/>
+    <rect x="44" y="15" width="2.8" height="34" rx="1" fill="#18181b"/>
+    <rect x="48" y="17" width="2.8" height="30" rx="1" fill="#18181b"/>
+    <rect x="52" y="22" width="2.8" height="20" rx="1" fill="#18181b"/>
+    <rect x="54" y="27" width="6" height="10" rx="1" fill="#18181b"/>
   </svg>`;
 
-  // Odcinkowy pomiar prędkości (uniwersalny piktogram dwóch zsynchronizowanych kamer ze wskaźnikiem pomiaru AVG)
+  // Odcinkowy pomiar prędkości: piktogram fotoradaru ze wskaźnikiem pomiaru odcinkowego na dole
   const SVG_D51A_AVERAGE_SPEED = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-    <defs>
-      <linearGradient id="avgBg" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#2c2d35"/>
-        <stop offset="100%" stop-color="#15161b"/>
-      </linearGradient>
-    </defs>
-    <!-- Tarcza z białą obwódką -->
-    <rect x="4" y="4" width="56" height="56" rx="16" ry="16" fill="url(#avgBg)" stroke="#ffffff" stroke-width="3"/>
-    <rect x="7" y="7" width="50" height="50" rx="13" ry="13" fill="none" stroke="#475569" stroke-width="1.2" opacity="0.6"/>
-    <!-- Kamera A -->
-    <g transform="translate(10, 15) scale(0.48)">
-      <path d="M10 11 L14 5 L24 5 L28 11 Z" fill="#f8fafc"/>
-      <rect x="2" y="11" width="34" height="22" rx="4" fill="#f8fafc"/>
-      <circle cx="19" cy="22" r="7.5" fill="#1e222a"/>
-      <circle cx="19" cy="22" r="4.8" fill="#38bdf8"/>
+    <rect x="3" y="3" width="58" height="58" rx="14" ry="14" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+    <g transform="translate(3, -2) scale(0.85)">
+      <rect x="7" y="10" width="34" height="44" rx="8" ry="8" fill="#18181b"/>
+      <circle cx="21" cy="38" r="11" fill="#18181b" stroke="#ffffff" stroke-width="3.5"/>
+      <circle cx="15" cy="44" r="1.5" fill="#ffffff"/>
+      <circle cx="31" cy="22" r="5.5" fill="#18181b" stroke="#ffffff" stroke-width="2.8"/>
+      <rect x="44" y="15" width="2.8" height="34" rx="1" fill="#18181b"/>
+      <rect x="48" y="17" width="2.8" height="30" rx="1" fill="#18181b"/>
+      <rect x="52" y="22" width="2.8" height="20" rx="1" fill="#18181b"/>
+      <rect x="54" y="27" width="6" height="10" rx="1" fill="#18181b"/>
     </g>
-    <!-- Kamera B -->
-    <g transform="translate(36, 15) scale(0.48)">
-      <path d="M10 11 L14 5 L24 5 L28 11 Z" fill="#f8fafc"/>
-      <rect x="2" y="11" width="34" height="22" rx="4" fill="#f8fafc"/>
-      <circle cx="19" cy="22" r="7.5" fill="#1e222a"/>
-      <circle cx="19" cy="22" r="4.8" fill="#38bdf8"/>
-    </g>
-    <!-- Wskaźnik odcinka ze strzałką pomiaru prędkości A -> B -->
-    <path d="M16 41 L42 41" stroke="#f8fafc" stroke-width="2.5" stroke-linecap="round"/>
-    <path d="M39 37 L46 41 L39 45 Z" fill="#f8fafc"/>
-    <text x="32" y="53" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="900" font-size="9" fill="#ef4444" letter-spacing="0.5">AVG</text>
+    <path d="M12 55 L52 55 M48 51 L52 55 L48 59 M16 51 L12 55 L16 59" fill="none" stroke="#dc2626" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
   </svg>`;
 
   // Rasteryzacja SVG w wysokiej rozdzielczości (4x lub więcej przy ekranach HiDPI), aby znaki były ostre
@@ -597,9 +518,8 @@ window.MAP_STYLE = MAP_STYLE;
     const ICON_DEFS = {
       'icon-infra-traffic-signals': { svg: SVG_APPLE_TRAFFIC_SIGNALS, w: 28, h: 28 },
       'icon-infra-crossing': { svg: SVG_D6_CROSSING, w: 28, h: 28 },
-      // Fotoradary i OPP: czerwona poświata z obręczą, żeby wyróżniały się spośród setek przejść i progów
-      'icon-infra-speed-camera': { svg: SVG_D51_SPEED_CAMERA, w: 28, h: 28, halo: { color: '#ef4444', size: 46 } },
-      'icon-infra-average-speed': { svg: SVG_D51A_AVERAGE_SPEED, w: 28, h: 28, halo: { color: '#ef4444', size: 46 } },
+      'icon-infra-speed-camera': { svg: SVG_D51_SPEED_CAMERA, w: 28, h: 28 },
+      'icon-infra-average-speed': { svg: SVG_D51A_AVERAGE_SPEED, w: 28, h: 28 },
       'icon-infra-speed-bump': { svg: SVG_A11A_SPEED_BUMP, w: 28, h: 28 }
     };
 

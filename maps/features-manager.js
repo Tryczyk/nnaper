@@ -1623,7 +1623,7 @@
           <option value="path">Ścieżka</option>
         </select>
         <input type="text" id="drawing-name-input" placeholder="Nazwa kształtu..." style="flex:1; min-width:110px; background:#0f172a; color:#f8fafc; border:1px solid #334155; border-radius:5px; padding:4px 7px; font-size:11.5px;" />
-        <input type="color" id="drawing-color-input" value="#38bdf8" title="Kolor kształtu" style="width:30px; height:26px; border:none; background:transparent; cursor:pointer;" />
+        <input type="hidden" id="drawing-color-input" value="#38bdf8" />
         <label style="font-size:11px; color:#cbd5e1; display:flex; align-items:center; gap:4px; cursor:pointer;">
           <input type="checkbox" id="drawing-show-metrics-chk" checked style="accent-color:#38bdf8;" /> Wymiary
         </label>
