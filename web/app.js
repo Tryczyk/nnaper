@@ -1773,11 +1773,110 @@ function autoBuildTree() {
   });
 
   document.addEventListener('click', (e) => {
-    if (!document.getElementById('search-container').contains(e.target)) {
+    if (!document.getElementById('search-container')?.contains(e.target)) {
       suggestionsBox.style.display = 'none';
       searchCompleted = Boolean(searchInput.value.trim());
     }
   });
+
+  /* Przycisk po lewej: Planowanie trasy (deseczka z klipsem i listą) */
+  const btnSearchOpenPlanner = document.getElementById('btn-search-open-planner');
+  if (btnSearchOpenPlanner) {
+    btnSearchOpenPlanner.addEventListener('click', () => {
+      const routePlannerPanel = document.getElementById('route-planner-panel');
+      if (routePlannerPanel && routePlannerPanel.classList.contains('active')) {
+        const btnClose = document.getElementById('btn-route-close');
+        if (btnClose) {
+          btnClose.click();
+        } else {
+          routePlannerPanel.classList.remove('active');
+          routePlannerPanel.setAttribute('aria-hidden', 'true');
+          document.getElementById('menu')?.classList.remove('route-planner-open');
+        }
+        btnSearchOpenPlanner.classList.remove('active');
+      } else {
+        const btnOpen = document.getElementById('btn-open-planner-menu');
+        if (btnOpen) {
+          btnOpen.click();
+        } else if (routePlannerPanel) {
+          if (typeof window.closePlaybackMode === 'function') window.closePlaybackMode();
+          document.getElementById('menu')?.classList.add('route-planner-open');
+          window.collapseRightMenu?.();
+          routePlannerPanel.classList.remove('collapsed');
+          routePlannerPanel.classList.add('active');
+          routePlannerPanel.setAttribute('aria-hidden', 'false');
+        }
+        btnSearchOpenPlanner.classList.add('active');
+      }
+    });
+
+    const updatePlannerBtnState = () => {
+      const panel = document.getElementById('route-planner-panel');
+      if (panel && panel.classList.contains('active')) {
+        btnSearchOpenPlanner.classList.add('active');
+      } else {
+        btnSearchOpenPlanner.classList.remove('active');
+      }
+    };
+    const observer = new MutationObserver(updatePlannerBtnState);
+    const panelEl = document.getElementById('route-planner-panel');
+    if (panelEl) observer.observe(panelEl, { attributes: true, attributeFilter: ['class'] });
+  }
+
+  /* Przycisk po prawej: Lupka wyszukiwania działająca zamiast Entera */
+  const btnSearchSubmit = document.getElementById('btn-search-submit');
+  if (btnSearchSubmit && searchInput) {
+    btnSearchSubmit.addEventListener('click', async () => {
+      const query = searchInput.value.trim();
+      if (!query) {
+        searchInput.focus();
+        return;
+      }
+
+      if (typeof window.parseGoogleMapsRouteUrl === 'function') {
+        const coords = window.parseGoogleMapsRouteUrl(query);
+        if (coords && coords.length >= 2) {
+          searchInput.value = '';
+          suggestionsBox.style.display = 'none';
+          window.loadRouteFromGoogleMapsUrl(query);
+          return;
+        }
+      }
+
+      if (searchResults && searchResults.length > 0) {
+        selectPlace(searchResults[highlightedSearchIndex >= 0 ? highlightedSearchIndex : 0]);
+        return;
+      }
+
+      try {
+        btnSearchSubmit.style.opacity = '0.6';
+        const url = `${photonUrl}/api/?q=${encodeURIComponent(query)}&limit=${photonSearchLimit}&bbox=${photonBbox}`;
+        const resp = await fetch(url);
+        if (resp.ok) {
+          const data = await resp.json();
+          const features = Array.isArray(data.features) ? data.features : [];
+          if (features.length > 0) {
+            const first = features[0];
+            const p = {
+              display_name: [first.properties?.name, first.properties?.street, first.properties?.city].filter(Boolean).join(', ') || query,
+              lat: first.geometry?.coordinates?.[1],
+              lon: first.geometry?.coordinates?.[0]
+            };
+            if (p.lat && p.lon) {
+              selectPlace(p);
+              return;
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Błąd wyszukiwania:', e);
+      } finally {
+        btnSearchSubmit.style.opacity = '1';
+      }
+
+      searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+  }
 
   function selectPlace(place) {
     searchInput.value = place.display_name;
