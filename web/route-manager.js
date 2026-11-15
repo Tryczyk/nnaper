@@ -1219,9 +1219,9 @@
               clearInlineRouteMarkers();
             }
 
-            const legs = (Array.isArray(planData.legs) && planData.legs.length)
-              ? planData.legs
-              : [{ distance_m: planData.distance_m, duration_s: planData.duration_s, coordinates: planData.coordinates }];
+            const legs = (shouldAutoGenerate || !Array.isArray(planData.legs) || !planData.legs.length)
+              ? [{ distance_m: planData.distance_m, duration_s: planData.duration_s, coordinates: planData.coordinates }]
+              : planData.legs;
 
             const segmentRoutes = [];
             legs.forEach((leg, index) => {
@@ -1247,7 +1247,7 @@
                 source: sourceId,
                 layout: { 'line-cap': 'round', 'line-join': 'round', 'line-sort-key': 100001 },
                 paint: {
-                  'line-color': routeSegmentColors[index % routeSegmentColors.length],
+                  'line-color': shouldAutoGenerate ? '#0284c7' : routeSegmentColors[index % routeSegmentColors.length],
                   'line-width': 5.5,
                   'line-opacity': 1
                 }

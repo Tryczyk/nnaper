@@ -968,15 +968,19 @@ func (g *Graph) buildCircularLoopRoute(req RoutePlanRequest, startNode int64, st
 		}
 
 		fullCoords, distM, durS, obs := g.materializeSteps(allSteps, false)
-		waypoints10, legs10 := g.extractOptimal10Waypoints(allSteps, allNodes, anchors[0], anchors[len(anchors)-1])
-
 		resp := RoutePlanResponse{
 			Status:       "ok",
 			DistanceM:    math.Round(distM*10) / 10,
 			DurationS:    math.Round(durS*10) / 10,
 			Coordinates:  fullCoords,
-			Waypoints:    waypoints10,
-			Legs:         legs10,
+			Waypoints:    [][2]float64{anchors[0], anchors[len(anchors)-1]},
+			Legs: []RouteLegSummary{
+				{
+					DistanceM:   math.Round(distM*10) / 10,
+					DurationS:   math.Round(durS*10) / 10,
+					Coordinates: fullCoords,
+				},
+			},
 			Obstacles:    obs,
 			AvoidedCount: totalAvoided,
 		}
@@ -1323,15 +1327,19 @@ func (g *Graph) buildIntelligentAutoRoute(req RoutePlanRequest, targetKM float64
 		}
 
 		fullCoords, distM, durS, obs := g.materializeSteps(allSteps, false)
-		waypoints10, legs10 := g.extractOptimal10Waypoints(allSteps, allNodes, anchorPts[0], anchorPts[len(anchorPts)-1])
-
 		candResp := RoutePlanResponse{
 			Status:       "ok",
 			DistanceM:    math.Round(distM*10) / 10,
 			DurationS:    math.Round(durS*10) / 10,
 			Coordinates:  fullCoords,
-			Waypoints:    waypoints10,
-			Legs:         legs10,
+			Waypoints:    [][2]float64{anchorPts[0], anchorPts[len(anchorPts)-1]},
+			Legs: []RouteLegSummary{
+				{
+					DistanceM:   math.Round(distM*10) / 10,
+					DurationS:   math.Round(durS*10) / 10,
+					Coordinates: fullCoords,
+				},
+			},
 			Obstacles:    obs,
 			AvoidedCount: totalAvoided,
 		}
