@@ -162,8 +162,6 @@ Zakres weryfikacji obejmuje:
    * `1 500` testów algorytmu zachłannego rozmieszczania do 10 znaczników wzdłuż wyznaczonej trasy,
    * `1 000` testów skali logarytmicznej Heatmapy.
 
-Instrukcja pełnego przeklikania aplikacji oraz szczegółowa ankieta dla testera manualnego znajdują się w pliku [`data/INSTRUKCJA_DLA_TESTERA.md`](data/INSTRUKCJA_DLA_TESTERA.md).
-
 ---
 
 ## Licencja
