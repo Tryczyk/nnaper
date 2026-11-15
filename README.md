@@ -39,7 +39,7 @@ Cały backend, lokalny geocoder, indeksator PBF oraz grafowy silnik wyznaczania 
 * Automatyczne indeksowanie pliku `pomorskie-latest.osm.pbf` w tle przy pierwszym uruchomieniu serwera Go:
   * **Infrastruktura drogowa (`/api/infrastructure/{z}/{x}/{y}.pbf`)** z dedykowanymi ikonami znaków drogowych:
     * **Sygnalizacja drogowa**: Ikona sygnalizatora w stylu Apple Maps wraz z przestrzenną deduplikacją w PostGIS (1 ikona w geometrycznym środku skrzyżowania zamiast osobnych ikon dla każdej linii zatrzymania).
-    * **Progi zwalniające**: Polski znak ostrzegawczy **A-11a** (`maps/icons/speed_bump.png`).
+    * **Progi zwalniające**: Dedykowana ikona progu zwalniającego (`assets/icons/signs/speed-bump.svg`).
     * **Przejścia dla pieszych**: Polski znak informacyjny **D-6** (wektorowy SVG).
     * **Fotoradary**: Polski znak informacyjny **D-51** (wektorowy SVG).
     * **Odcinkowe pomiary prędkości (OPP)**: Wektorowa linia pomiarowa wraz ze znakami **D-51a** automatycznie umieszczanymi dokładnie na początku i końcu każdego odcinka pomiarowego.
