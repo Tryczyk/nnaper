@@ -1,4 +1,4 @@
-co onst config = Object.assign({
+const config = Object.assign({
   API_BASE_URL: 'http://localhost:8000',
   TILES_BASE_URL: 'http://localhost:8080',
   PMTILES_FILE: 'pomorskie.pmtiles',
