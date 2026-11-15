@@ -99,10 +99,6 @@ type NMEAParser struct {
 	lastYieldTime  time.Time
 }
 
-func NewNMEAParser(profileID string, lastTs *time.Time, lastLat, lastLon float64, totalBytes int64) *NMEAParser {
-	return NewNMEAParserWithFilters(profileID, DefaultNMEAFilterOptions(), lastTs, lastLat, lastLon, totalBytes)
-}
-
 func NewNMEAParserWithFilters(profileID string, filters NMEAFilterOptions, lastTs *time.Time, lastLat, lastLon float64, totalBytes int64) *NMEAParser {
 	var p *Point
 	if lastLat != 0 || lastLon != 0 {
@@ -181,19 +177,19 @@ func (np *NMEAParser) ParseStream(r io.Reader, onBatch func(epochs []*Epoch) err
 
 		// Filtrowanie jakości Fix i błędów z GGA
 		if curBuilder.hasGGA {
-			if np.filters.MinFixQuality > 0 && curBuilder.ggaFixQuality < np.filters.MinFixQuality {
+			if np.filters.EnableFixQuality && np.filters.MinFixQuality > 0 && curBuilder.ggaFixQuality < np.filters.MinFixQuality {
 				curBuilder = &rawEpochBuilder{}
 				return
 			}
-			if np.filters.MinSatellites > 0 && curBuilder.ggaNumSats < np.filters.MinSatellites {
+			if np.filters.EnableSatellites && np.filters.MinSatellites > 0 && curBuilder.ggaNumSats < np.filters.MinSatellites {
 				curBuilder = &rawEpochBuilder{}
 				return
 			}
-			if np.filters.MaxHDOP > 0 && curBuilder.ggaHDOP > 0 && curBuilder.ggaHDOP > np.filters.MaxHDOP {
+			if np.filters.EnableHDOP && np.filters.MaxHDOP > 0 && curBuilder.ggaHDOP > 0 && curBuilder.ggaHDOP > np.filters.MaxHDOP {
 				curBuilder = &rawEpochBuilder{}
 				return
 			}
-			if curBuilder.hasAlt {
+			if np.filters.EnableAltitude && curBuilder.hasAlt {
 				if curBuilder.ggaAlt < np.filters.MinAltitude || curBuilder.ggaAlt > np.filters.MaxAltitude {
 					curBuilder = &rawEpochBuilder{}
 					return
@@ -203,11 +199,11 @@ func (np *NMEAParser) ParseStream(r io.Reader, onBatch func(epochs []*Epoch) err
 
 		// Filtrowanie błędu przestrzennego PDOP / HDOP z GSA
 		if curBuilder.hasGSA {
-			if np.filters.MaxPDOP > 0 && curBuilder.gsaPDOP > 0 && curBuilder.gsaPDOP > np.filters.MaxPDOP {
+			if np.filters.EnablePDOP && np.filters.MaxPDOP > 0 && curBuilder.gsaPDOP > 0 && curBuilder.gsaPDOP > np.filters.MaxPDOP {
 				curBuilder = &rawEpochBuilder{}
 				return
 			}
-			if np.filters.MaxHDOP > 0 && curBuilder.gsaHDOP > 0 && curBuilder.gsaHDOP > np.filters.MaxHDOP {
+			if np.filters.EnableHDOP && np.filters.MaxHDOP > 0 && curBuilder.gsaHDOP > 0 && curBuilder.gsaHDOP > np.filters.MaxHDOP {
 				curBuilder = &rawEpochBuilder{}
 				return
 			}
@@ -235,7 +231,6 @@ func (np *NMEAParser) ParseStream(r io.Reader, onBatch func(epochs []*Epoch) err
 					epTimestamp = &dt
 				}
 			}
-			speedKmh = curBuilder.rmcSpeedKmh
 		} else if curBuilder.ggaValid {
 			lat = curBuilder.ggaLat
 			lon = curBuilder.ggaLon
@@ -255,17 +250,32 @@ func (np *NMEAParser) ParseStream(r io.Reader, onBatch func(epochs []*Epoch) err
 			return
 		}
 
-		if speedKmh == 0.0 && np.lastPoint != nil && np.lastTime != nil && epTimestamp != nil {
+		// Prędkość ZAWSZE liczymy wyłącznie ze skoku geometrycznego (Haversine / dt), NIGDY z danych wejściowych
+		speedKmh = 0.0
+		if np.lastPoint != nil && np.lastTime != nil && epTimestamp != nil {
 			dtSec := epTimestamp.Sub(*np.lastTime).Seconds()
+			distM := HaversineMeters(np.lastPoint.Lat, np.lastPoint.Lon, lat, lon)
 			if dtSec > 0 {
-				distM := HaversineMeters(np.lastPoint.Lat, np.lastPoint.Lon, lat, lon)
 				speedKmh = (distM / dtSec) * 3.6
+			} else if dtSec == 0 {
+				if distM > 0.01 {
+					// Natychmiastowy skok pozycji w zerowym czasie = prędkość nieskończona
+					speedKmh = math.MaxFloat64
+				} else {
+					speedKmh = 0.0
+				}
+			} else {
+				// Czas się cofnął przy zmianie współrzędnych
+				speedKmh = math.MaxFloat64
 			}
 		}
 
 		maxSpd := np.filters.MaxSpeedKmh
-		if maxSpd <= 0 {
+		if !np.filters.EnableMaxSpeed || maxSpd <= 0 {
 			maxSpd = np.maxSpeedKmh
+		}
+		if maxSpd <= 0 {
+			maxSpd = 1000.0
 		}
 
 		if speedKmh <= maxSpd {
@@ -372,15 +382,13 @@ func (np *NMEAParser) ParseStream(r io.Reader, onBatch func(epochs []*Epoch) err
 				curBuilder.hasRMC = true
 				curBuilder.rmcTime = parts[1]
 				curBuilder.rmcDate = parts[9]
-				if lat, okLat := DDMToDD(parts[3], parts[4]); okLat {
-					if lon, okLon := DDMToDD(parts[5], parts[6]); okLon {
-						curBuilder.rmcLat = lat
-						curBuilder.rmcLon = lon
-						curBuilder.rmcValid = true
-						if len(parts) > 7 {
-							if spdKnots, err := strconv.ParseFloat(parts[7], 64); err == nil && spdKnots > 0 {
-								curBuilder.rmcSpeedKmh = spdKnots * 1.852
-							}
+				status := strings.ToUpper(strings.TrimSpace(parts[2]))
+				if status == "A" {
+					if lat, okLat := DDMToDD(parts[3], parts[4]); okLat {
+						if lon, okLon := DDMToDD(parts[5], parts[6]); okLon {
+							curBuilder.rmcLat = lat
+							curBuilder.rmcLon = lon
+							curBuilder.rmcValid = true
 						}
 					}
 				}
