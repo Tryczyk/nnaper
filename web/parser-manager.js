@@ -76,6 +76,7 @@
   // Stan
   let queue = [];
   let isProcessing = false;
+  let isUploading = false;
   let activeXhr = null;
   let activeServerJobId = null;
   let timerInterval = null;
@@ -180,10 +181,11 @@
 
   function setupBeforeUnloadProtection() {
     window.addEventListener('beforeunload', (e) => {
-      if (isProcessing && activeXhr) {
+      if (isUploading || (isProcessing && activeXhr)) {
         e.preventDefault();
-        e.returnValue = 'Trwa przesyłanie pliku GPS na serwer.';
-        return e.returnValue;
+        const msg = 'Trwa przesyłanie plików GPS na serwer. Nie opuszczaj strony dopóki wszystkie pliki nie zostaną przesłane!';
+        e.returnValue = msg;
+        return msg;
       }
     });
   }
@@ -279,6 +281,10 @@
   }
 
   function closeParserModal() {
+    if (isUploading) {
+      alert('Trwa przesyłanie plików na serwer. Nie można zamknąć okna ani opuścić strony dopóki wszystkie pliki nie zostaną przesłane!');
+      return;
+    }
     if (modalEl) {
       modalEl.style.display = 'none';
     }
@@ -784,6 +790,75 @@
     }, 1000);
   }
 
+  // Łączy wiele plików w jedną dużą całość (Blob) przed wysłaniem na serwer
+  async function combineFilesIntoSingleBlob(items) {
+    if (items.length === 1) {
+      return {
+        blob: items[0].file,
+        name: items[0].name,
+        count: 1
+      };
+    }
+
+    const isAllGpx = items.every(it => it.name && it.name.toLowerCase().endsWith('.gpx'));
+    const isAllCsv = items.every(it => it.name && it.name.toLowerCase().endsWith('.csv'));
+
+    if (isAllGpx) {
+      let combinedTracksXml = '';
+      for (let i = 0; i < items.length; i++) {
+        const text = await items[i].file.text();
+        const trkMatches = text.match(/<trk[\s\S]*?<\/trk>/gi) || [];
+        const wptMatches = text.match(/<wpt[\s\S]*?<\/wpt>/gi) || [];
+        combinedTracksXml += trkMatches.join('\n') + '\n' + wptMatches.join('\n') + '\n';
+      }
+      const fullGpx = `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="NNAPER">\n${combinedTracksXml}\n</gpx>`;
+      return {
+        blob: new Blob([fullGpx], { type: 'application/gpx+xml' }),
+        name: `zbiorczy_import_${items.length}_tras_${Date.now()}.gpx`,
+        count: items.length
+      };
+    }
+
+    if (isAllCsv) {
+      const parts = [];
+      for (let i = 0; i < items.length; i++) {
+        const file = items[i].file;
+        if (i === 0) {
+          parts.push(file);
+        } else {
+          // Pobierz fragment nagłówka, aby pominąć zduplikowaną pierwszą linię
+          const headerChunk = await file.slice(0, 4096).text();
+          const firstNl = headerChunk.indexOf('\n');
+          if (firstNl !== -1) {
+            parts.push('\n');
+            parts.push(file.slice(firstNl + 1));
+          } else {
+            parts.push('\n');
+            parts.push(file);
+          }
+        }
+      }
+      return {
+        blob: new Blob(parts, { type: 'text/csv' }),
+        name: `zbiorczy_import_${items.length}_plikow_${Date.now()}.csv`,
+        count: items.length
+      };
+    }
+
+    // Domyślny format: NMEA / pliki tekstowe / logi telemetryczne (.nmea, .txt, .log)
+    // Bezpośrednie łączenie deskryptorów Blob bez narzutu na pamięć RAM przeglądarki
+    const parts = [];
+    for (let i = 0; i < items.length; i++) {
+      parts.push(items[i].file);
+      parts.push('\n');
+    }
+    return {
+      blob: new Blob(parts, { type: 'text/plain' }),
+      name: `zbiorczy_import_${items.length}_plikow_${Date.now()}.txt`,
+      count: items.length
+    };
+  }
+
   async function startSequentialProcessing() {
     const token = window.getAuthToken?.() || '';
     if (!token) {
@@ -798,10 +873,11 @@
     }
 
     isProcessing = true;
+    isUploading = true;
     startTime = Date.now();
     startTimer();
 
-    const totalRemainingBytes = queue.filter(q => q.status !== 'done').reduce((acc, q) => acc + (q.size || q.file?.size || 0), 0);
+    const totalRemainingBytes = itemsToProcess.reduce((acc, q) => acc + (q.size || q.file?.size || 0), 0);
     const initialEtaSec = Math.max(1, Math.round((totalRemainingBytes / (1024 * 1024)) / estimatedParsingSpeedMBs));
     if (metricEta) metricEta.innerText = formatTime(initialEtaSec);
     if (metricSpeed) metricSpeed.innerText = '-- MB/s';
@@ -809,6 +885,10 @@
     if (btnStart) btnStart.style.display = 'none';
     if (btnAbort) btnAbort.style.display = 'inline-flex';
     if (btnCancel) btnCancel.disabled = true;
+    if (btnClose) {
+      btnClose.disabled = true;
+      btnClose.setAttribute('title', 'Nie można zamknąć okna w trakcie wysyłania plików na serwer');
+    }
     if (btnClearQueue) btnClearQueue.disabled = true;
     if (btnViewMap) btnViewMap.style.display = 'none';
     if (successBox) successBox.style.display = 'none';
@@ -820,54 +900,88 @@
 
     const snap = true; // Zawsze dociągaj do dróg OSM
 
-    for (let i = 0; i < queue.length; i++) {
-      if (!isProcessing) break;
-      const item = queue[i];
-      if (item.status === 'done') continue; // pominięty duplikat
-
-      processedFilesCount = i;
-      updateOverallProgress(0);
-
-      if (activeFileNameEl) activeFileNameEl.innerText = item.name;
-
-      try {
-        await processSingleFileOnServer(item, snap);
-      } catch (err) {
-        if (err.name === 'AbortError') {
-          item.status = 'error';
-          item.message = 'Przerwano przez użytkownika';
-          updateFileRow(item);
-          break;
+    try {
+      // 1. Etap łączenia: Jeśli jest wiele plików, łączymy je w jedną dużą całość przed wysłaniem
+      if (itemsToProcess.length > 1) {
+        if (currentStageEl) {
+          currentStageEl.innerText = `Pobieranie i łączenie ${itemsToProcess.length} plików w jedną całość przed wysłaniem...`;
         }
-        item.status = 'error';
-        item.error = err.message;
-        item.message = `Błąd: ${err.message}`;
-        updateFileRow(item);
-        if (item.name && item.name.toLowerCase().endsWith('.csv')) {
+        if (activeFileNameEl) {
+          activeFileNameEl.innerText = `Zbiorcza paczka (${itemsToProcess.length} plików)`;
+        }
+        itemsToProcess.forEach(it => {
+          it.status = 'reading';
+          it.percent = 1;
+          it.message = 'Łączenie w jedną całość...';
+          updateFileRow(it);
+        });
+      } else {
+        if (activeFileNameEl) activeFileNameEl.innerText = itemsToProcess[0].name;
+      }
+
+      const combined = await combineFilesIntoSingleBlob(itemsToProcess);
+
+      // 2. Etap wysyłania i przetwarzania połączonej całości
+      await processCombinedFilesOnServer(combined.blob, combined.name, itemsToProcess, snap);
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        itemsToProcess.forEach(it => {
+          if (it.status !== 'done') {
+            it.status = 'error';
+            it.message = 'Przerwano przez użytkownika';
+            updateFileRow(it);
+          }
+        });
+      } else {
+        itemsToProcess.forEach(it => {
+          if (it.status !== 'done') {
+            it.status = 'error';
+            it.error = err.message;
+            it.message = `Błąd: ${err.message}`;
+            updateFileRow(it);
+          }
+        });
+        if (itemsToProcess.some(it => it.name && it.name.toLowerCase().endsWith('.csv'))) {
           updateCsvInfoCardVisibility();
         }
       }
+    } finally {
+      isUploading = false;
+      if (btnClose) {
+        btnClose.disabled = false;
+        btnClose.removeAttribute('title');
+      }
+      if (btnCancel) btnCancel.disabled = false;
     }
 
     finishAllSuccess();
   }
 
-  // Wysyła plik i monitoruje zadanie w tle na serwerze
-  function processSingleFileOnServer(queueItem, snap) {
+  // Wysyła połączony plik i monitoruje zadanie w tle na serwerze
+  function processCombinedFilesOnServer(combinedBlob, combinedName, items, snap) {
     return new Promise((resolve, reject) => {
       const token = window.getAuthToken?.() || '';
       const targetProfileSelect = document.getElementById('parser-target-profile-select');
       const targetProfileId = targetProfileSelect ? targetProfileSelect.value : (window.getActiveProfileId?.() || '');
       const profParam = targetProfileId ? `&profile_id=${encodeURIComponent(targetProfileId)}` : '';
-      const url = `${getApiBaseUrl()}/api/parser/upload?token=${encodeURIComponent(token)}&snap=${snap ? 'true' : 'false'}&filename=${encodeURIComponent(queueItem.name)}${profParam}`;
+      const url = `${getApiBaseUrl()}/api/parser/upload?token=${encodeURIComponent(token)}&snap=${snap ? 'true' : 'false'}&filename=${encodeURIComponent(combinedName)}${profParam}`;
 
       const xhr = new XMLHttpRequest();
       activeXhr = xhr;
+      isUploading = true;
 
-      queueItem.status = 'uploading';
-      queueItem.percent = 1;
-      queueItem.message = 'Wysyłanie na serwer (inicjalizacja transferu)...';
-      updateFileRow(queueItem);
+      items.forEach(it => {
+        it.status = 'uploading';
+        it.percent = 1;
+        it.message = items.length > 1 ? `Wysyłanie połączonej paczki (${items.length} plików)...` : 'Wysyłanie na serwer...';
+        updateFileRow(it);
+      });
+
+      if (btnClose) {
+        btnClose.disabled = true;
+        btnClose.setAttribute('title', 'Nie można zamknąć okna w trakcie wysyłania plików na serwer');
+      }
+      if (btnCancel) btnCancel.disabled = true;
 
       let uploadStartTime = Date.now();
 
@@ -877,32 +991,34 @@
           const elapsedUploadSec = Math.max(0.1, (Date.now() - uploadStartTime) / 1000);
           const uploadSpeed = e.loaded / elapsedUploadSec;
 
-          // Upload mapujemy proporcjonalnie na zakres 1% - 15% całkowitego postępu pliku
+          // Upload mapujemy na zakres 1% - 15% całkowitego postępu
           const mappedUploadPct = Math.max(1, Math.min(15, Math.round(uploadPct * 0.15)));
 
-          // Estymacja całkowitego ETA na bazie megabajtów danych (upload + parsowanie całej kolejki)
-          const totalRemainingSec = estimateQueueRemainingSeconds(
-            processedFilesCount,
-            'upload',
-            e.loaded,
-            e.total,
-            0,
-            uploadSpeed
-          );
+          const remainingUploadBytes = Math.max(0, e.total - e.loaded);
+          const remainingUploadSec = uploadSpeed > 0 ? (remainingUploadBytes / uploadSpeed) : 0;
+          const estimatedParsingSec = (e.total / (1024 * 1024)) / Math.max(0.5, estimatedParsingSpeedMBs);
+          const totalRemainingSec = Math.max(1, Math.round(remainingUploadSec + estimatedParsingSec));
 
           if (uploadPct < 100) {
-            queueItem.status = 'uploading';
-            queueItem.percent = mappedUploadPct;
-            queueItem.message = `Wysyłanie na serwer: ${formatBytes(e.loaded)} / ${formatBytes(e.total)} (${uploadPct}%)`;
+            isUploading = true;
+            items.forEach(it => {
+              it.status = 'uploading';
+              it.percent = mappedUploadPct;
+              it.message = `Wysyłanie na serwer: ${formatBytes(e.loaded)} / ${formatBytes(e.total)} (${uploadPct}%)`;
+              updateFileRow(it);
+            });
           } else {
-            queueItem.status = 'writing';
-            queueItem.percent = 15;
-            queueItem.message = 'Transfer 100% zakończony. Zapisywanie na dysku serwera i kolejkowanie...';
+            isUploading = false;
+            items.forEach(it => {
+              it.status = 'writing';
+              it.percent = 15;
+              it.message = 'Transfer 100% zakończony. Zapisywanie na dysku serwera i kolejkowanie...';
+              updateFileRow(it);
+            });
           }
-          updateFileRow(queueItem);
 
-          if (activeFilePctEl) activeFilePctEl.innerText = `${queueItem.percent}%`;
-          if (activeFillEl) activeFillEl.style.width = `${queueItem.percent}%`;
+          if (activeFilePctEl) activeFilePctEl.innerText = `${mappedUploadPct}%`;
+          if (activeFillEl) activeFillEl.style.width = `${mappedUploadPct}%`;
           if (metricSpeed) {
             if (uploadPct < 100) {
               const upMB = (uploadSpeed / (1024 * 1024)).toFixed(1);
@@ -927,37 +1043,47 @@
             const totMB = (e.total / (1024 * 1024)).toFixed(1);
             if (uploadPct < 100) {
               const upMB = (uploadSpeed / (1024 * 1024)).toFixed(1);
-              currentStageEl.innerText = `Plik (${processedFilesCount + 1}/${queue.length}): ${queueItem.name} — Wysyłanie: ${curMB}/${totMB} MB (${uploadPct}%, ${upMB} MB/s) — Szacowane ETA: ~${formatTime(totalRemainingSec)}`;
+              const filesLabel = items.length > 1 ? `Połączona paczka (${items.length} plików)` : items[0].name;
+              currentStageEl.innerText = `${filesLabel} — Wysyłanie: ${curMB}/${totMB} MB (${uploadPct}%, ${upMB} MB/s) — Szacowane ETA: ~${formatTime(totalRemainingSec)}`;
             } else {
-              currentStageEl.innerText = `Plik (${processedFilesCount + 1}/${queue.length}): ${queueItem.name} — Transfer 100% zakończony. Zapisywanie na dysku serwera...`;
+              currentStageEl.innerText = `Paczka przesłana w 100%. Trwa zapisywanie i uruchamianie parsowania w tle...`;
             }
           }
-          updateOverallProgress(queueItem.percent);
+          updateOverallProgress(mappedUploadPct);
         }
       };
 
       xhr.onload = async () => {
         activeXhr = null;
+        isUploading = false;
+        if (btnClose) {
+          btnClose.disabled = false;
+          btnClose.removeAttribute('title');
+        }
+        if (btnCancel) btnCancel.disabled = false;
+
         if (xhr.status >= 200 && xhr.status < 300) {
           try {
             const resp = JSON.parse(xhr.responseText);
             activeServerJobId = resp.job_id;
 
-            queueItem.status = 'queued';
-            queueItem.percent = 18;
-            queueItem.message = 'Plik zapisany na serwerze. Uruchamianie parsowania w tle...';
-            updateFileRow(queueItem);
+            items.forEach(it => {
+              it.status = 'queued';
+              it.percent = 18;
+              it.message = 'Pliki zapisane na serwerze. Uruchamianie parsowania w tle...';
+              updateFileRow(it);
+            });
 
-            if (activeFilePctEl) activeFilePctEl.innerText = `${queueItem.percent}%`;
-            if (activeFillEl) activeFillEl.style.width = `${queueItem.percent}%`;
+            if (activeFilePctEl) activeFilePctEl.innerText = '18%';
+            if (activeFillEl) activeFillEl.style.width = '18%';
             if (metricSpeed) metricSpeed.innerText = 'Inicjalizacja...';
             if (currentStageEl) {
-              currentStageEl.innerText = `Plik (${processedFilesCount + 1}/${queue.length}): ${queueItem.name} — Zadanie zarejestrowane. Rozpoczynanie parsowania w tle...`;
+              const filesLabel = items.length > 1 ? `Połączona paczka (${items.length} plików)` : items[0].name;
+              currentStageEl.innerText = `${filesLabel} — Zadanie serwera zarejestrowane. Rozpoczynanie parsowania w tle...`;
             }
-            updateOverallProgress(queueItem.percent);
+            updateOverallProgress(18);
 
-            // Przejdź do odpytywania stanu zadania serwera
-            await pollServerJobUntilDone(resp.job_id, queueItem);
+            await pollServerJobUntilDone(resp.job_id, items, combinedBlob.size);
             resolve();
           } catch (err) {
             reject(err);
@@ -974,11 +1100,23 @@
 
       xhr.onerror = () => {
         activeXhr = null;
+        isUploading = false;
+        if (btnClose) {
+          btnClose.disabled = false;
+          btnClose.removeAttribute('title');
+        }
+        if (btnCancel) btnCancel.disabled = false;
         reject(new Error('Błąd połączenia z serwerem'));
       };
 
       xhr.onabort = () => {
         activeXhr = null;
+        isUploading = false;
+        if (btnClose) {
+          btnClose.disabled = false;
+          btnClose.removeAttribute('title');
+        }
+        if (btnCancel) btnCancel.disabled = false;
         const err = new Error('Przerwano');
         err.name = 'AbortError';
         reject(err);
@@ -986,13 +1124,14 @@
 
       xhr.open('POST', url, true);
       xhr.setRequestHeader('Content-Type', 'application/octet-stream');
-      xhr.setRequestHeader('X-Filename', encodeURIComponent(queueItem.name));
-      xhr.send(queueItem.file);
+      xhr.setRequestHeader('X-Filename', encodeURIComponent(combinedName));
+      xhr.send(combinedBlob);
     });
   }
 
   // Odpytuje serwer co 1s o stan trwającego zadania
-  function pollServerJobUntilDone(jobId, queueItem) {
+  function pollServerJobUntilDone(jobId, items, combinedTotalBytes) {
+    const itemList = Array.isArray(items) ? items : [items];
     return new Promise((resolve, reject) => {
       const token = window.getAuthToken?.() || '';
 
@@ -1019,9 +1158,9 @@
           // Rzeczywisty postęp parsowania danych z serwera (na bazie przetworzonych MB)
           const srvPct = Math.min(100, Math.max(0, job.percent || 0));
           // Parsowanie na serwerze mapujemy na zakres 18% - 99% (lub 100% gdy gotowe)
-          const actualPct = (job.status === 'done') ? 100 : Math.max(queueItem.percent, Math.min(99, Math.round(18 + (srvPct * 0.81))));
+          const actualPct = (job.status === 'done') ? 100 : Math.max(18, Math.min(99, Math.round(18 + (srvPct * 0.81))));
 
-          const fileTotalBytes = queueItem.size || queueItem.file?.size || job.file_size || 0;
+          const fileTotalBytes = combinedTotalBytes || job.file_size || 0;
           const processedBytes = job.processed_bytes || Math.round(fileTotalBytes * (srvPct / 100));
 
           // Szacowanie pozostałego czasu w sekundach
@@ -1036,17 +1175,19 @@
             liveRemainingSec = Math.round((liveRemainingSec * 0.3) + (serverSec * 0.7));
           }
 
-          queueItem.percent = actualPct;
-          queueItem.status = job.status === 'running' ? (job.stage || 'parsing') : job.status;
-          queueItem.message = job.message || 'Przetwarzanie na serwerze...';
-          queueItem.epochs = job.epochs || queueItem.epochs || 0;
-          if (job.status === 'error') {
-            queueItem.error = job.error || job.message;
-          }
-          updateFileRow(queueItem);
+          itemList.forEach(it => {
+            it.percent = actualPct;
+            it.status = job.status === 'running' ? (job.stage || 'parsing') : job.status;
+            it.message = job.message || 'Przetwarzanie na serwerze...';
+            it.epochs = job.epochs || it.epochs || 0;
+            if (job.status === 'error') {
+              it.error = job.error || job.message;
+            }
+            updateFileRow(it);
+          });
 
-          if (activeFilePctEl) activeFilePctEl.innerText = `${queueItem.percent}%`;
-          if (activeFillEl) activeFillEl.style.width = `${queueItem.percent}%`;
+          if (activeFilePctEl) activeFilePctEl.innerText = `${actualPct}%`;
+          if (activeFillEl) activeFillEl.style.width = `${actualPct}%`;
           if (metricEta) metricEta.innerText = formatTime(liveRemainingSec);
           const displaySpeed = (job.speed_mb_s !== undefined && job.speed_mb_s > 0) ? job.speed_mb_s : estimatedParsingSpeedMBs;
           if (metricSpeed) {
@@ -1068,25 +1209,31 @@
             else if (job.stage === 'done' || job.status === 'done') stageDesc = 'Zakończono pomyślnie';
             const curMB = (processedBytes / (1024 * 1024)).toFixed(1);
             const totMB = (fileTotalBytes / (1024 * 1024)).toFixed(1);
-            currentStageEl.innerText = `Plik (${processedFilesCount + 1}/${queue.length}): ${queueItem.name} — ${stageDesc} (${srvPct}%, ${curMB}/${totMB} MB, ${displaySpeed} MB/s, ETA: ~${formatTime(liveRemainingSec)})`;
+            const filesLabel = itemList.length > 1 ? `Zbiorcza paczka (${itemList.length} plików)` : itemList[0].name;
+            currentStageEl.innerText = `${filesLabel} — ${stageDesc} (${srvPct}%, ${curMB}/${totMB} MB, ${displaySpeed} MB/s, ETA: ~${formatTime(liveRemainingSec)})`;
           }
 
-          updateOverallProgress(queueItem.percent);
+          updateOverallProgress(actualPct);
 
           if (job.status === 'done') {
             clearInterval(pollingInterval);
             totalEpochsAccumulator += (job.epochs || 0);
-            saveLocalHistory(queueItem.name, queueItem.size, job.epochs || 0);
+            itemList.forEach(it => {
+              it.status = 'done';
+              it.percent = 100;
+              it.message = 'Pomyślnie zaimportowano';
+              updateFileRow(it);
+              saveLocalHistory(it.name, it.size, job.epochs || 0);
+            });
             resolve();
           } else if (job.status === 'error') {
             clearInterval(pollingInterval);
-            queueItem.status = 'error';
-            queueItem.error = job.error || job.message;
-            queueItem.message = `Błąd: ${job.error || job.message}`;
-            updateFileRow(queueItem);
-            if (queueItem.name && queueItem.name.toLowerCase().endsWith('.csv')) {
-              updateCsvInfoCardVisibility();
-            }
+            itemList.forEach(it => {
+              it.status = 'error';
+              it.error = job.error || job.message;
+              it.message = `Błąd: ${job.error || job.message}`;
+              updateFileRow(it);
+            });
             reject(new Error(job.error || job.message || 'Błąd zadania serwera'));
           }
         } catch (err) {
@@ -1094,9 +1241,8 @@
         }
       };
 
-      clearInterval(pollingInterval);
+      check();
       pollingInterval = setInterval(check, 1000);
-      check(); // natychmiastowe pierwsze wywołanie
     });
   }
 
@@ -1211,11 +1357,16 @@
 
   function cleanupProcessingState() {
     isProcessing = false;
+    isUploading = false;
     clearInterval(timerInterval);
     clearInterval(pollingInterval);
     activeXhr = null;
     activeServerJobId = null;
 
+    if (btnClose) {
+      btnClose.disabled = false;
+      btnClose.removeAttribute('title');
+    }
     if (btnStart) {
       btnStart.style.display = 'inline-flex';
       btnStart.disabled = queue.length === 0 || !(window.getAuthToken?.());
@@ -1338,6 +1489,18 @@
         }
       });
     }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && modalEl && modalEl.style.display !== 'none') {
+        if (isUploading) {
+          e.preventDefault();
+          e.stopPropagation();
+          alert('Trwa przesyłanie plików na serwer. Nie można zamknąć okna dopóki wszystkie pliki nie zostaną przesłane!');
+          return;
+        }
+        closeParserModal();
+      }
+    });
 
     window.addEventListener('nnaper_auth_changed', () => {
       checkAuthStatus();
