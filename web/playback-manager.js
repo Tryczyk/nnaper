@@ -240,6 +240,60 @@
     }
   }
 
+  function ensurePlaybackCarLayers() {
+    const m = getMap();
+    if (!m) return;
+
+    if (!m.getSource('playback-car-source')) {
+      m.addSource('playback-car-source', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] }
+      });
+    }
+
+    if (!m.getLayer('playback-car-pulse')) {
+      m.addLayer({
+        id: 'playback-car-pulse',
+        source: 'playback-car-source',
+        type: 'circle',
+        paint: {
+          'circle-radius': 13,
+          'circle-color': '#38bdf8',
+          'circle-opacity': 0.25,
+          'circle-stroke-width': 1.5,
+          'circle-stroke-color': '#38bdf8',
+          'circle-stroke-opacity': 0.7
+        }
+      });
+    }
+
+    if (!m.getLayer('playback-car-body')) {
+      m.addLayer({
+        id: 'playback-car-body',
+        source: 'playback-car-source',
+        type: 'circle',
+        paint: {
+          'circle-radius': 7.5,
+          'circle-color': '#38bdf8',
+          'circle-stroke-width': 2,
+          'circle-stroke-color': '#0f172a'
+        }
+      });
+    }
+
+    if (!m.getLayer('playback-car-core')) {
+      m.addLayer({
+        id: 'playback-car-core',
+        source: 'playback-car-source',
+        type: 'circle',
+        paint: {
+          'circle-radius': 3.2,
+          'circle-color': '#ffffff'
+        }
+      });
+    }
+  }
+
   function getDistanceKm(lat1, lon1, lat2, lon2) {
     const R = 6371;
     const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -363,20 +417,29 @@
     if (!trackData[index] || !m) return;
     const pt = trackData[index];
 
+    ensurePlaybackCarLayers();
+    const carSrc = m.getSource('playback-car-source');
+    if (carSrc) {
+      carSrc.setData({
+        type: 'FeatureCollection',
+        features: [{
+          type: 'Feature',
+          geometry: {
+            type: 'Point',
+            coordinates: [pt.lon, pt.lat]
+          }
+        }]
+      });
+    }
+
+    if (carMarker) {
+      carMarker.remove();
+      carMarker = null;
+    }
+
     const followCheckbox = chkFollow || document.getElementById('chk-playback-follow');
     if (centerCamera || (followCheckbox && followCheckbox.checked)) {
       m.jumpTo({ center: [pt.lon, pt.lat] });
-    }
-
-    if (!carMarker) {
-      const el = document.createElement('div');
-      el.className = 'car-marker';
-      el.style.transition = 'none';
-      el.style.willChange = 'transform';
-      el.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="#38bdf8" stroke="#0f172a" stroke-width="1.5"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="3" fill="#ffffff"/></svg>';
-      carMarker = new maplibregl.Marker({ element: el }).setLngLat([pt.lon, pt.lat]).addTo(m);
-    } else {
-      carMarker.setLngLat([pt.lon, pt.lat]);
     }
 
     // Ślad samochodzika (zapełnianie mapy śladem)
@@ -816,7 +879,8 @@
 
     try {
       const token = window.getAuthToken?.() || '';
-      const isSnapped = localStorage.getItem('nnaper_snap_roads') === 'true';
+      const trackMode = localStorage.getItem('nnaper_track_mode');
+      const isSnapped = (trackMode === 'snapped' || trackMode === 'osm' || localStorage.getItem('nnaper_snap_roads') === 'true');
       const snapParam = isSnapped ? '&snapped=true' : '';
       const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
       const rawProf = (typeof window.getActiveProfileId === 'function') ? window.getActiveProfileId() : '';
@@ -859,6 +923,8 @@
           carMarker = null;
         }
         const m = getMap();
+        const carSrc = m?.getSource('playback-car-source');
+        if (carSrc) carSrc.setData({ type: 'FeatureCollection', features: [] });
         const linesSrc = m?.getSource('satellites-lines-source');
         const ptsSrc = m?.getSource('satellites-points-source');
         if (linesSrc) linesSrc.setData({ type: 'FeatureCollection', features: [] });
@@ -1123,9 +1189,11 @@
       const linesSrc = m.getSource('satellites-lines-source');
       const ptsSrc = m.getSource('satellites-points-source');
       const trailSrc = m.getSource('playback-trail-source');
+      const carSrc = m.getSource('playback-car-source');
       if (linesSrc) linesSrc.setData({ type: 'FeatureCollection', features: [] });
       if (ptsSrc) ptsSrc.setData({ type: 'FeatureCollection', features: [] });
       if (trailSrc) trailSrc.setData({ type: 'FeatureCollection', features: [] });
+      if (carSrc) carSrc.setData({ type: 'FeatureCollection', features: [] });
 
       const cfg = window.LayerManager?.getStoredConfig?.() || {};
       if (!cfg.settings3D?.map3D && typeof m.getPitch === 'function' && m.getPitch() > 0) {
@@ -1269,6 +1337,8 @@
 
     const onMapLoaded = () => {
       ensureSatelliteLayers();
+      ensurePlaybackTrailLayers();
+      ensurePlaybackCarLayers();
       checkUrlForPlaybackMode();
     };
 
