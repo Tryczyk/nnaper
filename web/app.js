@@ -1850,16 +1850,9 @@ function autoBuildTree() {
     }
   }
 
-  /* Przycisk po lewej: Planowanie trasy (deseczka z klipsem i listą) */
+  /* Przycisk po lewej: Planowanie trasy (deseczka z klipsem i listą) - synchronizacja stanu aktywności */
   const btnSearchOpenPlanner = document.getElementById('btn-search-open-planner');
   if (btnSearchOpenPlanner) {
-    btnSearchOpenPlanner.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (typeof window.toggleRoutePlanner === 'function') {
-        window.toggleRoutePlanner();
-      }
-    });
-
     const updatePlannerBtnState = () => {
       const panel = document.getElementById('route-planner-panel');
       if (panel && panel.classList.contains('active')) {
