@@ -1588,6 +1588,65 @@ function autoBuildTree() {
       .replace(/\bPoland\b/gi, 'Polska');
   }
 
+  function parsePhotonFeature(feature) {
+    const properties = feature.properties || {};
+    const coordinates = feature.geometry && feature.geometry.coordinates;
+    if (!Array.isArray(coordinates) || coordinates.length < 2) return null;
+    const addressParts = [
+      properties.street && `${properties.street}${properties.housenumber ? ` ${properties.housenumber}` : ''}`,
+      properties.city || properties.town || properties.village,
+      getPolishPlaceLabel(properties.state),
+      getPolishPlaceLabel(properties.country)
+    ].filter(Boolean);
+
+    return {
+      ...properties,
+      state: getPolishPlaceLabel(properties.state),
+      country: getPolishPlaceLabel(properties.country),
+      name: properties.name || '',
+      display_name: [properties.name, ...addressParts]
+        .filter((value, index, values) => value && values.indexOf(value) === index)
+        .join(', '),
+      lon: coordinates[0],
+      lat: coordinates[1],
+      address: {
+        road: properties.street,
+        house_number: properties.housenumber,
+        city: properties.city || properties.town || properties.village,
+        state: getPolishPlaceLabel(properties.state),
+        country: getPolishPlaceLabel(properties.country),
+        postcode: properties.postcode
+      }
+    };
+  }
+
+  async function fetchGeocodeFeatures(query, signal) {
+    const primaryUrl = `${photonUrl}/api/?q=${encodeURIComponent(query)}&limit=${photonSearchLimit}&bbox=${photonBbox}`;
+    try {
+      const resp = await fetch(primaryUrl, { signal });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (Array.isArray(data.features) && data.features.length > 0) return data.features;
+      }
+    } catch (e) {
+      if (e.name === 'AbortError') throw e;
+    }
+
+    const localUrl = `${apiBaseUrl}/api/geocode/api/?q=${encodeURIComponent(query)}&limit=${photonSearchLimit}&bbox=${photonBbox}`;
+    if (primaryUrl !== localUrl) {
+      try {
+        const resp = await fetch(localUrl, { signal });
+        if (resp.ok) {
+          const data = await resp.json();
+          if (Array.isArray(data.features)) return data.features;
+        }
+      } catch (e) {
+        if (e.name === 'AbortError') throw e;
+      }
+    }
+    return [];
+  }
+
   function renderSearchResults(results) {
     suggestionsBox.innerHTML = '';
     searchResults = results.slice(0, 6);
@@ -1616,13 +1675,10 @@ function autoBuildTree() {
 
   searchInput.addEventListener('focus', () => {
     if (searchCompleted) {
-      searchInput.value = '';
-      suggestionsBox.innerHTML = '';
-      suggestionsBox.style.display = 'none';
-      searchResults = [];
-      highlightedSearchIndex = -1;
+      searchInput.select();
       searchCompleted = false;
-      restoreLayerMenu();
+    } else if (searchResults.length > 0 && searchInput.value.trim().length >= 1) {
+      suggestionsBox.style.display = 'block';
     }
   });
 
@@ -1633,23 +1689,10 @@ function autoBuildTree() {
       const direction = e.key === 'ArrowDown' ? 1 : -1;
       highlightedSearchIndex = (highlightedSearchIndex + direction + searchResults.length) % searchResults.length;
       updateHighlightedSearchResult();
-      suggestionsBox.children[highlightedSearchIndex].scrollIntoView({ block: 'nearest' });
+      suggestionsBox.children[highlightedSearchIndex]?.scrollIntoView({ block: 'nearest' });
     } else if (e.key === 'Enter') {
-      const query = searchInput.value.trim();
-      if (typeof window.parseGoogleMapsRouteUrl === 'function') {
-        const coords = window.parseGoogleMapsRouteUrl(query);
-        if (coords && coords.length >= 2) {
-          e.preventDefault();
-          searchInput.value = '';
-          suggestionsBox.style.display = 'none';
-          window.loadRouteFromGoogleMapsUrl(query);
-          return;
-        }
-      }
-      if (searchResults.length) {
-        e.preventDefault();
-        selectPlace(searchResults[highlightedSearchIndex >= 0 ? highlightedSearchIndex : 0]);
-      }
+      e.preventDefault();
+      handleSearchSubmit();
     } else if (e.key === 'Escape') {
       suggestionsBox.style.display = 'none';
     }
@@ -1675,6 +1718,8 @@ function autoBuildTree() {
     const query = e.target.value.trim();
 
     if (query.length < 1) {
+      searchResults = [];
+      highlightedSearchIndex = -1;
       suggestionsBox.style.display = 'none';
       suggestionsBox.innerHTML = '';
       return;
@@ -1702,74 +1747,52 @@ function autoBuildTree() {
 
     searchTimeout = setTimeout(async () => {
       try {
-        const query = searchInput.value.trim();
-        if (query.length < 1) {
+        const currentQuery = searchInput.value.trim();
+        if (currentQuery.length < 1) {
+          searchResults = [];
           suggestionsBox.style.display = 'none';
           suggestionsBox.innerHTML = '';
           return;
         }
 
-        const url = `${photonUrl}/api/?q=${encodeURIComponent(query)}&limit=${photonSearchLimit}&bbox=${photonBbox}`;
         searchAbortController = new AbortController();
-        const searchAbortTimer = setTimeout(() => searchAbortController.abort(), 4000);
-        const response = await fetch(url, { signal: searchAbortController.signal });
+        const searchAbortTimer = setTimeout(() => searchAbortController.abort(), 3500);
+        const rawFeatures = await fetchGeocodeFeatures(currentQuery, searchAbortController.signal);
         clearTimeout(searchAbortTimer);
-        if (!response.ok) throw new Error(`Błąd wyszukiwania: ${response.status}`);
-        const data = await response.json();
+
         if (requestId !== searchRequestId) return;
+
         const uniqueResults = new Map();
-        (Array.isArray(data.features) ? data.features : []).forEach(feature => {
-          const properties = feature.properties || {};
-          const coordinates = feature.geometry && feature.geometry.coordinates;
-          if (!Array.isArray(coordinates) || coordinates.length < 2) return;
-          const addressParts = [
-            properties.street && `${properties.street}${properties.housenumber ? ` ${properties.housenumber}` : ''}`,
-            properties.city || properties.town || properties.village,
-            getPolishPlaceLabel(properties.state),
-            getPolishPlaceLabel(properties.country)
-          ].filter(Boolean);
-
-          const place = {
-            ...properties,
-            state: getPolishPlaceLabel(properties.state),
-            country: getPolishPlaceLabel(properties.country),
-            name: properties.name || '',
-            display_name: [properties.name, ...addressParts]
-              .filter((value, index, values) => value && values.indexOf(value) === index)
-              .join(', '),
-            lon: coordinates[0],
-            lat: coordinates[1],
-            address: {
-              road: properties.street,
-              house_number: properties.housenumber,
-              city: properties.city || properties.town || properties.village,
-              state: getPolishPlaceLabel(properties.state),
-              country: getPolishPlaceLabel(properties.country),
-              postcode: properties.postcode
-            }
-          };
-          const key = `${place.osm_type || ''}/${place.osm_id || ''}/${place.lat}/${place.lon}`;
-          uniqueResults.set(key, place);
+        (Array.isArray(rawFeatures) ? rawFeatures : []).forEach(feature => {
+          const place = parsePhotonFeature(feature);
+          if (place) {
+            const key = `${place.osm_type || ''}/${place.osm_id || ''}/${place.lat}/${place.lon}`;
+            uniqueResults.set(key, place);
+          }
         });
-        const exactQueryParts = query.toLocaleLowerCase('pl-PL').split(/\s+/).filter(Boolean);
-        const results = [...uniqueResults.values()].filter(place =>
-          String(place.countrycode || place.country_code || '').toLocaleUpperCase('pl-PL') === 'PL' &&
-          /pomorsk|pomeranian/.test(String(place.state || '').toLocaleLowerCase('pl-PL')) &&
-          exactQueryParts.every(part => place.display_name.toLocaleLowerCase('pl-PL').includes(part))
-        );
 
-        if (results.length === 0) {
+        const exactQueryParts = currentQuery.toLocaleLowerCase('pl-PL').split(/\s+/).filter(Boolean);
+        const filteredResults = [...uniqueResults.values()].filter(place => {
+          const isPl = !place.countrycode || String(place.countrycode || place.country_code || '').toLocaleUpperCase('pl-PL') === 'PL';
+          const isPom = !place.state || /pomorsk|pomeranian/i.test(String(place.state));
+          const hasQuery = exactQueryParts.every(part => place.display_name.toLocaleLowerCase('pl-PL').includes(part));
+          return isPl && isPom && hasQuery;
+        });
+
+        const finalResults = filteredResults.length > 0 ? filteredResults : [...uniqueResults.values()];
+
+        if (finalResults.length === 0) {
           searchResults = [];
           suggestionsBox.style.display = 'none';
           return;
         }
 
-        renderSearchResults(results);
+        renderSearchResults(finalResults);
       } catch (err) {
         if (err.name === 'AbortError') return;
         console.error('Błąd wyszukiwania miejsca:', err);
       }
-    }, 300);
+    }, 250);
   });
 
   document.addEventListener('click', (e) => {
@@ -1778,6 +1801,54 @@ function autoBuildTree() {
       searchCompleted = Boolean(searchInput.value.trim());
     }
   });
+
+  /* Obsługa wyszukiwania lub wyboru najlepszej opcji po wciśnięciu Enter lub lupki */
+  async function handleSearchSubmit() {
+    const query = searchInput.value.trim();
+    if (!query) {
+      searchInput.focus();
+      return;
+    }
+
+    if (typeof window.parseGoogleMapsRouteUrl === 'function') {
+      const coords = window.parseGoogleMapsRouteUrl(query);
+      if (coords && coords.length >= 2) {
+        searchInput.value = '';
+        suggestionsBox.style.display = 'none';
+        window.loadRouteFromGoogleMapsUrl(query);
+        return;
+      }
+    }
+
+    // 1. Jeśli podpowiedzi są już załadowane, wybierz zaznaczoną lub pierwszą najlepszą
+    if (searchResults && searchResults.length > 0) {
+      const chosenIndex = highlightedSearchIndex >= 0 ? highlightedSearchIndex : 0;
+      selectPlace(searchResults[chosenIndex]);
+      return;
+    }
+
+    // 2. Jeśli podpowiedzi jeszcze nie ma w buforze, pobierz bezpośrednio z API geocodera
+    try {
+      if (btnSearchSubmit) btnSearchSubmit.style.opacity = '0.6';
+      clearTimeout(searchTimeout);
+      const abortCtrl = new AbortController();
+      const timer = setTimeout(() => abortCtrl.abort(), 3500);
+      const rawFeatures = await fetchGeocodeFeatures(query, abortCtrl.signal);
+      clearTimeout(timer);
+
+      if (rawFeatures && rawFeatures.length > 0) {
+        const parsed = rawFeatures.map(parsePhotonFeature).filter(Boolean);
+        if (parsed.length > 0) {
+          selectPlace(parsed[0]);
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('Błąd bezpośredniego wyszukiwania:', err);
+    } finally {
+      if (btnSearchSubmit) btnSearchSubmit.style.opacity = '1';
+    }
+  }
 
   /* Przycisk po lewej: Planowanie trasy (deseczka z klipsem i listą) */
   const btnSearchOpenPlanner = document.getElementById('btn-search-open-planner');
@@ -1805,55 +1876,9 @@ function autoBuildTree() {
   /* Przycisk po prawej: Lupka wyszukiwania działająca zamiast Entera */
   const btnSearchSubmit = document.getElementById('btn-search-submit');
   if (btnSearchSubmit && searchInput) {
-    btnSearchSubmit.addEventListener('click', async () => {
-      const query = searchInput.value.trim();
-      if (!query) {
-        searchInput.focus();
-        return;
-      }
-
-      if (typeof window.parseGoogleMapsRouteUrl === 'function') {
-        const coords = window.parseGoogleMapsRouteUrl(query);
-        if (coords && coords.length >= 2) {
-          searchInput.value = '';
-          suggestionsBox.style.display = 'none';
-          window.loadRouteFromGoogleMapsUrl(query);
-          return;
-        }
-      }
-
-      if (searchResults && searchResults.length > 0) {
-        selectPlace(searchResults[highlightedSearchIndex >= 0 ? highlightedSearchIndex : 0]);
-        return;
-      }
-
-      try {
-        btnSearchSubmit.style.opacity = '0.6';
-        const url = `${photonUrl}/api/?q=${encodeURIComponent(query)}&limit=${photonSearchLimit}&bbox=${photonBbox}`;
-        const resp = await fetch(url);
-        if (resp.ok) {
-          const data = await resp.json();
-          const features = Array.isArray(data.features) ? data.features : [];
-          if (features.length > 0) {
-            const first = features[0];
-            const p = {
-              display_name: [first.properties?.name, first.properties?.street, first.properties?.city].filter(Boolean).join(', ') || query,
-              lat: first.geometry?.coordinates?.[1],
-              lon: first.geometry?.coordinates?.[0]
-            };
-            if (p.lat && p.lon) {
-              selectPlace(p);
-              return;
-            }
-          }
-        }
-      } catch (e) {
-        console.warn('Błąd wyszukiwania:', e);
-      } finally {
-        btnSearchSubmit.style.opacity = '1';
-      }
-
-      searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    btnSearchSubmit.addEventListener('click', (e) => {
+      e.preventDefault();
+      handleSearchSubmit();
     });
   }
 

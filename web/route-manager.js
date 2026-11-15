@@ -321,11 +321,20 @@
     const timeoutId = setTimeout(() => routeStartAbortController.abort(), 4000);
 
     try {
-      const response = await fetch(`${photonUrl}/api/?q=${encodeURIComponent(query)}&limit=${photonSearchLimit}&bbox=${photonBbox}`, {
-        signal: routeStartAbortController.signal
-      });
+      let response;
+      const primaryUrl = `${photonUrl}/api/?q=${encodeURIComponent(query)}&limit=${photonSearchLimit}&bbox=${photonBbox}`;
+      try {
+        response = await fetch(primaryUrl, { signal: routeStartAbortController.signal });
+      } catch (err) {
+        const localUrl = `${apiBaseUrl}/api/geocode/api/?q=${encodeURIComponent(query)}&limit=${photonSearchLimit}&bbox=${photonBbox}`;
+        if (primaryUrl !== localUrl) {
+          response = await fetch(localUrl, { signal: routeStartAbortController.signal });
+        } else {
+          throw err;
+        }
+      }
       clearTimeout(timeoutId);
-      if (!response.ok) throw new Error(`Photon returned ${response.status}`);
+      if (!response || !response.ok) throw new Error(`Photon returned ${response ? response.status : 'error'}`);
       const data = await response.json();
       if (requestId !== routeStartRequestId) return;
       const features = Array.isArray(data.features) ? data.features : [];

@@ -353,7 +353,7 @@ html {
   top: 8px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 105;
+  z-index: 3000;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -470,7 +470,7 @@ input:-webkit-autofill:active {
   overflow-y: auto;
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.6);
   display: none;
-  z-index: 25;
+  z-index: 3100;
 }
 
 .suggestion-item {
