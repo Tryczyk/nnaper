@@ -18,4 +18,9 @@
     header @pmtiles {
         Cache-Control "no-store, no-cache, must-revalidate"
     }
+
+    @nocache path *.js *.html *.css
+    header @nocache {
+        Cache-Control "no-cache, must-revalidate"
+    }
 }
