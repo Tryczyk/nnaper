@@ -57,6 +57,7 @@ func (s *Service) HandleGetEpoch(w http.ResponseWriter, r *http.Request) {
 			'g_y', e.g_y,
 			'g_z', e.g_z,
 			'satellites', COALESCE(
+				e.satellites,
 				(SELECT json_agg(json_build_object(
 					'prn', sat.prn,
 					'elevation', sat.elevation,
@@ -327,7 +328,8 @@ func (s *Service) HandlePlaybackDay(w http.ResponseWriter, r *http.Request) {
 				LEAST(COALESCE(e.speed_kmh, 0), 220.0) AS speed_kmh,
 				e.g_x,
 				e.g_y,
-				e.g_z
+				e.g_z,
+				e.satellites
 			FROM epochs e
 			WHERE %s
 			  AND %s
@@ -346,6 +348,7 @@ func (s *Service) HandlePlaybackDay(w http.ResponseWriter, r *http.Request) {
 				) AS satellites
 			FROM satellite s
 			JOIN day_epochs de ON de.epoch_id = s.epoch_id
+			WHERE de.satellites IS NULL
 			GROUP BY s.epoch_id
 		)
 		SELECT COALESCE(json_agg(
@@ -359,7 +362,7 @@ func (s *Service) HandlePlaybackDay(w http.ResponseWriter, r *http.Request) {
 				'g_x', de.g_x,
 				'g_y', de.g_y,
 				'g_z', de.g_z,
-				'satellites', COALESCE(es.satellites, '[]'::json)
+				'satellites', COALESCE(de.satellites, es.satellites, '[]'::json)
 			) ORDER BY de.timestamp ASC
 		)::text, '[]')
 		FROM day_epochs de

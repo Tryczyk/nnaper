@@ -88,6 +88,32 @@ func NewManager(pool *pgxpool.Pool, cfg *config.Config, tilesService *tiles.Serv
 }
 
 func (m *Manager) loadJobs() {
+	if m.pool != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		rows, err := m.pool.Query(ctx, `
+			SELECT job_id, user_id, COALESCE(profile_id::text, ''), file_name, file_size, status, progress, stage, error_msg, epochs_count, created_at, updated_at
+			FROM parser_jobs
+			ORDER BY updated_at DESC
+			LIMIT 100
+		`)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var j JobRecord
+				var errStr *string
+				var created, updated time.Time
+				var progress float64
+				if err := rows.Scan(&j.JobID, &j.UserID, &j.ProfileID, &j.Filename, &j.FileSize, &j.Status, &progress, &j.Stage, &errStr, &j.Epochs, &created, &updated); err == nil {
+					j.Percent = int(progress)
+					j.Error = errStr
+					j.CreatedAt = created.Format(time.RFC3339)
+					j.UpdatedAt = updated.Format(time.RFC3339)
+					m.jobs[j.JobID] = &j
+				}
+			}
+		}
+	}
 	if m.jobsFile == "" {
 		return
 	}
@@ -97,17 +123,50 @@ func (m *Manager) loadJobs() {
 	}
 	var loaded map[string]*JobRecord
 	if err := json.Unmarshal(data, &loaded); err == nil && loaded != nil {
-		m.jobs = loaded
+		for k, v := range loaded {
+			if _, exists := m.jobs[k]; !exists {
+				m.jobs[k] = v
+			}
+		}
 	}
 }
 
-func (m *Manager) saveJobsLocked() {
-	if m.jobsFile == "" {
+func (m *Manager) persistJobToDB(job *JobRecord) {
+	if m.pool == nil || job == nil || job.UserID == "" {
 		return
 	}
-	data, err := json.MarshalIndent(m.jobs, "", "  ")
-	if err == nil {
-		_ = os.WriteFile(m.jobsFile, data, 0o644)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	var profID *string
+	if job.ProfileID != "" {
+		profID = &job.ProfileID
+	}
+	_, _ = m.pool.Exec(ctx, `
+		INSERT INTO parser_jobs (job_id, user_id, profile_id, file_name, file_size, status, progress, stage, error_msg, epochs_count, updated_at)
+		VALUES ($1, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP)
+		ON CONFLICT (job_id) DO UPDATE SET
+			status = EXCLUDED.status,
+			progress = EXCLUDED.progress,
+			stage = EXCLUDED.stage,
+			error_msg = EXCLUDED.error_msg,
+			epochs_count = EXCLUDED.epochs_count,
+			updated_at = CURRENT_TIMESTAMP
+	`, job.JobID, job.UserID, profID, job.Filename, job.FileSize, job.Status, float64(job.Percent), job.Stage, job.Error, job.Epochs)
+}
+
+func (m *Manager) saveJobsLocked() {
+	if m.jobsFile != "" {
+		data, err := json.MarshalIndent(m.jobs, "", "  ")
+		if err == nil {
+			_ = os.WriteFile(m.jobsFile, data, 0o644)
+		}
+	}
+	if m.pool != nil {
+		for _, j := range m.jobs {
+			jCopy := *j
+			go m.persistJobToDB(&jCopy)
+		}
 	}
 }
 

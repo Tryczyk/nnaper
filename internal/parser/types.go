@@ -53,9 +53,9 @@ func MakeRouteKey(p1, p2 Point) RouteKey {
 
 // SatelliteData reprezentuje dane pojedynczego satelity
 type SatelliteData struct {
-	PRN       int16
-	Elevation int16
-	Azimuth   int16
+	PRN       int16 `json:"prn"`
+	Elevation int16 `json:"elevation"`
+	Azimuth   int16 `json:"azimuth"`
 }
 
 // NMEAFilterOptions definiuje parametry filtrowania danych NMEA / GPS

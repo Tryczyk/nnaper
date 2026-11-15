@@ -124,16 +124,35 @@ type adjEdge struct {
 }
 
 type Graph struct {
-	NodeCoords map[int64][2]float64 // nodeID -> [lon, lat]
-	Edges      []GraphEdge
-	Adj        map[int64][]adjEdge
+	NodeCoords  map[int64][2]float64 // nodeID -> [lon, lat]
+	Edges       []GraphEdge
+	Adj         map[int64][]adjEdge
+	spatialGrid map[int64][]int64
+}
+
+func spatialNodeGridKey(gx, gy int64) int64 {
+	return (gx << 32) | (gy & 0xffffffff)
+}
+
+func nodeToGridCell(lon, lat float64) (int64, int64) {
+	return int64(math.Floor(lon * 100.0)), int64(math.Floor(lat * 100.0))
 }
 
 func NewGraph() *Graph {
 	return &Graph{
-		NodeCoords: make(map[int64][2]float64),
-		Adj:        make(map[int64][]adjEdge),
+		NodeCoords:  make(map[int64][2]float64),
+		Adj:         make(map[int64][]adjEdge),
+		spatialGrid: make(map[int64][]int64),
 	}
+}
+
+func (g *Graph) addNodeToSpatialGrid(nid int64, coord [2]float64) {
+	if g.spatialGrid == nil {
+		g.spatialGrid = make(map[int64][]int64)
+	}
+	gx, gy := nodeToGridCell(coord[0], coord[1])
+	key := spatialNodeGridKey(gx, gy)
+	g.spatialGrid[key] = append(g.spatialGrid[key], nid)
 }
 
 func (g *Graph) AddEdge(e GraphEdge) {
@@ -142,8 +161,15 @@ func (g *Graph) AddEdge(e GraphEdge) {
 	}
 	idx := len(g.Edges)
 	g.Edges = append(g.Edges, e)
-	g.NodeCoords[e.SourceNode] = e.Coords[0]
-	g.NodeCoords[e.TargetNode] = e.Coords[len(e.Coords)-1]
+
+	if _, exists := g.NodeCoords[e.SourceNode]; !exists {
+		g.NodeCoords[e.SourceNode] = e.Coords[0]
+		g.addNodeToSpatialGrid(e.SourceNode, e.Coords[0])
+	}
+	if _, exists := g.NodeCoords[e.TargetNode]; !exists {
+		g.NodeCoords[e.TargetNode] = e.Coords[len(e.Coords)-1]
+		g.addNodeToSpatialGrid(e.TargetNode, e.Coords[len(e.Coords)-1])
+	}
 
 	g.Adj[e.SourceNode] = append(g.Adj[e.SourceNode], adjEdge{
 		toNode:  e.TargetNode,
@@ -377,9 +403,57 @@ func (pq *priorityQueue) Pop() interface{} {
 }
 
 func (g *Graph) FindNearestNode(lon, lat float64) (int64, bool) {
+	if len(g.NodeCoords) == 0 {
+		return 0, false
+	}
+
 	var bestID int64
 	bestDist := math.MaxFloat64
 	found := false
+
+	// 1. Szybkie wyszukiwanie przestrzenne po pierścieniach siatki (komórki ~1.1km)
+	if len(g.spatialGrid) > 0 {
+		centerGx, centerGy := nodeToGridCell(lon, lat)
+		maxRadius := int64(25) // do ok. 25 km
+		for r := int64(0); r <= maxRadius; r++ {
+			for dx := -r; dx <= r; dx++ {
+				for dy := -r; dy <= r; dy++ {
+					if r > 0 && dx > -r && dx < r && dy > -r && dy < r {
+						continue // komórka sprawdzona we wcześniejszym pierścieniu
+					}
+					cellKey := spatialNodeGridKey(centerGx+dx, centerGy+dy)
+					nodes := g.spatialGrid[cellKey]
+					for _, nid := range nodes {
+						if len(g.Adj[nid]) == 0 {
+							continue
+						}
+						c := g.NodeCoords[nid]
+						d := haversineM(lat, lon, c[1], c[0])
+						if d < bestDist {
+							bestDist = d
+							bestID = nid
+							found = true
+						}
+					}
+				}
+			}
+
+			// Jeśli znaleziono węzeł, a odległość do kolejnego pierścienia jest większa niż bestDist,
+			// żaden dalszy węzeł nie może być bliżej - kończymy natychmiast.
+			if found {
+				approxDistToNextRingM := float64(r) * 600.0
+				if bestDist < approxDistToNextRingM {
+					return bestID, true
+				}
+			}
+		}
+
+		if found {
+			return bestID, true
+		}
+	}
+
+	// 2. Bezpieczny fallback globalny (np. punkt daleko na morzu lub poza siatką dróg)
 	for nid, c := range g.NodeCoords {
 		if len(g.Adj[nid]) == 0 {
 			continue

@@ -89,7 +89,7 @@ func GetUserFromToken(ctx context.Context, pool *pgxpool.Pool, token string) (*U
 		SELECT u.user_id, u.username, u.email, u.avatar_url, u.created_at
 		FROM user_sessions s
 		JOIN users u ON s.user_id = u.user_id
-		WHERE s.token = $1
+		WHERE s.token = $1 AND (s.expires_at IS NULL OR s.expires_at > CURRENT_TIMESTAMP)
 	`, token).Scan(&u.UserID, &u.Username, &email, &avatar, &u.CreatedAt)
 
 	if err != nil {
@@ -263,7 +263,7 @@ func RegisterHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		}
 
 		token := GenerateToken()
-		_, err = pool.Exec(ctx, `INSERT INTO user_sessions (token, user_id) VALUES ($1, $2)`, token, userID)
+		_, err = pool.Exec(ctx, `INSERT INTO user_sessions (token, user_id, expires_at) VALUES ($1, $2, CURRENT_TIMESTAMP + INTERVAL '30 days')`, token, userID)
 		if err != nil {
 			http.Error(w, `{"detail":"Błąd tworzenia sesji"}`, http.StatusInternalServerError)
 			return
@@ -322,7 +322,7 @@ func LoginHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		}
 
 		token := GenerateToken()
-		_, err = pool.Exec(ctx, `INSERT INTO user_sessions (token, user_id) VALUES ($1, $2)`, token, u.UserID)
+		_, err = pool.Exec(ctx, `INSERT INTO user_sessions (token, user_id, expires_at) VALUES ($1, $2, CURRENT_TIMESTAMP + INTERVAL '30 days')`, token, u.UserID)
 		if err != nil {
 			http.Error(w, `{"detail":"Błąd zapisu sesji"}`, http.StatusInternalServerError)
 			return

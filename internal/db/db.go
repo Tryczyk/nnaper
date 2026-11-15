@@ -215,6 +215,25 @@ func (d *DB) EnsureSchema(ctx context.Context) error {
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_fog_parcels_road_geom ON fog_parcels USING GIST (road_geom);`,
 		`CREATE INDEX IF NOT EXISTS idx_fog_parcels_parcel_geom ON fog_parcels USING GIST (parcel_geom);`,
+		`ALTER TABLE epochs ADD COLUMN IF NOT EXISTS satellites JSONB;`,
+		`ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;`,
+		`CREATE INDEX IF NOT EXISTS idx_epochs_profile_ts ON epochs (profile_id, timestamp DESC);`,
+		`CREATE TABLE IF NOT EXISTS parser_jobs (
+			job_id       VARCHAR(64) PRIMARY KEY,
+			user_id      UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+			profile_id   UUID REFERENCES profiles(profile_id) ON DELETE SET NULL,
+			file_name    TEXT NOT NULL,
+			file_size    BIGINT NOT NULL DEFAULT 0,
+			status       VARCHAR(32) NOT NULL DEFAULT 'queued',
+			progress     DOUBLE PRECISION NOT NULL DEFAULT 0,
+			stage        VARCHAR(128) NOT NULL DEFAULT 'Oczekiwanie...',
+			error_msg    TEXT,
+			epochs_count INT NOT NULL DEFAULT 0,
+			created_at   TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at   TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_parser_jobs_user_id ON parser_jobs (user_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_parser_jobs_updated ON parser_jobs (updated_at DESC);`,
 	}
 
 	for _, q := range queries {
