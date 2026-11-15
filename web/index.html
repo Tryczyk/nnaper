@@ -846,15 +846,24 @@
                                       </div>
 
                                       <!-- Filtry telemetryczne NMEA / GPS (konfigurowalne z zalecanymi wartościami) -->
-                                      <details id="parser-filters-details" class="parser-filters-details">
+                                       <details id="parser-filters-details" class="parser-filters-details" open>
                                         <summary class="parser-filters-summary">
                                           <div style="display: flex; align-items: center; gap: 8px;">
                                             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
-                                            <strong>Zaawansowane filtry jakości NMEA / GPS</strong>
+                                             <strong>Wybór filtrów jakości parsowania NMEA / GPS</strong>
                                           </div>
                                           <span style="font-size: 11px; color: #38bdf8; font-weight: normal;">Dostosuj parametry odrzucania błędnych punktów</span>
                                         </summary>
                                         <div class="parser-filters-body">
+                                           <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px; padding: 8px 12px; background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 6px;">
+                                             <label for="flt-preset-select" style="font-weight: 600; color: #38bdf8; font-size: 12px; white-space: nowrap;">Szybki profil filtru:</label>
+                                             <select id="flt-preset-select" class="parser-filter-input" style="flex: 1; font-weight: 600;">
+                                               <option value="recommended" selected>Zalecany (Optymalny GPS, min 4 satelity, HDOP ≤ 5.0)</option>
+                                               <option value="none">Brak filtrów (Wszystkie punkty – surowe dane bez odrzucania)</option>
+                                               <option value="strict">Ścisły / Wysoka jakość (Tylko idealny GPS, min 6 satelitów, HDOP ≤ 2.5)</option>
+                                               <option value="custom">Własny (ręczna konfiguracja parametrów poniżej)</option>
+                                             </select>
+                                           </div>
                                           <div class="parser-filters-grid">
                                             <div class="parser-filter-field">
                                               <label for="flt-min-fix-quality">Minimalna jakość Fix (GGA Quality):</label>

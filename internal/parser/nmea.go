@@ -159,6 +159,8 @@ func (np *NMEAParser) ParseStream(r io.Reader, onBatch func(epochs []*Epoch) err
 	}
 
 	curBuilder := &rawEpochBuilder{}
+	var lastCompleteSatellites []SatelliteData
+	var gsvAccumulator []SatelliteData
 	var batch []*Epoch
 	batchSize := 2000
 
@@ -268,6 +270,10 @@ func (np *NMEAParser) ParseStream(r io.Reader, onBatch func(epochs []*Epoch) err
 
 		if speedKmh <= maxSpd {
 			pt := Point{Lon: lon, Lat: lat}
+			sats := curBuilder.satellites
+			if len(sats) == 0 && len(lastCompleteSatellites) > 0 {
+				sats = lastCompleteSatellites
+			}
 			ep := &Epoch{
 				ID:         NewUUID(),
 				ProfileID:  np.profileID,
@@ -276,7 +282,7 @@ func (np *NMEAParser) ParseStream(r io.Reader, onBatch func(epochs []*Epoch) err
 				Lon:        lon,
 				GeomWKT:    pt.WKT(),
 				SpeedKmh:   math.Round(speedKmh*100) / 100,
-				Satellites: curBuilder.satellites,
+				Satellites: sats,
 			}
 			if curBuilder.hasAlt {
 				alt := math.Round(curBuilder.ggaAlt*100) / 100
@@ -441,23 +447,27 @@ func (np *NMEAParser) ParseStream(r io.Reader, onBatch func(epochs []*Epoch) err
 			if len(parts) >= 4 {
 				totMsg, _ := strconv.Atoi(parts[1])
 				msgNum, _ := strconv.Atoi(parts[2])
-				if totMsg > 0 && msgNum == 1 && len(curBuilder.satellites) > 0 {
-					flushBuilder()
+				if msgNum == 1 {
+					gsvAccumulator = nil
 				}
-				// Próbkowanie satelitów co 5 cykli, aby nie zalewać bazy 15 milionami rekordów
-				if np.totalLines%5 == 0 && len(parts) >= 8 {
+				if len(parts) >= 8 {
 					for sIdx := 4; sIdx+3 < len(parts); sIdx += 4 {
 						prn, _ := strconv.Atoi(parts[sIdx])
 						elev, _ := strconv.Atoi(parts[sIdx+1])
 						azim, _ := strconv.Atoi(parts[sIdx+2])
 						if prn > 0 {
-							curBuilder.satellites = append(curBuilder.satellites, SatelliteData{
+							gsvAccumulator = append(gsvAccumulator, SatelliteData{
 								PRN:       int16(prn),
 								Elevation: int16(elev),
 								Azimuth:   int16(azim),
 							})
 						}
 					}
+				}
+				if totMsg > 0 && msgNum >= totMsg && len(gsvAccumulator) > 0 {
+					lastCompleteSatellites = make([]SatelliteData, len(gsvAccumulator))
+					copy(lastCompleteSatellites, gsvAccumulator)
+					curBuilder.satellites = lastCompleteSatellites
 				}
 			}
 		}

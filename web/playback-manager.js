@@ -342,6 +342,8 @@
     return `${sign}${num.toFixed(3)} G`;
   }
 
+  let lastKnownPlaybackSats = [];
+
   function updateSatellitesDisplay(point) {
     const m = getMap();
     if (!m) return;
@@ -351,7 +353,18 @@
     const ptsSrc = m.getSource('satellites-points-source');
     if (!linesSrc || !ptsSrc) return;
 
-    if (mode === 'none' || !point || !point.satellites || !point.satellites.length) {
+    if (mode === 'none' || !point) {
+      linesSrc.setData({ type: 'FeatureCollection', features: [] });
+      ptsSrc.setData({ type: 'FeatureCollection', features: [] });
+      return;
+    }
+
+    if (point.satellites && point.satellites.length > 0) {
+      lastKnownPlaybackSats = point.satellites;
+    }
+
+    const sats = lastKnownPlaybackSats;
+    if (!sats || !sats.length) {
       linesSrc.setData({ type: 'FeatureCollection', features: [] });
       ptsSrc.setData({ type: 'FeatureCollection', features: [] });
       return;
@@ -362,7 +375,7 @@
     const pLon = point.lon;
     const pLat = point.lat;
 
-    point.satellites.forEach(sat => {
+    sats.forEach(sat => {
       if (sat.azimuth === null || sat.azimuth === undefined) return;
       let sLon, sLat;
       if (mode === 'local') {
@@ -892,6 +905,7 @@
   async function loadTrackForDay(dayStr) {
     if (!dayStr) return;
     pausePlayback();
+    lastKnownPlaybackSats = [];
 
     if (activeFetchController) {
       activeFetchController.abort();
@@ -1202,6 +1216,7 @@
     isPlaybackActive = false;
 
     pausePlayback();
+    lastKnownPlaybackSats = [];
     if (loadingBanner) loadingBanner.style.display = 'none';
     document.body.classList.remove('playback-mode');
     updatePlaybackButtonState(false);

@@ -114,8 +114,19 @@ func (e *Engine) ParseFile(ctx context.Context, opts ParseOptions) (*ParseStats,
 	sampleStr := strings.ToLower(string(sample[:n]))
 	ext := strings.ToLower(filepath.Ext(opts.FilePath))
 
+	isNMEA := strings.Contains(sampleStr, "$gp") || strings.Contains(sampleStr, "$gn") ||
+		strings.Contains(sampleStr, "$gl") || strings.Contains(sampleStr, "$ga") ||
+		strings.Contains(sampleStr, "$gb") || strings.Contains(sampleStr, "$bd")
+
 	if ext == ".gpx" || strings.Contains(sampleStr, "<gpx") {
 		err = ParseGPXStream(file, opts.ProfileID, totalBytes, batchHandler, progressCallback)
+	} else if isNMEA || ext == ".nmea" {
+		filters := opts.Filters
+		if filters.MaxSpeedKmh == 0 && filters.MaxAltitude == 0 && filters.MinAltitude == 0 {
+			filters = DefaultNMEAFilterOptions()
+		}
+		nmeaParser := NewNMEAParserWithFilters(opts.ProfileID, filters, lastTs, lastLat, lastLon, totalBytes)
+		err = nmeaParser.ParseStream(file, batchHandler, progressCallback)
 	} else if ext == ".csv" || (strings.Contains(sampleStr, "lat") && (strings.Contains(sampleStr, ",") || strings.Contains(sampleStr, ";"))) {
 		err = ParseCSVStream(file, opts.ProfileID, totalBytes, batchHandler, progressCallback)
 	} else {
