@@ -1151,35 +1151,12 @@
         if (res.ok) {
           const planData = await res.json();
           if (Array.isArray(planData.coordinates) && planData.coordinates.length >= 2) {
-            // Jeśli serwer wygenerował punkty pośrednie (np. 10 punktów w generatorze automatycznym),
-            // synchronizujemy je z listą punktów planera i znacznikami na mapie, aby działało "Otwórz w Google"
-            if (shouldAutoGenerate && Array.isArray(planData.waypoints) && planData.waypoints.length >= 2) {
-              inlinePointColorSequence = 0;
-              inlineRouteState.points = planData.waypoints.slice(0, 10).map((wp, idx, arr) => {
-                const lon = parseFloat(Number(wp[0]).toFixed(6));
-                const lat = parseFloat(Number(wp[1]).toFixed(6));
-                const existing = (idx === 0 && points[0]) ? points[0] : null;
-                const label = existing && existing.display_name
-                  ? existing.display_name
-                  : `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
-                const ptObj = {
-                  type: idx === 0 ? 'start' : (idx === arr.length - 1 ? 'destination' : 'stop'),
-                  place: {
-                    lon,
-                    lat,
-                    name: label,
-                    display_name: label
-                  }
-                };
-                assignPointColor(ptObj);
-                return ptObj;
-              });
-              renderInlineRouteMarkers();
-              inlineRouteState.points.forEach((ptObj) => {
-                if (ptObj && ptObj.place) {
-                  reverseGeocodeInlinePoint(ptObj.place);
-                }
-              });
+            // W trybie automatycznym nie generujemy znacznikow posrednich na mapie - trasa jest przeznaczona bezposrednio do GPX
+            if (shouldAutoGenerate) {
+              if (inlineRouteState.points.length > 1) {
+                inlineRouteState.points = [inlineRouteState.points[0]];
+              }
+              clearInlineRouteMarkers();
             }
 
             const legs = (Array.isArray(planData.legs) && planData.legs.length)
@@ -1242,7 +1219,8 @@
               points: activePoints.map(p => ({ ...p.place, name: inlineRoutePlaceLabel(p.place) })),
               segmentRoutes,
               distance: planData.distance_m,
-              duration: planData.duration_s
+              duration: planData.duration_s,
+              isAuto: Boolean(shouldAutoGenerate)
             };
             updateGoogleMapsOutputIfVisible();
             return;
@@ -1279,16 +1257,10 @@
         });
       }
       effectivePoints.push({ ...p0 });
-      inlinePointColorSequence = 0;
-      inlineRouteState.points = effectivePoints.map((pl, idx, arr) => {
-        const ptObj = {
-          type: idx === 0 ? 'start' : (idx === arr.length - 1 ? 'destination' : 'stop'),
-          place: pl
-        };
-        assignPointColor(ptObj);
-        return ptObj;
-      });
-      renderInlineRouteMarkers();
+      if (inlineRouteState.points.length > 1) {
+        inlineRouteState.points = [inlineRouteState.points[0]];
+      }
+      clearInlineRouteMarkers();
     }
 
     const segmentRoutes = [];
@@ -1406,7 +1378,8 @@
       points: routePoints.map(p => ({ ...p.place, name: inlineRoutePlaceLabel(p.place) })),
       segmentRoutes: segmentRoutes,
       distance: distance,
-      duration: duration
+      duration: duration,
+      isAuto: Boolean(shouldAutoGenerate)
     };
     updateGoogleMapsOutputIfVisible();
   }
@@ -1501,6 +1474,10 @@
 
   if (btnRouteGoogleMaps) {
     btnRouteGoogleMaps.addEventListener('click', () => {
+      if (lastCalculatedPlannedRoute && lastCalculatedPlannedRoute.isAuto) {
+        routePlannerStats.innerText = 'Trasa automatyczna jest zoptymalizowana pod eksport GPX (1:1). Uzyj przycisku "Pobierz GPX (1:1)".';
+        return;
+      }
       const url = getGoogleMapsRouteUrl();
       if (!url) {
         routePlannerStats.innerText = 'Wybierz co najmniej 2 punkty trasy z prawidłowymi współrzędnymi.';
@@ -1748,8 +1725,7 @@
     <name>Zaplanowana trasa NNAPER (${data.distanceKm.toFixed(1)} km)</name>
     <time>${new Date().toISOString()}</time>
   </metadata>
-${wptsXml}
-  <trk>
+${wptsXml ? wptsXml + '\n' : ''}  <trk>
     <name>Trasa NNAPER (${data.distanceKm.toFixed(1)} km, ${data.durationMin} min)</name>
     <trkseg>
 ${trkptsXml}
@@ -1814,17 +1790,28 @@ ${trkptsXml}
   }
 
   function getPlannedRouteData() {
-    const validPoints = (inlineRouteState.points || []).filter(p => p && p.place);
-    if (validPoints.length < 2) return null;
-
     const points = getPlannedRouteDensePoints();
-    if (!points.length) return null;
+    if (!points || points.length < 2) return null;
 
-    const stops = validPoints.map(p => ({
-      lat: Number(p.place.lat),
-      lon: Number(p.place.lon),
-      name: inlineRoutePlaceLabel(p.place)
-    }));
+    const validPoints = (inlineRouteState.points || []).filter(p => p && p.place);
+    const isAuto = Boolean(lastCalculatedPlannedRoute && lastCalculatedPlannedRoute.isAuto);
+
+    let stops = [];
+    if (!isAuto && validPoints.length >= 2) {
+      stops = validPoints.map(p => ({
+        lat: Number(p.place.lat),
+        lon: Number(p.place.lon),
+        name: inlineRoutePlaceLabel(p.place)
+      }));
+    } else if (!isAuto && validPoints.length === 1) {
+      stops = [
+        {
+          lat: Number(validPoints[0].place.lat),
+          lon: Number(validPoints[0].place.lon),
+          name: inlineRoutePlaceLabel(validPoints[0].place)
+        }
+      ];
+    }
 
     const distKm = lastCalculatedPlannedRoute ? (lastCalculatedPlannedRoute.distance / 1000) : 0;
     const durMin = lastCalculatedPlannedRoute ? Math.round(lastCalculatedPlannedRoute.duration / 60) : 0;
@@ -1833,7 +1820,8 @@ ${trkptsXml}
       points,
       stops,
       distanceKm: distKm,
-      durationMin: durMin
+      durationMin: durMin,
+      isAuto
     };
   }
 

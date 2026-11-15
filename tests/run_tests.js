@@ -276,6 +276,8 @@ function computeEdgeCostJS(e, avoidPoints, avoidMode, prefs) {
     countAssert(routeContent.includes('rng-av-traversed'), 'Brak suwaka unikania przebytych dróg w route-manager.js');
     countAssert(routeContent.includes('max="7"'), 'Suwaki przeszkód powinny mieć max="7" (zakres 0-7 odpowiadający 7 obiektom)');
     countAssert(routeContent.includes('Wagi unikania przeszkód i dróg'), 'Brak sekcji wagi przeszkód i dróg');
+    countAssert(!routeContent.includes('inlineRouteState.points = planData.waypoints'), 'Trasa automatyczna nie powinna tworzyć znaczników waypoints na mapie');
+    countAssert(routeContent.includes('isAuto: Boolean(shouldAutoGenerate)'), 'Brak flagi isAuto dla tras wygenerowanych automatycznie');
   });
 
   await runSuite('Statystyki konta i 4 skrajne punkty geograficzne (N/S/E/W) w web/auth-manager.js', () => {
