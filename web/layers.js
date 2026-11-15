@@ -34,10 +34,42 @@ const MAP_STYLE = {
       tileSize: 256,
       maxzoom: 15,
       encoding: 'terrarium'
+    },
+    'world-satellite-source': {
+      type: 'raster',
+      tiles: [
+        'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+      ],
+      tileSize: 256,
+      maxzoom: 19,
+      attribution: 'Satelita: &copy; Esri, Maxar, Earthstar Geographics'
+    },
+    'geoportal-orto-source': {
+      type: 'raster',
+      tiles: [
+        'https://mapy.geoportal.gov.pl/wss/service/PZGIK/ORTO/WMTS/StandardResolution?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ORTOFOTOMAPA&STYLE=default&TILEMATRIXSET=EPSG:3857&TILEMATRIX=EPSG:3857:{z}&TILEROW={y}&TILECOL={x}&FORMAT=image/jpeg'
+      ],
+      tileSize: 256,
+      maxzoom: 20,
+      attribution: 'Ortofotomapa: &copy; Główny Urząd Geodezji i Kartografii (GUGiK)'
     }
   },
   layers: [
     { id: 'bg', type: 'background', paint: { 'background-color': '#090d16' } },
+    {
+      id: 'Podkłady/Satelita (Świat - ESRI)',
+      source: 'world-satellite-source',
+      type: 'raster',
+      layout: { visibility: 'none' },
+      paint: { 'raster-opacity': 1.0 }
+    },
+    {
+      id: 'Podkłady/Ortofotomapa (Polska - GUGiK)',
+      source: 'geoportal-orto-source',
+      type: 'raster',
+      layout: { visibility: 'none' },
+      paint: { 'raster-opacity': 1.0 }
+    },
     {
       id: 'Przyroda/Lasy',
       source: 'pomorskie-tiles',
@@ -366,11 +398,7 @@ window.MAP_STYLE = MAP_STYLE;
 
 (function () {
   // Zewnętrzne pliki SVG znaków drogowych w katalogu /assets/icons/signs/
-  const SVG_APPLE_TRAFFIC_SIGNALS = '/assets/icons/signs/traffic-signals.svg';
   const SVG_A11A_SPEED_BUMP = '/assets/icons/signs/speed-bump.svg';
-  const SVG_D6_CROSSING = '/assets/icons/signs/d6-crossing.svg';
-  const SVG_D51_SPEED_CAMERA = '/assets/icons/signs/d51-speed-camera.svg';
-  const SVG_D51A_AVERAGE_SPEED = '/assets/icons/signs/d51a-average-speed.svg';
 
   // Rasteryzacja SVG w wysokiej rozdzielczości (4x lub więcej przy ekranach HiDPI), aby znaki były ostre
   // przy każdym przybliżeniu. width/height to rozmiar logiczny ikony w pikselach CSS przy icon-size = 1.
@@ -462,10 +490,6 @@ window.MAP_STYLE = MAP_STYLE;
 
     // Rozmiary logiczne ikon (px CSS przy icon-size = 1) - jedna tabela dla rejestracji i fallbacku
     const ICON_DEFS = {
-      'icon-infra-traffic-signals': { svg: SVG_APPLE_TRAFFIC_SIGNALS, w: 28, h: 28 },
-      'icon-infra-crossing': { svg: SVG_D6_CROSSING, w: 28, h: 28 },
-      'icon-infra-speed-camera': { svg: SVG_D51_SPEED_CAMERA, w: 28, h: 28 },
-      'icon-infra-average-speed': { svg: SVG_D51A_AVERAGE_SPEED, w: 28, h: 28 },
       'icon-infra-speed-bump': { svg: SVG_A11A_SPEED_BUMP, w: 28, h: 28 }
     };
 

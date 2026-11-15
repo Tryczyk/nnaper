@@ -17,9 +17,13 @@ type Config struct {
 	DataDir         string
 	UploadDir       string
 	HistoryFile     string
-	MaxSpeedKMH     float64
-	MatchChunkSize  int
-	OSRMConcurrency int
+	MaxSpeedKMH         float64
+	MatchChunkSize      int
+	OSRMConcurrency     int
+	OSMAutoUpdate       bool
+	OSMPreferredHour    int
+	OSMRetryIntervalMin int
+	OSMUpdateBaseURL    string
 }
 
 func LoadConfig() *Config {
@@ -56,7 +60,12 @@ func LoadConfig() *Config {
 		}
 	}
 	if len(corsOrigins) == 0 {
-		corsOrigins = []string{"*"}
+		corsOrigins = []string{
+			"http://localhost:8000",
+			"http://localhost:8080",
+			"http://127.0.0.1:8000",
+			"http://127.0.0.1:8080",
+		}
 	}
 
 	dataDir := os.Getenv("DATA_DIR")
@@ -99,18 +108,45 @@ func LoadConfig() *Config {
 		osmPbfPath = filepath.Join("osm_data", osmFileName)
 	}
 
+	osmAutoUpdate := true
+	if auStr := os.Getenv("OSM_AUTO_UPDATE_ENABLED"); auStr != "" {
+		if val, err := strconv.ParseBool(auStr); err == nil {
+			osmAutoUpdate = val
+		}
+	}
+
+	osmPreferredHour := 3
+	if phStr := os.Getenv("OSM_PREFERRED_HOUR"); phStr != "" {
+		if val, err := strconv.Atoi(phStr); err == nil && val >= 0 && val <= 23 {
+			osmPreferredHour = val
+		}
+	}
+
+	osmRetryMin := 15
+	if rmStr := os.Getenv("OSM_RETRY_INTERVAL_MINUTES"); rmStr != "" {
+		if val, err := strconv.Atoi(rmStr); err == nil && val > 0 {
+			osmRetryMin = val
+		}
+	}
+
+	osmUpdateBaseURL := os.Getenv("OSM_UPDATE_BASE_URL")
+
 	return &Config{
-		Port:            port,
-		DBURL:           dbURL,
-		OSRMURL:         osrmURL,
-		OSMPBFPath:      osmPbfPath,
-		CORSOrigins:     corsOrigins,
-		DataDir:         dataDir,
-		UploadDir:       uploadDir,
-		HistoryFile:     historyFile,
-		MaxSpeedKMH:     maxSpeed,
-		MatchChunkSize:  chunkSize,
-		OSRMConcurrency: concurrency,
+		Port:                port,
+		DBURL:               dbURL,
+		OSRMURL:             osrmURL,
+		OSMPBFPath:          osmPbfPath,
+		CORSOrigins:         corsOrigins,
+		DataDir:             dataDir,
+		UploadDir:           uploadDir,
+		HistoryFile:         historyFile,
+		MaxSpeedKMH:         maxSpeed,
+		MatchChunkSize:      chunkSize,
+		OSRMConcurrency:     concurrency,
+		OSMAutoUpdate:       osmAutoUpdate,
+		OSMPreferredHour:    osmPreferredHour,
+		OSMRetryIntervalMin: osmRetryMin,
+		OSMUpdateBaseURL:    osmUpdateBaseURL,
 	}
 }
 

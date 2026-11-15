@@ -53,6 +53,7 @@ func main() {
 	exportService := export.NewService(database.Pool)
 	jobsManager := jobs.NewManager(database.Pool, cfg, tilesService)
 	osmService := osm.NewService(database.Pool)
+	osmUpdater := osm.NewUpdater(database.Pool, cfg)
 	featuresService := features.NewService(database.Pool)
 	routingService := routing.NewService(database.Pool, cfg.OSRMURL)
 
@@ -62,6 +63,9 @@ func main() {
 			log.Printf("[NNAPER OSM WARNING] Indeksowanie PBF: %v\n", err)
 		}
 	}()
+
+	// Uruchomienie harmonogramu automatycznych aktualizacji przyrostowych PBF (anacron / catch-up / nocne)
+	osmUpdater.StartScheduler(ctx)
 
 	// Konfiguracja routera Chi
 	r := chi.NewRouter()
@@ -83,6 +87,8 @@ func main() {
 
 	// Rejestracja endpointów API
 	r.Route("/api", func(api chi.Router) {
+		api.Use(auth.AuthMiddleware(database.Pool, false))
+
 		api.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.WriteHeader(http.StatusOK)
@@ -123,6 +129,10 @@ func main() {
 		api.Get("/infrastructure/{z}/{x}/{y}.pbf", osmService.HandleGetInfrastructureTile)
 		api.Get("/poi/{z}/{x}/{y}.pbf", osmService.HandleGetPOITile)
 		api.Get("/poi/details", osmService.HandleGetPOIDetails)
+
+		// Status i ręczne wywołanie aktualizacji przyrostowych .osm.pbf
+		api.Get("/osm/update/status", osmUpdater.HandleGetStatus)
+		api.Post("/osm/update/trigger", osmUpdater.HandleTriggerUpdate)
 
 		// Lokalny serwis geokodowania i wyszukiwania adresów (100% offline, kompatybilny z Photon)
 		api.Get("/geocode/api", osmService.HandleGeocodeSearch)

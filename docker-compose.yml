@@ -8,7 +8,7 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-nnaper}
       - POSTGRES_DB=${POSTGRES_DB:-nnaper_db}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${POSTGRES_PORT:-127.0.0.1:5432}:5432"
     volumes:
       - nnaper_pgdata:/var/lib/postgresql/data
       - ./init_db.sql:/docker-entrypoint-initdb.d/init_db.sql:ro
@@ -27,7 +27,7 @@ services:
     container_name: nnaper_api
     working_dir: /app
     volumes:
-      - .:/app
+      - ./osm_data:/app/osm_data
     ports:
       - "${API_PORT:-8000}:8000"
     environment:
@@ -35,9 +35,11 @@ services:
       - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
       - OSRM_URL=http://osrm:5000
       - OSM_PBF_PATH=/app/osm_data/${OSM_FILE_NAME:-pomorskie.osm.pbf}
+      - OSM_AUTO_UPDATE_ENABLED=${OSM_AUTO_UPDATE_ENABLED:-true}
+      - OSM_PREFERRED_HOUR=${OSM_PREFERRED_HOUR:-3}
+      - OSM_RETRY_INTERVAL_MINUTES=${OSM_RETRY_INTERVAL_MINUTES:-15}
+      - OSM_UPDATE_BASE_URL=${OSM_UPDATE_BASE_URL:-}
       - PORT=8000
-    command: >
-      sh -c "if [ -f /app/nnaper-server ]; then chmod +x /app/nnaper-server && exec /app/nnaper-server; else exec /usr/local/bin/nnaper-server; fi"
     depends_on:
       db:
         condition: service_healthy
@@ -126,7 +128,11 @@ services:
     ports:
       - "${TILES_PORT:-8080}:8080"
     volumes:
-      - .:/usr/share/caddy
+      - ./web:/usr/share/caddy/web
+      - ./assets:/usr/share/caddy/assets:ro
+      - ./osm_data:/usr/share/caddy/osm_data:ro
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./entrypoint-caddy.sh:/entrypoint-caddy.sh:ro
     environment:
       - API_PUBLIC_URL=${API_PUBLIC_URL:-http://localhost:8000}
       - TILES_PUBLIC_URL=${TILES_PUBLIC_URL:-http://localhost:8080}
@@ -135,7 +141,7 @@ services:
       - PHOTON_BBOX=${PHOTON_BBOX:-14.1,53.9,19.9,55.9}
       - PHOTON_SEARCH_LIMIT=${PHOTON_SEARCH_LIMIT:-50}
       - PMTILES_FILE=${PMTILES_FILE:-pomorskie.pmtiles}
-    command: ["sh", "/usr/share/caddy/entrypoint-caddy.sh"]
+    command: ["sh", "/entrypoint-caddy.sh"]
     restart: unless-stopped
 
   open-browser:

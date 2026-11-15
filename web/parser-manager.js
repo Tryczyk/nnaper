@@ -308,40 +308,136 @@
   const NMEA_FILTER_STORAGE_KEY = 'nnaper_nmea_filters_config';
   const FILTER_PRESETS = {
     recommended: {
+      enable_fix_quality: true,
       min_fix_quality: 1,
+      enable_satellites: true,
       min_satellites: 4,
+      enable_hdop: true,
       max_hdop: 5.0,
+      enable_pdop: true,
       max_pdop: 6.0,
+      enable_altitude: true,
       min_altitude: -50,
       max_altitude: 5000,
+      enable_max_speed: true,
       max_speed_kmh: 250,
       require_valid_rmc: true
     },
-    none: {
-      min_fix_quality: 0,
-      min_satellites: 0,
-      max_hdop: 99.0,
-      max_pdop: 99.0,
-      min_altitude: -1000,
-      max_altitude: 20000,
-      max_speed_kmh: 1500,
-      require_valid_rmc: false
+    bicycle: {
+      enable_fix_quality: true,
+      min_fix_quality: 1,
+      enable_satellites: true,
+      min_satellites: 4,
+      enable_hdop: true,
+      max_hdop: 4.0,
+      enable_pdop: true,
+      max_pdop: 5.0,
+      enable_altitude: true,
+      min_altitude: -50,
+      max_altitude: 3000,
+      enable_max_speed: true,
+      max_speed_kmh: 50,
+      require_valid_rmc: true
+    },
+    aviation: {
+      enable_fix_quality: true,
+      min_fix_quality: 1,
+      enable_satellites: true,
+      min_satellites: 5,
+      enable_hdop: true,
+      max_hdop: 3.5,
+      enable_pdop: true,
+      max_pdop: 5.0,
+      enable_altitude: true,
+      min_altitude: -100,
+      max_altitude: 15000,
+      enable_max_speed: true,
+      max_speed_kmh: 900,
+      require_valid_rmc: true
     },
     strict: {
+      enable_fix_quality: true,
       min_fix_quality: 1,
+      enable_satellites: true,
       min_satellites: 6,
+      enable_hdop: true,
       max_hdop: 2.5,
+      enable_pdop: true,
       max_pdop: 3.5,
+      enable_altitude: true,
       min_altitude: -20,
       max_altitude: 3500,
+      enable_max_speed: true,
       max_speed_kmh: 180,
       require_valid_rmc: true
+    },
+    none: {
+      enable_fix_quality: false,
+      min_fix_quality: 0,
+      enable_satellites: false,
+      min_satellites: 0,
+      enable_hdop: false,
+      max_hdop: 99.0,
+      enable_pdop: false,
+      max_pdop: 99.0,
+      enable_altitude: false,
+      min_altitude: -1000,
+      max_altitude: 20000,
+      enable_max_speed: false,
+      max_speed_kmh: 1500,
+      require_valid_rmc: false
     }
   };
   const DEFAULT_NMEA_FILTERS = FILTER_PRESETS.recommended;
 
+  function updateFilterCardStates() {
+    const mappings = [
+      { toggleId: 'flt-enable-fix-quality', cardId: 'card-flt-fix-quality', inputIds: ['flt-min-fix-quality'] },
+      { toggleId: 'flt-enable-satellites', cardId: 'card-flt-satellites', inputIds: ['flt-min-satellites'] },
+      { toggleId: 'flt-enable-hdop', cardId: 'card-flt-hdop', inputIds: ['flt-max-hdop'] },
+      { toggleId: 'flt-enable-pdop', cardId: 'card-flt-pdop', inputIds: ['flt-max-pdop'] },
+      { toggleId: 'flt-enable-max-speed', cardId: 'card-flt-speed', inputIds: ['flt-max-speed'] },
+      { toggleId: 'flt-enable-altitude', cardId: 'card-flt-altitude', inputIds: ['flt-min-altitude', 'flt-max-altitude'] },
+      { toggleId: 'flt-require-rmc-valid', cardId: 'card-flt-rmc', inputIds: [] }
+    ];
+
+    mappings.forEach(m => {
+      const toggle = document.getElementById(m.toggleId);
+      const card = document.getElementById(m.cardId);
+      const isEnabled = toggle ? toggle.checked : true;
+      if (card) {
+        if (isEnabled) {
+          card.classList.add('active');
+          card.classList.remove('disabled');
+        } else {
+          card.classList.remove('active');
+          card.classList.add('disabled');
+        }
+      }
+      m.inputIds.forEach(inpId => {
+        const inp = document.getElementById(inpId);
+        if (inp) {
+          inp.disabled = !isEnabled;
+        }
+      });
+    });
+  }
+
   function detectMatchingPreset(d) {
     for (const [key, p] of Object.entries(FILTER_PRESETS)) {
+      const matchEnables =
+        Boolean(d.enable_fix_quality) === Boolean(p.enable_fix_quality) &&
+        Boolean(d.enable_satellites) === Boolean(p.enable_satellites) &&
+        Boolean(d.enable_hdop) === Boolean(p.enable_hdop) &&
+        Boolean(d.enable_pdop) === Boolean(p.enable_pdop) &&
+        Boolean(d.enable_altitude) === Boolean(p.enable_altitude) &&
+        Boolean(d.enable_max_speed) === Boolean(p.enable_max_speed) &&
+        Boolean(d.require_valid_rmc) === Boolean(p.require_valid_rmc);
+
+      if (!matchEnables) continue;
+
+      if (key === 'none') return 'none';
+
       if (
         Number(d.min_fix_quality) === Number(p.min_fix_quality) &&
         Number(d.min_satellites) === Number(p.min_satellites) &&
@@ -349,8 +445,7 @@
         Math.abs(Number(d.max_pdop) - Number(p.max_pdop)) < 0.05 &&
         Number(d.min_altitude) === Number(p.min_altitude) &&
         Number(d.max_altitude) === Number(p.max_altitude) &&
-        Number(d.max_speed_kmh) === Number(p.max_speed_kmh) &&
-        Boolean(d.require_valid_rmc) === Boolean(p.require_valid_rmc)
+        Number(d.max_speed_kmh) === Number(p.max_speed_kmh)
       ) {
         return key;
       }
@@ -359,22 +454,34 @@
   }
 
   function getNmeaFilterValues() {
+    const enFix = document.getElementById('flt-enable-fix-quality');
     const fixQ = document.getElementById('flt-min-fix-quality');
+    const enSats = document.getElementById('flt-enable-satellites');
     const minSats = document.getElementById('flt-min-satellites');
+    const enHdop = document.getElementById('flt-enable-hdop');
     const maxHdop = document.getElementById('flt-max-hdop');
+    const enPdop = document.getElementById('flt-enable-pdop');
     const maxPdop = document.getElementById('flt-max-pdop');
+    const enAlt = document.getElementById('flt-enable-altitude');
     const minAlt = document.getElementById('flt-min-altitude');
     const maxAlt = document.getElementById('flt-max-altitude');
+    const enSpeed = document.getElementById('flt-enable-max-speed');
     const maxSpeed = document.getElementById('flt-max-speed');
     const reqRmc = document.getElementById('flt-require-rmc-valid');
 
     return {
+      enable_fix_quality: enFix ? enFix.checked : (DEFAULT_NMEA_FILTERS.enable_fix_quality ?? true),
       min_fix_quality: fixQ ? parseInt(fixQ.value, 10) : DEFAULT_NMEA_FILTERS.min_fix_quality,
+      enable_satellites: enSats ? enSats.checked : (DEFAULT_NMEA_FILTERS.enable_satellites ?? true),
       min_satellites: minSats ? parseInt(minSats.value, 10) : DEFAULT_NMEA_FILTERS.min_satellites,
+      enable_hdop: enHdop ? enHdop.checked : (DEFAULT_NMEA_FILTERS.enable_hdop ?? true),
       max_hdop: maxHdop ? parseFloat(maxHdop.value) : DEFAULT_NMEA_FILTERS.max_hdop,
+      enable_pdop: enPdop ? enPdop.checked : (DEFAULT_NMEA_FILTERS.enable_pdop ?? true),
       max_pdop: maxPdop ? parseFloat(maxPdop.value) : DEFAULT_NMEA_FILTERS.max_pdop,
+      enable_altitude: enAlt ? enAlt.checked : (DEFAULT_NMEA_FILTERS.enable_altitude ?? true),
       min_altitude: minAlt ? parseFloat(minAlt.value) : DEFAULT_NMEA_FILTERS.min_altitude,
       max_altitude: maxAlt ? parseFloat(maxAlt.value) : DEFAULT_NMEA_FILTERS.max_altitude,
+      enable_max_speed: enSpeed ? enSpeed.checked : (DEFAULT_NMEA_FILTERS.enable_max_speed ?? true),
       max_speed_kmh: maxSpeed ? parseFloat(maxSpeed.value) : DEFAULT_NMEA_FILTERS.max_speed_kmh,
       require_valid_rmc: reqRmc ? reqRmc.checked : DEFAULT_NMEA_FILTERS.require_valid_rmc
     };
@@ -383,12 +490,18 @@
   function getNmeaFilterQueryString() {
     const f = getNmeaFilterValues();
     const p = new URLSearchParams();
+    p.set('enable_fix_quality', f.enable_fix_quality ? 'true' : 'false');
     if (f.min_fix_quality !== undefined && !isNaN(f.min_fix_quality)) p.set('min_fix_quality', f.min_fix_quality);
+    p.set('enable_satellites', f.enable_satellites ? 'true' : 'false');
     if (f.min_satellites !== undefined && !isNaN(f.min_satellites)) p.set('min_satellites', f.min_satellites);
+    p.set('enable_hdop', f.enable_hdop ? 'true' : 'false');
     if (f.max_hdop !== undefined && !isNaN(f.max_hdop)) p.set('max_hdop', f.max_hdop);
+    p.set('enable_pdop', f.enable_pdop ? 'true' : 'false');
     if (f.max_pdop !== undefined && !isNaN(f.max_pdop)) p.set('max_pdop', f.max_pdop);
+    p.set('enable_altitude', f.enable_altitude ? 'true' : 'false');
     if (f.min_altitude !== undefined && !isNaN(f.min_altitude)) p.set('min_altitude', f.min_altitude);
     if (f.max_altitude !== undefined && !isNaN(f.max_altitude)) p.set('max_altitude', f.max_altitude);
+    p.set('enable_max_speed', f.enable_max_speed ? 'true' : 'false');
     if (f.max_speed_kmh !== undefined && !isNaN(f.max_speed_kmh)) p.set('max_speed_kmh', f.max_speed_kmh);
     p.set('require_valid_rmc', f.require_valid_rmc ? 'true' : 'false');
     const str = p.toString();
@@ -406,24 +519,38 @@
   }
 
   function applyNmeaFiltersToDom(d) {
+    const enFix = document.getElementById('flt-enable-fix-quality');
     const fixQ = document.getElementById('flt-min-fix-quality');
+    const enSats = document.getElementById('flt-enable-satellites');
     const minSats = document.getElementById('flt-min-satellites');
+    const enHdop = document.getElementById('flt-enable-hdop');
     const maxHdop = document.getElementById('flt-max-hdop');
+    const enPdop = document.getElementById('flt-enable-pdop');
     const maxPdop = document.getElementById('flt-max-pdop');
+    const enAlt = document.getElementById('flt-enable-altitude');
     const minAlt = document.getElementById('flt-min-altitude');
     const maxAlt = document.getElementById('flt-max-altitude');
+    const enSpeed = document.getElementById('flt-enable-max-speed');
     const maxSpeed = document.getElementById('flt-max-speed');
     const reqRmc = document.getElementById('flt-require-rmc-valid');
     const selPreset = document.getElementById('flt-preset-select');
 
+    if (enFix && d.enable_fix_quality !== undefined) enFix.checked = Boolean(d.enable_fix_quality);
     if (fixQ && d.min_fix_quality !== undefined) fixQ.value = String(d.min_fix_quality);
+    if (enSats && d.enable_satellites !== undefined) enSats.checked = Boolean(d.enable_satellites);
     if (minSats && d.min_satellites !== undefined) minSats.value = String(d.min_satellites);
+    if (enHdop && d.enable_hdop !== undefined) enHdop.checked = Boolean(d.enable_hdop);
     if (maxHdop && d.max_hdop !== undefined) maxHdop.value = String(d.max_hdop);
+    if (enPdop && d.enable_pdop !== undefined) enPdop.checked = Boolean(d.enable_pdop);
     if (maxPdop && d.max_pdop !== undefined) maxPdop.value = String(d.max_pdop);
+    if (enAlt && d.enable_altitude !== undefined) enAlt.checked = Boolean(d.enable_altitude);
     if (minAlt && d.min_altitude !== undefined) minAlt.value = String(d.min_altitude);
     if (maxAlt && d.max_altitude !== undefined) maxAlt.value = String(d.max_altitude);
+    if (enSpeed && d.enable_max_speed !== undefined) enSpeed.checked = Boolean(d.enable_max_speed);
     if (maxSpeed && d.max_speed_kmh !== undefined) maxSpeed.value = String(d.max_speed_kmh);
     if (reqRmc && d.require_valid_rmc !== undefined) reqRmc.checked = Boolean(d.require_valid_rmc);
+
+    updateFilterCardStates();
 
     if (selPreset) {
       selPreset.value = detectMatchingPreset(d);
@@ -1573,19 +1700,40 @@
       });
     }
 
+    const fltToggles = [
+      'flt-enable-fix-quality', 'flt-enable-satellites', 'flt-enable-hdop', 'flt-enable-pdop',
+      'flt-enable-max-speed', 'flt-enable-altitude', 'flt-require-rmc-valid'
+    ];
+    fltToggles.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.addEventListener('change', () => {
+          updateFilterCardStates();
+          if (selPreset) {
+            selPreset.value = detectMatchingPreset(getNmeaFilterValues());
+          }
+          saveNmeaFilters();
+        });
+      }
+    });
+
     const fltInputs = [
       'flt-min-fix-quality', 'flt-min-satellites', 'flt-max-hdop', 'flt-max-pdop',
-      'flt-min-altitude', 'flt-max-altitude', 'flt-max-speed', 'flt-require-rmc-valid'
+      'flt-min-altitude', 'flt-max-altitude', 'flt-max-speed'
     ];
     fltInputs.forEach(id => {
       const el = document.getElementById(id);
       if (el) {
         el.addEventListener('input', () => {
-          if (selPreset) selPreset.value = 'custom';
+          if (selPreset) {
+            selPreset.value = detectMatchingPreset(getNmeaFilterValues());
+          }
           saveNmeaFilters();
         });
         el.addEventListener('change', () => {
-          if (selPreset) selPreset.value = 'custom';
+          if (selPreset) {
+            selPreset.value = detectMatchingPreset(getNmeaFilterValues());
+          }
           saveNmeaFilters();
         });
       }

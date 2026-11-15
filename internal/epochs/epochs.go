@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -58,14 +59,14 @@ func (s *Service) HandleGetEpoch(w http.ResponseWriter, r *http.Request) {
 			'g_z', e.g_z,
 			'satellites', COALESCE(
 				e.satellites,
-				(SELECT json_agg(json_build_object(
+				(SELECT jsonb_agg(jsonb_build_object(
 					'prn', sat.prn,
 					'elevation', sat.elevation,
 					'azimuth', sat.azimuth
 				) ORDER BY sat.prn)
 				 FROM satellite sat
 				 WHERE sat.epoch_id = e.epoch_id),
-				'[]'::json
+				'[]'::jsonb
 			)
 		)::text
 		FROM epochs e
@@ -312,10 +313,67 @@ func (s *Service) HandlePlaybackDay(w http.ResponseWriter, r *http.Request) {
 		nextArg++
 	}
 
+	// 1. Tryb samych metadanych (liczba punktów, zakres dat) dla streamingu / paska buforowania
+	if r.URL.Query().Get("meta_only") == "true" {
+		metaQuery := fmt.Sprintf(`
+			SELECT 
+				count(*),
+				COALESCE(to_char(min(e.timestamp), 'YYYY-MM-DD"T"HH24:MI:SS"Z"'), ''),
+				COALESCE(to_char(max(e.timestamp), 'YYYY-MM-DD"T"HH24:MI:SS"Z"'), '')
+			FROM epochs e
+			WHERE %s AND %s
+		`, whereProfile, whereTime)
+		var totalCount int64
+		var minTime, maxTime string
+		if err := s.pool.QueryRow(ctx, metaQuery, args...).Scan(&totalCount, &minTime, &maxTime); err != nil {
+			http.Error(w, fmt.Sprintf(`{"detail":"Błąd pobierania metadanych: %v"}`, err), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"total":    totalCount,
+			"min_time": minTime,
+			"max_time": maxTime,
+		})
+		return
+	}
+
+	// 2. Obsługa stronicowania / buforowania strumieniowego (Streaming Buffer)
+	limit := 50000
+	if lStr := r.URL.Query().Get("limit"); lStr != "" {
+		if l, err := strconv.Atoi(lStr); err == nil && l > 0 {
+			if l > 50000 {
+				limit = 50000
+			} else {
+				limit = l
+			}
+		}
+	} else if day == "all" || day == "0" || day == "all-history" {
+		limit = 5000
+	}
+
+	offset := 0
+	if oStr := r.URL.Query().Get("offset"); oStr != "" {
+		if o, err := strconv.Atoi(oStr); err == nil && o >= 0 {
+			offset = o
+		}
+	}
+
+	afterTS := strings.TrimSpace(r.URL.Query().Get("after_ts"))
+	if afterTS != "" {
+		whereTime += fmt.Sprintf(" AND e.timestamp > $%d::timestamptz", nextArg)
+		args = append(args, afterTS)
+		nextArg++
+	}
+
 	activeGeom := "e.geom"
 	if snapped {
 		activeGeom = "COALESCE(e.geom_snapped, e.geom)"
 	}
+
+	limitArg := nextArg
+	offsetArg := nextArg + 1
+	args = append(args, limit, offset)
 
 	query := fmt.Sprintf(`
 		WITH day_epochs AS (
@@ -334,13 +392,14 @@ func (s *Service) HandlePlaybackDay(w http.ResponseWriter, r *http.Request) {
 			WHERE %s
 			  AND %s
 			ORDER BY %s
-			LIMIT 35000
+			LIMIT $%d
+			OFFSET $%d
 		),
 		epoch_sats AS (
 			SELECT
 				s.epoch_id,
-				json_agg(
-					json_build_object(
+				jsonb_agg(
+					jsonb_build_object(
 						'prn', s.prn,
 						'elevation', s.elevation,
 						'azimuth', s.azimuth
@@ -362,12 +421,12 @@ func (s *Service) HandlePlaybackDay(w http.ResponseWriter, r *http.Request) {
 				'g_x', de.g_x,
 				'g_y', de.g_y,
 				'g_z', de.g_z,
-				'satellites', COALESCE(de.satellites, es.satellites, '[]'::json)
+				'satellites', COALESCE(de.satellites, es.satellites, '[]'::jsonb)
 			) ORDER BY de.timestamp ASC
 		)::text, '[]')
 		FROM day_epochs de
 		LEFT JOIN epoch_sats es ON es.epoch_id = de.epoch_id;
-	`, activeGeom, activeGeom, whereProfile, whereTime, orderClauseCTE)
+	`, activeGeom, activeGeom, whereProfile, whereTime, orderClauseCTE, limitArg, offsetArg)
 
 	var resultJSON string
 	err := s.pool.QueryRow(ctx, query, args...).Scan(&resultJSON)
@@ -378,6 +437,9 @@ func (s *Service) HandlePlaybackDay(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Access-Control-Expose-Headers", "X-Limit, X-Offset")
+	w.Header().Set("X-Limit", strconv.Itoa(limit))
+	w.Header().Set("X-Offset", strconv.Itoa(offset))
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(resultJSON))
 }

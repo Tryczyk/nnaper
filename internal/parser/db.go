@@ -145,7 +145,6 @@ func (db *DBClient) SaveBatch(ctx context.Context, epochs []*Epoch) error {
 	}
 
 	rows := make([][]interface{}, len(epochs))
-	var satelliteRows [][]interface{}
 
 	for i, ep := range epochs {
 		if len(ep.ID) != 36 {
@@ -182,16 +181,6 @@ func (db *DBClient) SaveBatch(ctx context.Context, epochs []*Epoch) error {
 			snappedGeom,
 			lineGeom,
 			satJSON,
-		}
-
-		for _, sat := range ep.Satellites {
-			satelliteRows = append(satelliteRows, []interface{}{
-				NewUUID(),
-				ep.ID,
-				sat.PRN,
-				sat.Elevation,
-				sat.Azimuth,
-			})
 		}
 	}
 
@@ -265,37 +254,6 @@ func (db *DBClient) SaveBatch(ctx context.Context, epochs []*Epoch) error {
 	`)
 	if err != nil {
 		return fmt.Errorf("błąd INSERT INTO epochs: %w", err)
-	}
-
-	if len(satelliteRows) > 0 {
-		_, err = tx.Exec(ctx, `
-			CREATE TEMP TABLE staging_satellite (
-				satellite_id UUID,
-				epoch_id     UUID,
-				prn          SMALLINT,
-				elevation    SMALLINT,
-				azimuth      SMALLINT
-			) ON COMMIT DROP;
-		`)
-		if err == nil {
-			satCols := []string{"satellite_id", "epoch_id", "prn", "elevation", "azimuth"}
-			_, err = tx.CopyFrom(
-				ctx,
-				pgx.Identifier{"staging_satellite"},
-				satCols,
-				pgx.CopyFromRows(satelliteRows),
-			)
-			if err == nil {
-				_, _ = tx.Exec(ctx, `
-					INSERT INTO satellite (satellite_id, epoch_id, prn, elevation, azimuth)
-					SELECT DISTINCT ON (s.epoch_id, s.prn)
-						s.satellite_id, s.epoch_id, s.prn, s.elevation, s.azimuth
-					FROM staging_satellite s
-					JOIN epochs e ON s.epoch_id = e.epoch_id
-					ON CONFLICT DO NOTHING;
-				`)
-			}
-		}
 	}
 
 	return tx.Commit(ctx)

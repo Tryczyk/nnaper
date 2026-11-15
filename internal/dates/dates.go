@@ -46,39 +46,33 @@ func (s *Service) HandleDatesTree(w http.ResponseWriter, r *http.Request) {
 		profileID = ""
 	}
 
+	if userID == "" {
+		// Użytkownik niezalogowany - brak dostępu do tras
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_, _ = w.Write([]byte("{}"))
+		return
+	}
+
 	var whereProfile string
 	var args []interface{}
 	nextArg := 1
 
-	if userID != "" {
-		if profileID != "" {
-			var owns bool
-			_ = s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM profiles WHERE profile_id = $1::uuid AND user_id = $2::uuid)`, profileID, userID).Scan(&owns)
-			if !owns {
-				w.Header().Set("Content-Type", "application/json; charset=utf-8")
-				_, _ = w.Write([]byte("{}"))
-				return
-			}
-			whereProfile = fmt.Sprintf("e.profile_id = $%d::uuid", nextArg)
-			args = append(args, profileID)
-			nextArg++
-		} else {
-			// Wszystkie profile danego użytkownika oraz ewentualne ślady z profile_id IS NULL
-			whereProfile = fmt.Sprintf("(e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = $%d::uuid) OR e.profile_id IS NULL)", nextArg)
-			args = append(args, userID)
-			nextArg++
-		}
-	} else {
-		if profileID != "" {
-			whereProfile = fmt.Sprintf("e.profile_id = $%d::uuid", nextArg)
-			args = append(args, profileID)
-			nextArg++
-		} else {
-			// Uzytkownik niezalogowany bez wybranego profilu - brak dostepu do cudzych tras
+	if profileID != "" {
+		var owns bool
+		_ = s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM profiles WHERE profile_id = $1::uuid AND user_id = $2::uuid)`, profileID, userID).Scan(&owns)
+		if !owns {
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			_, _ = w.Write([]byte("{}"))
 			return
 		}
+		whereProfile = fmt.Sprintf("e.profile_id = $%d::uuid", nextArg)
+		args = append(args, profileID)
+		nextArg++
+	} else {
+		// Wszystkie profile danego użytkownika oraz ewentualne ślady z profile_id IS NULL
+		whereProfile = fmt.Sprintf("(e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = $%d::uuid) OR e.profile_id IS NULL)", nextArg)
+		args = append(args, userID)
+		nextArg++
 	}
 
 	query := fmt.Sprintf(`
@@ -160,31 +154,25 @@ func (s *Service) HandleTimeTree(w http.ResponseWriter, r *http.Request) {
 		profileID = ""
 	}
 
+	if userID == "" {
+		// Użytkownik niezalogowany - brak dostępu do tras
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_, _ = w.Write([]byte("{}"))
+		return
+	}
+
 	var whereProfile string
 	var args []interface{}
 	nextArg := 1
 
-	if userID != "" {
-		if profileID != "" {
-			whereProfile = fmt.Sprintf("e.profile_id = $%d::uuid AND e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = $%d::uuid)", nextArg, nextArg+1)
-			args = append(args, profileID, userID)
-			nextArg += 2
-		} else {
-			whereProfile = fmt.Sprintf("(e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = $%d::uuid) OR e.profile_id IS NULL)", nextArg)
-			args = append(args, userID)
-			nextArg++
-		}
+	if profileID != "" {
+		whereProfile = fmt.Sprintf("e.profile_id = $%d::uuid AND e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = $%d::uuid)", nextArg, nextArg+1)
+		args = append(args, profileID, userID)
+		nextArg += 2
 	} else {
-		if profileID != "" {
-			whereProfile = fmt.Sprintf("e.profile_id = $%d::uuid", nextArg)
-			args = append(args, profileID)
-			nextArg++
-		} else {
-			// Uzytkownik niezalogowany bez wybranego profilu - brak dostepu do cudzych tras
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			_, _ = w.Write([]byte("{}"))
-			return
-		}
+		whereProfile = fmt.Sprintf("(e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = $%d::uuid) OR e.profile_id IS NULL)", nextArg)
+		args = append(args, userID)
+		nextArg++
 	}
 
 	var whereTime string

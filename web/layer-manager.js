@@ -22,7 +22,36 @@
         version: 1,
         layers: {},
         categories: {
+          'Podkłady': false,
           'Przyroda': true,
+          'Woda': true,
+          'Drogi': true,
+          'Ruch alternatywny': true,
+          'Punkty POI': true,
+          'Infrastruktura drogowa': true,
+          'Granice i Etykiety': true
+        },
+        settings3D: { map3D: false, buildings3D: false }
+      }
+    },
+    {
+      preset_id: 'default_satellite_hybrid',
+      name: 'Satelita i Ortofotomapa',
+      is_default: true,
+      config: {
+        version: 1,
+        layers: {
+          'Przyroda/Lasy': { visibility: 'none' },
+          'Przyroda/Parki': { visibility: 'none' },
+          'Przyroda/Trawy': { visibility: 'none' },
+          'Przyroda/Wydmy i plaże': { visibility: 'none' },
+          'Przyroda/Tereny zabudowane': { visibility: 'none' },
+          'Podkłady/Satelita (Świat - ESRI)': { visibility: 'visible' },
+          'Podkłady/Ortofotomapa (Polska - GUGiK)': { visibility: 'visible' }
+        },
+        categories: {
+          'Podkłady': true,
+          'Przyroda': false,
           'Woda': true,
           'Drogi': true,
           'Ruch alternatywny': true,
@@ -650,6 +679,7 @@
             else if (raw.type === 'line') map.setPaintProperty(layerId, 'line-opacity', opVal);
             else if (raw.type === 'circle') map.setPaintProperty(layerId, 'circle-opacity', opVal);
             else if (raw.type === 'fill-extrusion') map.setPaintProperty(layerId, 'fill-extrusion-opacity', opVal);
+            else if (raw.type === 'raster') map.setPaintProperty(layerId, 'raster-opacity', opVal);
           } catch (e) { }
         }
       }
@@ -930,11 +960,16 @@
     });
 
     const sortedGroupNames = Object.keys(groups).sort((a, b) => {
-      const aIsGps = a.trim() === 'GPS';
-      const bIsGps = b.trim() === 'GPS';
-      if (aIsGps && !bIsGps) return -1;
-      if (!aIsGps && bIsGps) return 1;
-      return 0;
+      const getPriority = (name) => {
+        const n = name.trim();
+        if (n === 'GPS') return 1;
+        if (n === 'Podkłady') return 2;
+        return 10;
+      };
+      const pA = getPriority(a);
+      const pB = getPriority(b);
+      if (pA !== pB) return pA - pB;
+      return a.localeCompare(b, 'pl');
     });
 
     sortedGroupNames.forEach(groupName => {
@@ -953,7 +988,7 @@
       pCheckbox.type = 'checkbox';
 
       // Ustalenie stanu kategorii
-      let initialCatChecked = groupName.trim() === 'GPS' ? false : true;
+      let initialCatChecked = (groupName.trim() === 'GPS' || groupName.trim() === 'Podkłady') ? false : true;
       if (cfg.categories && cfg.categories[groupName] !== undefined) {
         initialCatChecked = !!cfg.categories[groupName];
       }
@@ -1023,8 +1058,48 @@
           }
         });
 
+        const lodHolder = document.createElement('div');
+        lodHolder.style.cssText = 'padding: 6px 0 2px 0; display: flex; flex-direction: column; gap: 4px;';
+
+        const lodLabel = document.createElement('label');
+        lodLabel.htmlFor = 'select-track-lod';
+        lodLabel.style.cssText = 'font-size: 10.5px; color: #94a3b8; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;';
+        lodLabel.innerText = 'Precyzja śladu (LOD):';
+
+        const selectLod = document.createElement('select');
+        selectLod.id = 'select-track-lod';
+        selectLod.className = 'sidebar-select track-lod-select';
+        selectLod.style.cssText = 'cursor: pointer; font-size: 11.5px; padding: 5px 8px; background: #1e293b; color: #f8fafc; border: 1px solid #334155; border-radius: 4px; outline: none; width: 100%; box-sizing: border-box;';
+
+        const optAuto = document.createElement('option');
+        optAuto.value = 'auto';
+        optAuto.innerText = 'Inteligentny LOD (Płynny rok, atomy przy zbliżeniu)';
+
+        const optAtomic = document.createElement('option');
+        optAtomic.value = 'atomic';
+        optAtomic.innerText = 'Wymuś zawsze atomowo (Wszystkie punkty w oddaleniu)';
+
+        selectLod.appendChild(optAuto);
+        selectLod.appendChild(optAtomic);
+
+        const isAtomicForced = (localStorage.getItem('nnaper_track_atomic_forced') === 'true');
+        selectLod.value = isAtomicForced ? 'atomic' : 'auto';
+
+        selectLod.addEventListener('click', (e) => e.stopPropagation());
+        selectLod.addEventListener('change', (e) => {
+          e.stopPropagation();
+          const forced = (e.target.value === 'atomic');
+          if (typeof window.setTrackAtomicForced === 'function') {
+            window.setTrackAtomicForced(forced);
+          }
+        });
+
+        lodHolder.appendChild(lodLabel);
+        lodHolder.appendChild(selectLod);
+
         modeHolder.appendChild(modeLabel);
         modeHolder.appendChild(selectMode);
+        modeHolder.appendChild(lodHolder);
         childrenBox.appendChild(modeHolder);
       }
 
@@ -1412,6 +1487,7 @@
       else if (lType === 'circle') studioMap.setPaintProperty(currentStudioLayerId, 'circle-opacity', op);
       else if (lType === 'fill-extrusion') studioMap.setPaintProperty(currentStudioLayerId, 'fill-extrusion-opacity', op);
       else if (lType === 'symbol') studioMap.setPaintProperty(currentStudioLayerId, 'text-opacity', op);
+      else if (lType === 'raster') studioMap.setPaintProperty(currentStudioLayerId, 'raster-opacity', op);
     } catch (e) { }
 
     updateLayerProperty(currentStudioLayerId, { opacity: op });
@@ -1568,6 +1644,7 @@
       else if (lType === 'circle') badgeEl.innerText = 'Punkt (Circle)';
       else if (lType === 'fill-extrusion') badgeEl.innerText = 'Bryła 3D (Extrusion)';
       else if (lType === 'symbol') badgeEl.innerText = 'Etykieta / Tekst (Symbol)';
+      else if (lType === 'raster') badgeEl.innerText = 'Podkład rastrowy / Satelita';
       else badgeEl.innerText = `Typ: ${lType}`;
     }
 
@@ -1588,8 +1665,8 @@
     const grpCircle = document.getElementById('group-circle');
     const grpSymbol = document.getElementById('group-symbol');
 
-    if (grpMainColor) grpMainColor.style.display = 'block';
-    if (grpOpacity) grpOpacity.style.display = (lType === 'fill' || lType === 'line' || lType === 'fill-extrusion' || lType === 'circle') ? 'block' : 'none';
+    if (grpMainColor) grpMainColor.style.display = (lType === 'raster') ? 'none' : 'block';
+    if (grpOpacity) grpOpacity.style.display = (lType === 'fill' || lType === 'line' || lType === 'fill-extrusion' || lType === 'circle' || lType === 'raster') ? 'block' : 'none';
     if (grpLineWidth) grpLineWidth.style.display = (lType === 'line') ? 'block' : 'none';
     if (grpLineDash) grpLineDash.style.display = (lType === 'line') ? 'block' : 'none';
     if (grpOutline) grpOutline.style.display = (lType === 'fill' || lType === 'line') ? 'block' : 'none';
@@ -1777,14 +1854,23 @@
     setPipetteMode(true);
   }
 
-  function closeStyleStudio() {
+  function closeStyleStudio(andCollapse = false) {
     const tree = document.getElementById('tree-container');
     const panel = document.getElementById('style-studio-panel');
+    const menuEl = document.getElementById('menu');
     if (panel) panel.style.display = 'none';
     if (tree) tree.style.display = 'block';
     const overlays = document.getElementById('group-view-overlays');
     if (overlays) overlays.style.display = '';
     setPipetteMode(false);
+    if (andCollapse && menuEl) {
+      menuEl.classList.add('collapsed');
+      const btnToggleMenu = document.getElementById('btn-toggle-menu');
+      if (btnToggleMenu) {
+        btnToggleMenu.setAttribute('title', 'Rozwiń wybierak warstw');
+        btnToggleMenu.setAttribute('aria-label', 'Rozwiń wybierak warstw');
+      }
+    }
   }
 
   function resetCurrentLayer() {
@@ -1890,11 +1976,42 @@
     if (!window._styleStudioLauncherAttached) {
       window._styleStudioLauncherAttached = true;
       document.addEventListener('click', (e) => {
-        const btn = e.target.closest('#btn-open-style-studio');
-        if (btn) {
+        const btnOpen = e.target.closest('#btn-open-style-studio');
+        if (btnOpen) {
           e.preventDefault();
           e.stopPropagation();
           openStyleStudio();
+          return;
+        }
+
+        const btnBack = e.target.closest('#btn-close-style-studio');
+        if (btnBack) {
+          e.preventDefault();
+          e.stopPropagation();
+          closeStyleStudio(false);
+          return;
+        }
+
+        const btnDone = e.target.closest('#btn-studio-done');
+        if (btnDone) {
+          e.preventDefault();
+          e.stopPropagation();
+          closeStyleStudio(true);
+          return;
+        }
+
+        const btnExit = e.target.closest('#btn-exit-style-studio');
+        if (btnExit) {
+          e.preventDefault();
+          e.stopPropagation();
+          closeStyleStudio(true);
+          return;
+        }
+      });
+
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && isStyleStudioOpen()) {
+          closeStyleStudio(true);
         }
       });
     }

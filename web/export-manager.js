@@ -325,6 +325,9 @@
   // -------------------------------------------------------------
   function haversineDistanceKm(lat1, lon1, lat2, lon2) {
     if (lat1 === lat2 && lon1 === lon2) return 0;
+    if (typeof window.haversineDistanceKm === 'function') {
+      return window.haversineDistanceKm(lat1, lon1, lat2, lon2);
+    }
     const R = 6371.0;
     const dLat = (lat2 - lat1) * Math.PI / 180;
     const dLon = (lon2 - lon1) * Math.PI / 180;
@@ -3162,29 +3165,7 @@ ${placemarks}
       }
       if (res.ok) {
         const raw = await res.json();
-        const clean = {};
-        if (raw && typeof raw === 'object') {
-          Object.keys(raw).forEach(y => {
-            if (/^\d{4}$/.test(y) && raw[y] && typeof raw[y] === 'object') {
-              clean[y] = {};
-              Object.keys(raw[y]).forEach(m => {
-                const mPadded = String(m).padStart(2, '0');
-                if (/^\d{2}$/.test(mPadded) && Array.isArray(raw[y][m])) {
-                  const daysClean = raw[y][m]
-                    .map(d => String(d).padStart(2, '0'))
-                    .filter(d => /^\d{2}$/.test(d));
-                  if (daysClean.length > 0) {
-                    clean[y][mPadded] = Array.from(new Set(daysClean)).sort().reverse();
-                  }
-                }
-              });
-              if (Object.keys(clean[y]).length === 0) {
-                delete clean[y];
-              }
-            }
-          });
-        }
-        cachedDatesTree = clean;
+        cachedDatesTree = (typeof window.sanitizeDatesTree === 'function') ? window.sanitizeDatesTree(raw) : (raw || {});
       }
     } catch (e) {
       console.error('Blad pobierania drzewa dat dla eksportu:', e);

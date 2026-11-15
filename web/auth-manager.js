@@ -473,10 +473,10 @@
 
       let lastStatsData = null;
 
-      const loadStats = async () => {
+      const loadStats = async (force = false) => {
         try {
           const profId = (typeof window.getActiveProfileId === 'function') ? window.getActiveProfileId() : '';
-          const url = `${getApiBaseUrl()}/api/stats?token=${encodeURIComponent(token)}${profId ? '&profile_id=' + encodeURIComponent(profId) : ''}`;
+          const url = `${getApiBaseUrl()}/api/stats?token=${encodeURIComponent(token)}${profId ? '&profile_id=' + encodeURIComponent(profId) : ''}${force ? '&force=true' : ''}`;
           const res = await fetch(url);
           if (!res.ok) return;
           const st = await res.json();
@@ -533,7 +533,7 @@
       }
 
       const refreshBtn = statsBox.querySelector('#btn-refresh-account-stats');
-      if (refreshBtn) refreshBtn.onclick = loadStats;
+      if (refreshBtn) refreshBtn.onclick = () => loadStats(true);
 
       container.appendChild(card);
     }
@@ -1159,7 +1159,7 @@
 
   window.addEventListener('nnaper_epochs_deleted', () => {
     if (typeof window.refreshAccountStats === 'function') {
-      window.refreshAccountStats();
+      window.refreshAccountStats(true);
     }
   });
 

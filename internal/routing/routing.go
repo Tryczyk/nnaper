@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/sync/singleflight"
 	"nnaper/internal/auth"
 )
 
@@ -24,6 +25,7 @@ type Service struct {
 	cachedAt       time.Time
 	traversedMu    sync.RWMutex
 	traversedCache map[string]traversedGridEntry
+	sfGroup        singleflight.Group
 }
 
 type traversedGridEntry struct {
@@ -113,6 +115,7 @@ type GraphEdge struct {
 	TrafficSignals int
 	IsIntersection bool
 	Traversed      bool
+	InitiallyTraversed bool
 	UsedCount      int
 	Coords         [][2]float64 // [lon, lat]
 }
@@ -158,6 +161,9 @@ func (g *Graph) addNodeToSpatialGrid(nid int64, coord [2]float64) {
 func (g *Graph) AddEdge(e GraphEdge) {
 	if len(e.Coords) < 2 {
 		return
+	}
+	if !e.InitiallyTraversed && e.Traversed {
+		e.InitiallyTraversed = true
 	}
 	idx := len(g.Edges)
 	g.Edges = append(g.Edges, e)
@@ -252,13 +258,16 @@ func highwayRank(hw string) int {
 // unikania przebytych już dróg oraz zakazu powtarzania tej samej drogi.
 // Zwraca (cost, excluded, hitAvoidPoint).
 func ComputeEdgeCost(e GraphEdge, avoidPoints []AvoidPoint, avoidMode string, prefs RoutePreferences) (float64, bool, bool) {
+	// Krawędź uznajemy za przebytą, jeśli pochodzi z bazy GPS (Traversed) LUB została już wcześniej włączona do wyznaczanej trasy (UsedCount > 0)
+	isTraversed := e.Traversed || e.UsedCount > 0
+
 	cost := math.Max(e.DurationS, 0.5)
 	if prefs.AutoExploratory {
 		cost = math.Max(e.LengthM/12.5, 0.5)
 		rank := highwayRank(e.Highway)
 		if prefs.AvoidHighways && isHighwayClass(e.Highway) {
 			cost = cost*5000.0 + 2500000.0
-		} else if !e.Traversed {
+		} else if !isTraversed {
 			// Nowa nieprzejechana droga - premiujemy scisle wg hierarchii klas (od najwyzszej klasy do najgorszej)
 			switch rank {
 			case 5:
@@ -345,21 +354,21 @@ func ComputeEdgeCost(e GraphEdge, avoidPoints []AvoidPoint, avoidMode string, pr
 		}
 	}
 
-	// 3. Unikanie przebytych już dróg (kara za wjazd na drogę ze śladem GPS)
-	if (prefs.AvoidTraversed || prefs.AversionTraversed > 0) && e.Traversed {
+	// 3. Unikanie przebytych już dróg (kara za wjazd na drogę ze śladem GPS LUB już użytą w bieżącej trasie)
+	if (prefs.AvoidTraversed || prefs.AversionTraversed > 0) && isTraversed {
 		if prefs.AversionTraversed > 0 {
 			cost += (cost*30.0 + 2000.0) * prefs.AversionTraversed
 		} else {
 			cost = cost*280.0 + 18000.0
 		}
-	} else if prefs.AutoExploratory && !e.Traversed {
+	} else if prefs.AutoExploratory && !isTraversed {
 		// W trybie auto-eksploracji premiujemy nowe nieodwiedzone ulice
 		cost *= 0.45
 	}
 
 	// 4. Unikanie jechania 2 razy tą samą drogą w ramach wyznaczanej trasy
 	if e.UsedCount > 0 {
-		cost = cost*1000.0*float64(e.UsedCount) + 100000.0*float64(e.UsedCount)
+		cost += (cost*15.0 + 800.0) * float64(e.UsedCount)
 	}
 
 	return cost, false, hitAvoid
@@ -368,6 +377,7 @@ func ComputeEdgeCost(e GraphEdge, avoidPoints []AvoidPoint, avoidMode string, pr
 func (g *Graph) ResetUsedEdges() {
 	for i := range g.Edges {
 		g.Edges[i].UsedCount = 0
+		g.Edges[i].Traversed = g.Edges[i].InitiallyTraversed
 	}
 }
 
@@ -403,8 +413,15 @@ func (pq *priorityQueue) Pop() interface{} {
 }
 
 func (g *Graph) FindNearestNode(lon, lat float64) (int64, bool) {
+	return g.FindNearestNodeWithMinDegree(lon, lat, 1)
+}
+
+func (g *Graph) FindNearestNodeWithMinDegree(lon, lat float64, minDegree int) (int64, bool) {
 	if len(g.NodeCoords) == 0 {
 		return 0, false
+	}
+	if minDegree < 1 {
+		minDegree = 1
 	}
 
 	var bestID int64
@@ -424,7 +441,7 @@ func (g *Graph) FindNearestNode(lon, lat float64) (int64, bool) {
 					cellKey := spatialNodeGridKey(centerGx+dx, centerGy+dy)
 					nodes := g.spatialGrid[cellKey]
 					for _, nid := range nodes {
-						if len(g.Adj[nid]) == 0 {
+						if len(g.Adj[nid]) < minDegree {
 							continue
 						}
 						c := g.NodeCoords[nid]
@@ -455,7 +472,7 @@ func (g *Graph) FindNearestNode(lon, lat float64) (int64, bool) {
 
 	// 2. Bezpieczny fallback globalny (np. punkt daleko na morzu lub poza siatką dróg)
 	for nid, c := range g.NodeCoords {
-		if len(g.Adj[nid]) == 0 {
+		if len(g.Adj[nid]) < minDegree {
 			continue
 		}
 		d := haversineM(lat, lon, c[1], c[0])
@@ -544,8 +561,13 @@ func (g *Graph) findShortestPathSteps(
 		prevSt, hasPrev := cameFrom[u]
 
 		for _, adj := range g.Adj[u] {
-			// Zakaz natychmiastowego zawracania tą samą krawędzią, jeśli węzeł nie jest ślepą uliczką
-			if hasPrev && adj.edgeIdx == prevSt.edgeIdx && len(g.Adj[u]) > 1 {
+			// Zakaz natychmiastowego zawracania tą samą krawędzią
+			if hasPrev && adj.edgeIdx == prevSt.edgeIdx {
+				continue
+			}
+
+			// Zakaz wjeżdżania w ślepe zaułki (węzły o stopniu <= 1), jeśli nie są punktem docelowym
+			if adj.toNode != endNode && len(g.Adj[adj.toNode]) <= 1 {
 				continue
 			}
 
@@ -614,15 +636,18 @@ func (g *Graph) materializeSteps(steps []prevStep, markUsed bool) (coords [][2]f
 	for _, st := range steps {
 		if markUsed {
 			g.Edges[st.edgeIdx].UsedCount++
+			g.Edges[st.edgeIdx].Traversed = true
 			e := g.Edges[st.edgeIdx]
 			for _, adj := range g.Adj[e.SourceNode] {
 				if adj.toNode == e.TargetNode && adj.edgeIdx != st.edgeIdx {
 					g.Edges[adj.edgeIdx].UsedCount++
+					g.Edges[adj.edgeIdx].Traversed = true
 				}
 			}
 			for _, adj := range g.Adj[e.TargetNode] {
 				if adj.toNode == e.SourceNode && adj.edgeIdx != st.edgeIdx {
 					g.Edges[adj.edgeIdx].UsedCount++
+					g.Edges[adj.edgeIdx].Traversed = true
 				}
 			}
 		}
@@ -631,7 +656,7 @@ func (g *Graph) materializeSteps(steps []prevStep, markUsed bool) (coords [][2]f
 		distM += e.LengthM
 		durS += e.DurationS
 		totalLenM += e.LengthM
-		if e.Traversed {
+		if e.InitiallyTraversed {
 			obs.TraversedEdges++
 		} else {
 			newLenM += e.LengthM
@@ -898,8 +923,8 @@ func (g *Graph) extractOptimal10Waypoints(steps []prevStep, pathNodes []int64, s
 func (g *Graph) buildCircularLoopRoute(req RoutePlanRequest, startNode int64, startCoord [2]float64, targetKM float64) (RoutePlanResponse, bool) {
 	cosLat := math.Max(0.2, math.Cos(startCoord[1]*math.Pi/180.0))
 
-	// Rzeczywisty dystans drogowy 6-wierzchołkowej pętli to około 14.6 * R => R = targetKM * 1000 / 14.6.
-	baseR := math.Max(350.0, (targetKM*1000.0)/14.6)
+	// Rzeczywisty dystans drogowy 6-wierzchołkowej pętli to około 7.68 * R (obwód sześciokąta 6*R z uwzględnieniem współczynnika krętości polskich dróg ~1.28)
+	baseR := math.Max(400.0, (targetKM*1000.0)/7.68)
 
 	type loopCandidate struct {
 		anchorCoords [][2]float64
@@ -932,14 +957,14 @@ func (g *Graph) buildCircularLoopRoute(req RoutePlanRequest, startNode int64, st
 					targetLon := centerLon + (R*math.Sin(stepAng))/(111320.0*cosLat)
 					targetLat := centerLat + (R*math.Cos(stepAng))/111320.0
 
-					nodeID, okNode := g.FindNearestNode(targetLon, targetLat)
+					nodeID, okNode := g.FindNearestNodeWithMinDegree(targetLon, targetLat, 2)
 					if !okNode {
 						valid = false
 						break
 					}
 					nodeCoord := g.NodeCoords[nodeID]
 					dFromTarget := haversineM(targetLat, targetLon, nodeCoord[1], nodeCoord[0])
-					if dFromTarget > math.Max(2500.0, R*0.65) {
+					if dFromTarget > math.Max(4000.0, R*0.75) {
 						valid = false
 						break
 					}
@@ -976,7 +1001,7 @@ func (g *Graph) buildCircularLoopRoute(req RoutePlanRequest, startNode int64, st
 					}
 
 					adjs := g.Adj[nodeID]
-					if len(adjs) == 0 {
+					if len(adjs) < 2 {
 						valid = false
 						break
 					}
@@ -985,8 +1010,10 @@ func (g *Graph) buildCircularLoopRoute(req RoutePlanRequest, startNode int64, st
 						if (req.Preferences.AvoidHighways || req.Preferences.AversionHighways > 0) && isHighwayClass(e.Highway) {
 							loopScore -= 5000.0
 						}
-						if !e.Traversed {
+						if !e.Traversed && e.UsedCount == 0 {
 							loopScore += e.LengthM * 1.2
+						} else {
+							loopScore -= 2000.0 * math.Max(1.0, req.Preferences.AversionTraversed)
 						}
 						loopScore -= float64(e.SpeedBumps*25 + e.Crossings*10 + e.TrafficSignals*15)
 					}
@@ -1023,6 +1050,18 @@ func (g *Graph) buildCircularLoopRoute(req RoutePlanRequest, startNode int64, st
 		for i := 0; i < len(anchors)-1; i++ {
 			p1 := anchors[i]
 			p2 := anchors[i+1]
+			if i == len(anchors)-2 {
+				// Przed ostatnim odcinkiem domykającym do startu:
+				// Zwalniamy krawędzie wyjazdowe ze startu w promieniu 2.5 km, aby Dijkstra mógł bezpośrednio wrócić
+				for eIdx := range g.Edges {
+					if g.Edges[eIdx].UsedCount > 0 {
+						c := g.Edges[eIdx].Coords[0]
+						if haversineM(startCoord[1], startCoord[0], c[1], c[0]) <= 2500.0 {
+							g.Edges[eIdx].UsedCount = 0
+						}
+					}
+				}
+			}
 			legSteps, legNodes, avHits, okLeg := g.findShortestPathSteps(p1[0], p1[1], p2[0], p2[1], req.AvoidPoints, req.AvoidMode, req.Preferences)
 			if !okLeg || len(legSteps) == 0 {
 				return RoutePlanResponse{}, 0, false
@@ -1380,6 +1419,16 @@ func (g *Graph) buildIntelligentAutoRoute(req RoutePlanRequest, targetKM float64
 		for i := 0; i < len(anchorPts)-1; i++ {
 			p1 := anchorPts[i]
 			p2 := anchorPts[i+1]
+			if isLoop && i == len(anchorPts)-2 {
+				for eIdx := range g.Edges {
+					if g.Edges[eIdx].UsedCount > 0 {
+						c := g.Edges[eIdx].Coords[0]
+						if haversineM(startCoord[1], startCoord[0], c[1], c[0]) <= 2500.0 {
+							g.Edges[eIdx].UsedCount = 0
+						}
+					}
+				}
+			}
 			legSteps, legNodes, avHits, okLeg := g.findShortestPathSteps(p1[0], p1[1], p2[0], p2[1], req.AvoidPoints, req.AvoidMode, req.Preferences)
 			if !okLeg || len(legSteps) == 0 {
 				valid = false
@@ -1458,7 +1507,7 @@ func (s *Service) HandlePlanRoute(w http.ResponseWriter, r *http.Request) {
 
 		startPt := req.Points[0]
 		cosLat := math.Max(0.2, math.Cos(startPt[1]*math.Pi/180.0))
-		envRadiusKM := math.Max(6.0, math.Min(45.0, targetKM*0.45))
+		envRadiusKM := math.Max(10.0, math.Min(150.0, targetKM*0.65))
 		dLat := envRadiusKM / 111.32
 		dLon := envRadiusKM / (111.32 * cosLat)
 		bboxPts := [][2]float64{
@@ -1638,62 +1687,77 @@ func (s *Service) ensureCachedEdges(ctx context.Context) ([]GraphEdge, error) {
 	}
 	s.mu.RUnlock()
 
-	if s.pool == nil {
-		return nil, fmt.Errorf("brak połączenia z bazą")
-	}
+	res, err, _ := s.sfGroup.Do("ensureCachedEdges", func() (interface{}, error) {
+		s.mu.RLock()
+		if len(s.cachedEdges) > 0 && time.Since(s.cachedAt) < 15*time.Minute {
+			edges := s.cachedEdges
+			s.mu.RUnlock()
+			return edges, nil
+		}
+		s.mu.RUnlock()
 
-	rows, err := s.pool.Query(ctx, `
-		SELECT
-			r.edge_id,
-			r.source_node,
-			r.target_node,
-			r.oneway,
-			r.highway,
-			COALESCE(r.name, ''),
-			r.length_m,
-			r.speed_kmh,
-			r.duration_s,
-			r.is_roundabout,
-			r.speed_bumps,
-			r.crossings,
-			r.traffic_signals,
-			r.is_intersection,
-			ST_AsGeoJSON(r.geom)::text
-		FROM osm_road_edges r
-	`)
+		if s.pool == nil {
+			return nil, fmt.Errorf("brak połączenia z bazą")
+		}
+
+		rows, err := s.pool.Query(ctx, `
+			SELECT
+				r.edge_id,
+				r.source_node,
+				r.target_node,
+				r.oneway,
+				r.highway,
+				COALESCE(r.name, ''),
+				r.length_m,
+				r.speed_kmh,
+				r.duration_s,
+				r.is_roundabout,
+				r.speed_bumps,
+				r.crossings,
+				r.traffic_signals,
+				r.is_intersection,
+				ST_AsGeoJSON(r.geom)::text
+			FROM osm_road_edges r
+		`)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+
+		type geoLine struct {
+			Coordinates [][2]float64 `json:"coordinates"`
+		}
+
+		var allEdges []GraphEdge
+		for rows.Next() {
+			var e GraphEdge
+			var geoStr string
+			if err := rows.Scan(
+				&e.EdgeID, &e.SourceNode, &e.TargetNode, &e.Oneway, &e.Highway, &e.Name,
+				&e.LengthM, &e.SpeedKMH, &e.DurationS, &e.IsRoundabout,
+				&e.SpeedBumps, &e.Crossings, &e.TrafficSignals, &e.IsIntersection,
+				&geoStr,
+			); err == nil {
+				var gl geoLine
+				if json.Unmarshal([]byte(geoStr), &gl) == nil && len(gl.Coordinates) >= 2 {
+					e.Coords = gl.Coordinates
+					allEdges = append(allEdges, e)
+				}
+			}
+		}
+
+		s.mu.Lock()
+		s.cachedEdges = allEdges
+		s.cachedAt = time.Now()
+		s.mu.Unlock()
+
+		return allEdges, nil
+	})
+
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	type geoLine struct {
-		Coordinates [][2]float64 `json:"coordinates"`
-	}
-
-	var allEdges []GraphEdge
-	for rows.Next() {
-		var e GraphEdge
-		var geoStr string
-		if err := rows.Scan(
-			&e.EdgeID, &e.SourceNode, &e.TargetNode, &e.Oneway, &e.Highway, &e.Name,
-			&e.LengthM, &e.SpeedKMH, &e.DurationS, &e.IsRoundabout,
-			&e.SpeedBumps, &e.Crossings, &e.TrafficSignals, &e.IsIntersection,
-			&geoStr,
-		); err == nil {
-			var gl geoLine
-			if json.Unmarshal([]byte(geoStr), &gl) == nil && len(gl.Coordinates) >= 2 {
-				e.Coords = gl.Coordinates
-				allEdges = append(allEdges, e)
-			}
-		}
-	}
-
-	s.mu.Lock()
-	s.cachedEdges = allEdges
-	s.cachedAt = time.Now()
-	s.mu.Unlock()
-
-	return allEdges, nil
+	return res.([]GraphEdge), nil
 }
 
 func (s *Service) loadSubgraphFromDB(
@@ -1747,6 +1811,7 @@ func (s *Service) loadSubgraphFromDB(
 		e.Traversed = travGrid[gridCellKey(c0[0], c0[1])] ||
 			travGrid[gridCellKey(mid[0], mid[1])] ||
 			travGrid[gridCellKey(c1[0], c1[1])]
+		e.InitiallyTraversed = e.Traversed
 		g.AddEdge(e)
 	}
 	return g, nil

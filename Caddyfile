@@ -7,6 +7,13 @@
     redir /maps /web/ 301
     redir /maps/ /web/ 301
     redir /maps/* /web/ 301
+
+    # Blokada dostępu do wrażliwych plików, katalogów i źródeł
+    @blocked {
+        path /.* /.env* /*.sql /data/* /osm_data/sources/* /internal/* /Dockerfile* /go.*
+    }
+    respond @blocked 403
+
     file_server
 
     header {

@@ -1,5 +1,6 @@
 # Dane lokalne, logi telemetryczne i uploady
 data/
+!data/INSTRUKCJA_DLA_TESTERA.md
 *.txt
 *.log
 *.pkl
@@ -10,6 +11,12 @@ data/
 *.dll
 *.so
 *.dylib
+nnaper
+nnaper.exe
+nnaper-server
+nnaper-server.exe
+nnaper-parser
+nnaper-parser.exe
 /nnaper
 /nnaper.exe
 /nnaper-server

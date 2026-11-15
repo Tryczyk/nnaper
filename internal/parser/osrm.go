@@ -153,43 +153,6 @@ func (c *OSRMClient) Nearest(lon, lat float64) (string, error) {
 	return "", nil
 }
 
-// RouteGeom wyznacza geometrię drogi między dwoma punktami
-func (c *OSRMClient) RouteGeom(p1, p2 Point) (string, error) {
-	url := fmt.Sprintf("%s/route/v1/driving/%.6f,%.6f;%%20%.6f,%.6f?overview=full&geometries=geojson",
-		c.baseURL, p1.Lon, p1.Lat, p2.Lon, p2.Lat)
-	url = strings.Replace(url, "%%20", "", 1)
-
-	resp, err := c.httpClient.Get(url)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("status %d", resp.StatusCode)
-	}
-
-	var res OSRMRouteResponse
-	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
-		return "", err
-	}
-
-	if res.Code == "Ok" && len(res.Routes) > 0 && len(res.Routes[0].Geometry.Coordinates) >= 2 {
-		coords := res.Routes[0].Geometry.Coordinates
-		var sb strings.Builder
-		sb.WriteString("SRID=4326;LINESTRING(")
-		for i, c := range coords {
-			if i > 0 {
-				sb.WriteString(", ")
-			}
-			sb.WriteString(fmt.Sprintf("%.6f %.6f", c[0], c[1]))
-		}
-		sb.WriteString(")")
-		return sb.String(), nil
-	}
-	return "", nil
-}
-
 // SnapBatch przetwarza całą partię epok równolegle w mikro-wątkach (goroutines)
 func (c *OSRMClient) SnapBatch(epochs []*Epoch, chunkSize int, concurrency int) {
 	if len(epochs) == 0 {

@@ -55,6 +55,42 @@ const apiBaseUrl = (window.NNAPER_CONFIG?.API_BASE_URL || 'http://localhost:8000
 const photonUrl = (window.NNAPER_CONFIG?.PHOTON_URL || `${apiBaseUrl}/api/geocode`).replace(/\/$/, '');
 const photonBbox = window.NNAPER_CONFIG?.PHOTON_BBOX || '14.1,53.9,19.9,55.9';
 const photonSearchLimit = window.NNAPER_CONFIG?.PHOTON_SEARCH_LIMIT || 50;
+
+window.sanitizeDatesTree = function (raw) {
+  const clean = {};
+  if (!raw || typeof raw !== 'object') return clean;
+  Object.keys(raw).forEach(y => {
+    if (/^\d{4}$/.test(y) && raw[y] && typeof raw[y] === 'object') {
+      clean[y] = {};
+      Object.keys(raw[y]).forEach(m => {
+        const mPadded = String(m).padStart(2, '0');
+        if (/^\d{2}$/.test(mPadded) && Array.isArray(raw[y][m])) {
+          const daysClean = raw[y][m]
+            .map(d => String(d).padStart(2, '0'))
+            .filter(d => /^\d{2}$/.test(d));
+          if (daysClean.length > 0) {
+            clean[y][mPadded] = Array.from(new Set(daysClean)).sort().reverse();
+          }
+        }
+      });
+      if (Object.keys(clean[y]).length === 0) {
+        delete clean[y];
+      }
+    }
+  });
+  return clean;
+};
+
+window.haversineDistanceKm = function (lat1, lon1, lat2, lon2) {
+  const R = 6371.0;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180.0;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180.0;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180.0) * Math.cos((lat2 * Math.PI) / 180.0) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+};
 const TRACK_TILES_URL = `${apiBaseUrl}/api/track/{z}/{x}/{y}.pbf`;
 const trackMonthLayers = new Map();
 const trackLayerIds = new Set(['GPS / Ślad trasy']);
@@ -122,8 +158,12 @@ class MapPaletteControl {
       <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/>
     </svg>`;
     btn.onclick = () => {
-      if (window.LayerManager && typeof window.LayerManager.openStyleStudio === 'function') {
-        window.LayerManager.openStyleStudio();
+      if (window.LayerManager) {
+        if (typeof window.LayerManager.isStyleStudioOpen === 'function' && window.LayerManager.isStyleStudioOpen()) {
+          window.LayerManager.closeStyleStudio(true);
+        } else if (typeof window.LayerManager.openStyleStudio === 'function') {
+          window.LayerManager.openStyleStudio();
+        }
       }
     };
     this._container.appendChild(btn);
@@ -152,10 +192,32 @@ map.addControl(scaleControl, 'bottom-left');
 window.scaleControl = scaleControl;
 
 map.on('error', (e) => {
-  if (e?.error?.name === 'AbortError' || e?.error?.message === 'AbortError' || e?.status === 0) {
+  const err = e?.error || e;
+  const errMsg = (err?.message || err?.statusText || '').toLowerCase();
+  const errName = err?.name || '';
+  const status = err?.status ?? e?.status;
+
+  // Ignoruj nieszkodliwe przerwania/anulowania zadan sieciowych kafelkow podczas nawigacji (pan/zoom)
+  if (
+    errName === 'AbortError' ||
+    errMsg.includes('abort') ||
+    errMsg.includes('canceled') ||
+    errMsg.includes('cancelled') ||
+    status === 0
+  ) {
     return;
   }
-  console.warn('MapLibre error:', e);
+
+  const details = {
+    message: err?.message || 'Nieznany blad MapLibre',
+    status: status,
+    sourceId: e?.sourceId,
+    tile: e?.tile ? { z: e.tile.tileID?.canonical?.z, x: e.tile.tileID?.canonical?.x, y: e.tile.tileID?.canonical?.y } : undefined,
+    url: err?.url || e?.tile?.url,
+    originalError: err
+  };
+
+  console.warn('MapLibre error:', details.message, details);
 });
 
 
@@ -284,13 +346,196 @@ function getActiveFiltersForMonth(monthKey) {
   return { activeDays, activeHours, activeMinutes, activeSeconds };
 }
 
-function updateTrackFilters() {
-  trackMonthLayers.forEach(({ layerId, lineLayerId }, key) => {
-    const hasCircle = !!map.getLayer(layerId);
-    const hasLine = !!lineLayerId && !!map.getLayer(lineLayerId);
-    if (!hasCircle && !hasLine) return;
+function getEffectiveActiveDaysParam() {
+  if (gpsMasterCheckbox && gpsMasterCheckbox.checked && !gpsMasterCheckbox.indeterminate) {
+    return 'all';
+  }
+  if (!dayNodesRegistry || dayNodesRegistry.size === 0) {
+    return 'all';
+  }
 
-    const { activeDays, activeHours, activeMinutes, activeSeconds } = getActiveFiltersForMonth(key);
+  let hasAnyChecked = false;
+  for (const dayItem of dayNodesRegistry.values()) {
+    const cb = dayItem.dayHeader.checkbox;
+    if (cb.checked || cb.indeterminate) {
+      hasAnyChecked = true;
+      break;
+    }
+  }
+  if (!hasAnyChecked) {
+    return '__none__';
+  }
+
+  // Grupowanie według lat i miesięcy w celu kompresji URL
+  const yearsMap = new Map();
+  for (const [dateStr, dayItem] of dayNodesRegistry.entries()) {
+    const cb = dayItem.dayHeader.checkbox;
+    const isChecked = cb.checked || cb.indeterminate;
+    const parts = dateStr.split('-');
+    const year = parts[0];
+    const month = (parts.length > 1) ? `${parts[0]}-${parts[1]}` : 'None';
+
+    if (!yearsMap.has(year)) {
+      yearsMap.set(year, new Map());
+    }
+    const monthsMap = yearsMap.get(year);
+    if (!monthsMap.has(month)) {
+      monthsMap.set(month, []);
+    }
+    monthsMap.get(month).push({ dateStr, isChecked });
+  }
+
+  const queryTokens = [];
+  for (const [year, monthsMap] of yearsMap.entries()) {
+    let yearTotalDays = 0;
+    let yearCheckedDays = 0;
+
+    for (const [month, daysList] of monthsMap.entries()) {
+      yearTotalDays += daysList.length;
+      const checkedCount = daysList.filter(d => d.isChecked).length;
+      yearCheckedDays += checkedCount;
+    }
+
+    if (yearTotalDays > 0 && yearCheckedDays === yearTotalDays && year !== 'None') {
+      queryTokens.push(year);
+    } else if (yearCheckedDays > 0) {
+      for (const [month, daysList] of monthsMap.entries()) {
+        const checkedCount = daysList.filter(d => d.isChecked).length;
+        if (checkedCount === daysList.length && daysList.length > 0 && month !== 'None') {
+          queryTokens.push(month);
+        } else if (checkedCount > 0) {
+          daysList.forEach(d => {
+            if (d.isChecked) queryTokens.push(d.dateStr);
+          });
+        }
+      }
+    }
+  }
+
+  if (queryTokens.length === 0) return '__none__';
+  return queryTokens.join(',');
+}
+
+function getAllActiveTrackFilters() {
+  const activeDays = [];
+  const activeHours = [];
+  const activeMinutes = [];
+  const activeSeconds = [];
+  let isAnyPartial = false;
+
+  dayNodesRegistry.forEach(dayItem => {
+    const dayCb = dayItem.dayHeader.checkbox;
+    if (!dayCb.checked && !dayCb.indeterminate) return;
+
+    if (dayCb.checked && !dayCb.indeterminate) {
+      activeDays.push(dayItem.dateStr);
+      return;
+    }
+
+    isAnyPartial = true;
+    if (dayItem.isLoaded) {
+      dayItem.hours.forEach(hourObj => {
+        const hCb = hourObj.hourHeader.checkbox;
+        const hVal = (dayItem.dateStr === 'None' || hourObj.hour === 'None') ? 'None' : `${dayItem.dateStr}T${hourObj.hour}`;
+        if (!hCb.checked && !hCb.indeterminate) return;
+        if (hCb.checked && !hCb.indeterminate) {
+          activeHours.push(hVal);
+          return;
+        }
+        hourObj.minutes.forEach(minObj => {
+          const mCb = minObj.minuteHeader.checkbox;
+          const mVal = (hVal === 'None' || minObj.minute === 'None') ? 'None' : `${dayItem.dateStr}T${hourObj.hour}:${minObj.minute}`;
+          if (!mCb.checked && !mCb.indeterminate) return;
+          if (mCb.checked && !mCb.indeterminate) {
+            activeMinutes.push(mVal);
+            return;
+          }
+          minObj.seconds.forEach(secObj => {
+            if (secObj.secCheckbox.checked) {
+              activeSeconds.push(secObj.value);
+            }
+          });
+        });
+      });
+    } else {
+      if (dayCb.checked) activeDays.push(dayItem.dateStr);
+    }
+  });
+
+  return { activeDays, activeHours, activeMinutes, activeSeconds, isAnyPartial };
+}
+
+let lastActiveDaysParam = null;
+let updateTilesDebounceTimer = null;
+
+function scheduleTrackTilesUpdate() {
+  if (updateTilesDebounceTimer) clearTimeout(updateTilesDebounceTimer);
+  updateTilesDebounceTimer = setTimeout(() => {
+    const newDaysParam = getEffectiveActiveDaysParam();
+    if (newDaysParam !== lastActiveDaysParam) {
+      lastActiveDaysParam = newDaysParam;
+      updateTrackTilesSource();
+    }
+  }, 120);
+}
+
+function updateTrackFilters() {
+  if (typeof ensureBaseTrackLayers === 'function') {
+    ensureBaseTrackLayers();
+  }
+  scheduleTrackTilesUpdate();
+
+  const circleLayer = map.getLayer('GPS / Ślad trasy');
+  const lineLayer = map.getLayer('GPS / Ślad trasy / linie');
+  if (!circleLayer && !lineLayer) return;
+
+  const daysParam = getEffectiveActiveDaysParam();
+  if (daysParam === '__none__') {
+    if (circleLayer) {
+      map.setLayoutProperty('GPS / Ślad trasy', 'visibility', 'none');
+      map.setFilter('GPS / Ślad trasy', ['==', ['get', 'day'], '__NO_DAY_ACTIVE__']);
+    }
+    if (lineLayer) {
+      map.setLayoutProperty('GPS / Ślad trasy / linie', 'visibility', 'none');
+      map.setFilter('GPS / Ślad trasy / linie', ['==', ['get', 'day'], '__NO_DAY_ACTIVE__']);
+    }
+    return;
+  }
+
+  const { activeDays, activeHours, activeMinutes, activeSeconds, isAnyPartial } = getAllActiveTrackFilters();
+
+  if (currentTrackMode === 'osm') {
+    if (lineLayer) {
+      map.setLayoutProperty('GPS / Ślad trasy / linie', 'visibility', 'visible');
+      map.setPaintProperty('GPS / Ślad trasy / linie', 'line-color', trackBaseColor);
+      map.setPaintProperty('GPS / Ślad trasy / linie', 'line-width', [
+        'interpolate', ['linear'], ['zoom'],
+        8, 1.8,
+        12, 2.5,
+        15, 3.2,
+        18, 4.0
+      ]);
+      map.setPaintProperty('GPS / Ślad trasy / linie', 'line-opacity', 0.92);
+    }
+    if (circleLayer) {
+      map.setLayoutProperty('GPS / Ślad trasy', 'visibility', 'none');
+    }
+  } else {
+    if (lineLayer) {
+      map.setLayoutProperty('GPS / Ślad trasy / linie', 'visibility', 'none');
+    }
+    if (circleLayer) {
+      map.setLayoutProperty('GPS / Ślad trasy', 'visibility', 'visible');
+      map.setPaintProperty('GPS / Ślad trasy', 'circle-opacity', 1.0);
+      map.setPaintProperty('GPS / Ślad trasy', 'circle-stroke-opacity', 1.0);
+      const curRadius = map.getPaintProperty('GPS / Ślad trasy', 'circle-radius') || 4.5;
+      map.setPaintProperty('GPS / Ślad trasy', 'circle-radius', curRadius);
+      map.setPaintProperty('GPS / Ślad trasy', 'circle-color', trackBaseColor);
+      map.setPaintProperty('GPS / Ślad trasy', 'circle-stroke-color', trackBaseColor);
+    }
+  }
+
+  if (isAnyPartial) {
     const conditions = [];
     if (activeDays.length > 0) {
       conditions.push(['match', ['get', 'day'], activeDays, true, false]);
@@ -309,69 +554,25 @@ function updateTrackFilters() {
         ['match', ['get', 'm'], minutesFromSeconds, true, false]
       ]);
     }
-
-    if (conditions.length > 0) {
-      const activeFilter = conditions.length === 1 ? conditions[0] : ['any', ...conditions];
-
-      if (currentTrackMode === 'osm') {
-        if (hasLine) {
-          map.setLayoutProperty(lineLayerId, 'visibility', 'visible');
-          map.setFilter(lineLayerId, activeFilter);
-          map.setPaintProperty(lineLayerId, 'line-color', trackBaseColor);
-          map.setPaintProperty(lineLayerId, 'line-width', [
-            'interpolate', ['linear'], ['zoom'],
-            8, 1.8,
-            12, 2.5,
-            15, 3.2,
-            18, 4.0
-          ]);
-          map.setPaintProperty(lineLayerId, 'line-opacity', 0.92);
-        }
-        if (hasCircle) {
-          map.setLayoutProperty(layerId, 'visibility', 'none');
-          map.setFilter(layerId, ['==', ['get', 'day'], '__NO_DAY_ACTIVE__']);
-        }
-      } else {
-        if (hasLine) {
-          map.setLayoutProperty(lineLayerId, 'visibility', 'none');
-          map.setFilter(lineLayerId, ['==', ['get', 'day'], '__NO_DAY_ACTIVE__']);
-        }
-        if (hasCircle) {
-          map.setLayoutProperty(layerId, 'visibility', 'visible');
-          map.setFilter(layerId, activeFilter);
-          map.setPaintProperty(layerId, 'circle-opacity', 1.0);
-          map.setPaintProperty(layerId, 'circle-stroke-opacity', 1.0);
-          const curRadius = map.getPaintProperty(layerId, 'circle-radius') || 4.5;
-          map.setPaintProperty(layerId, 'circle-radius', curRadius);
-          map.setPaintProperty(layerId, 'circle-color', trackBaseColor);
-          map.setPaintProperty(layerId, 'circle-stroke-color', trackBaseColor);
-        }
-      }
-    } else {
-      if (hasCircle) {
-        map.setLayoutProperty(layerId, 'visibility', 'none');
-        map.setFilter(layerId, ['==', ['get', 'day'], '__NO_DAY_ACTIVE__']);
-      }
-      if (hasLine) {
-        map.setLayoutProperty(lineLayerId, 'visibility', 'none');
-        map.setFilter(lineLayerId, ['==', ['get', 'day'], '__NO_DAY_ACTIVE__']);
-      }
-    }
-  });
+    const activeFilter = conditions.length === 1 ? conditions[0] : (conditions.length > 1 ? ['any', ...conditions] : null);
+    if (circleLayer) map.setFilter('GPS / Ślad trasy', activeFilter);
+    if (lineLayer) map.setFilter('GPS / Ślad trasy / linie', activeFilter);
+  } else {
+    if (circleLayer) map.setFilter('GPS / Ślad trasy', null);
+    if (lineLayer) map.setFilter('GPS / Ślad trasy / linie', null);
+  }
 }
 
 function applyTrackDateFilter(dayCheckboxes, isEverythingActive) {
   if (!isEverythingActive) {
-    trackMonthLayers.forEach(({ layerId, lineLayerId }) => {
-      if (map.getLayer(layerId)) {
-        map.setLayoutProperty(layerId, 'visibility', 'none');
-        map.setFilter(layerId, ['==', ['get', 'day'], '__NO_DAY_ACTIVE__']);
-      }
-      if (lineLayerId && map.getLayer(lineLayerId)) {
-        map.setLayoutProperty(lineLayerId, 'visibility', 'none');
-        map.setFilter(lineLayerId, ['==', ['get', 'day'], '__NO_DAY_ACTIVE__']);
-      }
-    });
+    if (map.getLayer('GPS / Ślad trasy')) {
+      map.setLayoutProperty('GPS / Ślad trasy', 'visibility', 'none');
+      map.setFilter('GPS / Ślad trasy', ['==', ['get', 'day'], '__NO_DAY_ACTIVE__']);
+    }
+    if (map.getLayer('GPS / Ślad trasy / linie')) {
+      map.setLayoutProperty('GPS / Ślad trasy / linie', 'visibility', 'none');
+      map.setFilter('GPS / Ślad trasy / linie', ['==', ['get', 'day'], '__NO_DAY_ACTIVE__']);
+    }
     return;
   }
   updateTrackFilters();
@@ -480,6 +681,68 @@ window.setSnapRoadsEnabled = function (bool) {
 };
 
 let trackTilesVersion = Date.now();
+let isAtomicForced = (localStorage.getItem('nnaper_track_atomic_forced') === 'true');
+
+window.setTrackAtomicForced = function(forced) {
+  isAtomicForced = !!forced;
+  localStorage.setItem('nnaper_track_atomic_forced', isAtomicForced ? 'true' : 'false');
+  updateTrackTilesSource(true);
+};
+
+function ensureBaseTrackLayers() {
+  if (!map) return;
+  if (!map.getSource('gps-track')) {
+    map.addSource('gps-track', {
+      type: 'vector',
+      tiles: [buildTrackTilesUrl('__none__')],
+      minzoom: 0,
+      maxzoom: 18
+    });
+  }
+  if (!map.getLayer('GPS / Ślad trasy / linie')) {
+    map.addLayer({
+      id: 'GPS / Ślad trasy / linie',
+      source: 'gps-track',
+      'source-layer': 'gps-track',
+      type: 'line',
+      layout: {
+        'line-join': 'round',
+        'line-cap': 'round',
+        'visibility': (currentTrackMode === 'osm') ? 'visible' : 'none'
+      },
+      paint: {
+        'line-color': trackBaseColor,
+        'line-width': [
+          'interpolate', ['linear'], ['zoom'],
+          8, 1.8,
+          12, 2.5,
+          15, 3.2,
+          18, 4.0
+        ],
+        'line-opacity': 0.92
+      }
+    });
+  }
+  if (!map.getLayer('GPS / Ślad trasy')) {
+    map.addLayer({
+      id: 'GPS / Ślad trasy',
+      source: 'gps-track',
+      'source-layer': 'gps-track',
+      type: 'circle',
+      layout: {
+        'visibility': (currentTrackMode !== 'osm') ? 'visible' : 'none'
+      },
+      paint: {
+        'circle-color': trackBaseColor,
+        'circle-radius': 4.5,
+        'circle-stroke-width': 0,
+        'circle-stroke-color': trackBaseColor,
+        'circle-pitch-alignment': 'map',
+        'circle-pitch-scale': 'viewport'
+      }
+    });
+  }
+}
 
 function buildTrackTilesUrl(days) {
   const token = (typeof window.getAuthToken === 'function') ? window.getAuthToken() : '';
@@ -491,6 +754,9 @@ function buildTrackTilesUrl(days) {
   if (currentTrackMode === 'snapped') {
     url += '&snapped=true';
   }
+  if (isAtomicForced) {
+    url += '&atomic=true';
+  }
   return url;
 }
 
@@ -498,19 +764,28 @@ function updateTrackTilesSource(force = false) {
   if (force) {
     trackTilesVersion = Date.now();
   }
+  ensureBaseTrackLayers();
+
+  const daysParam = getEffectiveActiveDaysParam();
+  lastActiveDaysParam = daysParam;
   const baseSrc = map.getSource('gps-track');
-  const baseTiles = [buildTrackTilesUrl('__none__')];
+  const baseTiles = [buildTrackTilesUrl(daysParam)];
   if (baseSrc && typeof baseSrc.setTiles === 'function') {
     baseSrc.setTiles(baseTiles);
   }
 
-  trackMonthLayers.forEach(({ layerId, days }, key) => {
+  // Usuwamy ewentualne pozostałości po dawnych wielu źródłach miesięcznych
+  trackMonthLayers.forEach(({ layerId, lineLayerId }, key) => {
     const suffix = key.replaceAll('-', '_');
     const sourceId = `gps-track-${suffix}`;
-    const src = map.getSource(sourceId);
-    const newTiles = [buildTrackTilesUrl(days.join(','))];
-    if (src && typeof src.setTiles === 'function') {
-      src.setTiles(newTiles);
+    if (map.getLayer(layerId)) {
+      try { map.removeLayer(layerId); } catch (e) {}
+    }
+    if (lineLayerId && map.getLayer(lineLayerId)) {
+      try { map.removeLayer(lineLayerId); } catch (e) {}
+    }
+    if (map.getSource(sourceId)) {
+      try { map.removeSource(sourceId); } catch (e) {}
     }
   });
 
@@ -608,67 +883,12 @@ window.bindGpsMasterCheckbox = (cb) => {
 
 function addTrackMonthLayers(months) {
   months.forEach(({ key, days }) => {
-    if (trackMonthLayers.has(key)) return;
-
-    const suffix = key.replaceAll('-', '_');
-    const sourceId = `gps-track-${suffix}`;
-    const layerId = `GPS / Ślad trasy / ${key}`;
-    const lineLayerId = `GPS / Ślad trasy / ${key} / linie`;
-
-    map.addSource(sourceId, {
-      type: 'vector',
-      tiles: [buildTrackTilesUrl(days.join(','))],
-      minzoom: 0,
-      maxzoom: 18
-    });
-
-    // Warstwa dociągniętych linii dróg OSM (tryb Zaznaczone ścieżki OSM)
-    map.addLayer({
-      id: lineLayerId,
-      source: sourceId,
-      'source-layer': 'gps-track',
-      type: 'line',
-      layout: {
-        'line-join': 'round',
-        'line-cap': 'round',
-        'visibility': (currentTrackMode === 'osm') ? 'visible' : 'none'
-      },
-      paint: {
-        'line-color': trackBaseColor,
-        'line-width': [
-          'interpolate', ['linear'], ['zoom'],
-          8, 1.8,
-          12, 2.5,
-          15, 3.2,
-          18, 4.0
-        ],
-        'line-opacity': 0.92
-      }
-    });
-
-    // Warstwa punktów GPS (surowe / snapnięte)
-    map.addLayer({
-      id: layerId,
-      source: sourceId,
-      'source-layer': 'gps-track',
-      type: 'circle',
-      layout: {
-        'visibility': (currentTrackMode !== 'osm') ? 'visible' : 'none'
-      },
-      paint: {
-        'circle-color': trackBaseColor,
-        'circle-radius': 4.5,
-        'circle-stroke-width': 0,
-        'circle-stroke-color': trackBaseColor,
-        'circle-pitch-alignment': 'map',
-        'circle-pitch-scale': 'viewport'
-      }
-    });
-
-    trackMonthLayers.set(key, { layerId, lineLayerId, days });
-    trackLayerIds.add(layerId);
-    trackLayerIds.add(lineLayerId);
+    trackMonthLayers.set(key, { layerId: 'GPS / Ślad trasy', lineLayerId: 'GPS / Ślad trasy / linie', days });
   });
+  trackLayerIds.add('GPS / Ślad trasy');
+  trackLayerIds.add('GPS / Ślad trasy / linie');
+  ensureBaseTrackLayers();
+  updateTrackTilesSource();
 }
 
 function syncMinuteCheckbox(minObj) {
@@ -887,7 +1107,8 @@ async function buildInlineTimeFilter(container) {
       clearTimeout(fetchTimeout);
     }
     if (!res.ok) throw new Error('Błąd API');
-    const data = await res.json();
+    const raw = await res.json();
+    const data = (typeof window.sanitizeDatesTree === 'function') ? window.sanitizeDatesTree(raw) : (raw || {});
 
     if (!data || Object.keys(data).length === 0) {
       container.innerHTML = '<span style="color:#64748b;font-size:11px;">Brak zarejestrowanych tras dla tego profilu w bazie danych.</span>';
@@ -1252,6 +1473,9 @@ function autoBuildTree() {
     if (menuEl.classList.contains('collapsed')) {
       expandMenu();
     } else {
+      if (window.LayerManager && typeof window.LayerManager.isStyleStudioOpen === 'function' && window.LayerManager.isStyleStudioOpen()) {
+        window.LayerManager.closeStyleStudio(false);
+      }
       collapseMenu();
     }
   }
@@ -1529,30 +1753,7 @@ function autoBuildTree() {
 
   /* ------------------- INICJALIZACJA ------------------- */
   map.on('load', () => {
-    // Ślad GPS
-    map.addSource('gps-track', {
-      type: 'vector',
-      tiles: [buildTrackTilesUrl('__none__')],
-      minzoom: 0,
-      maxzoom: 18
-    });
-
-    map.addLayer({
-      id: 'GPS / Ślad trasy',
-      source: 'gps-track',
-      'source-layer': 'gps-track',
-      type: 'circle',
-      layout: { visibility: 'none' },
-      paint: {
-        'circle-color': trackBaseColor,
-        'circle-radius': 4.5,
-        'circle-stroke-width': 0,
-        'circle-stroke-color': trackBaseColor,
-        'circle-pitch-alignment': 'map',
-        'circle-pitch-scale': 'viewport'
-      }
-    });
-
+    ensureBaseTrackLayers();
     autoBuildTree();
   });
 

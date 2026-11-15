@@ -278,12 +278,69 @@
   const searchCache = new Map();
   let inlineSearchDebounceTimer = null;
 
+  function selectInlinePlace(point, place, input, suggestions) {
+    point.place = place;
+    input.value = place.display_name;
+    suggestions.innerHTML = '';
+    input._searchResults = [];
+    input._highlightedIndex = -1;
+    routePlannerHint.innerText = 'Punkt wybrany.';
+    renderInlineRouteMarkers();
+    scheduleInlineRouteCalculation();
+
+    const nextEmptyPointIndex = inlineRouteState.points.findIndex(p => !p.place);
+    if (nextEmptyPointIndex !== -1) {
+      const nextInput = routePlannerStops.querySelector(`[data-point-index="${nextEmptyPointIndex}"] input`);
+      if (nextInput && nextInput !== input) {
+        nextInput.focus();
+      }
+    }
+  }
+
+  function parseInlinePhotonFeature(feature) {
+    const properties = feature?.properties || {};
+    const coordinates = feature?.geometry?.coordinates;
+    if (!Array.isArray(coordinates) || coordinates.length < 2) return null;
+    return {
+      ...properties,
+      display_name: inlineRoutePlaceLabel(properties),
+      lon: coordinates[0],
+      lat: coordinates[1]
+    };
+  }
+
+  async function fetchInlineGeocodeFeatures(query, signal) {
+    if (searchCache.has(query)) {
+      return searchCache.get(query);
+    }
+    let response;
+    const primaryUrl = `${photonUrl}/api/?q=${encodeURIComponent(query)}&limit=${photonSearchLimit}&bbox=${photonBbox}`;
+    try {
+      response = await fetch(primaryUrl, { signal });
+    } catch (err) {
+      if (err.name === 'AbortError') throw err;
+      const localUrl = `${apiBaseUrl}/api/geocode/api/?q=${encodeURIComponent(query)}&limit=${photonSearchLimit}&bbox=${photonBbox}`;
+      if (primaryUrl !== localUrl) {
+        response = await fetch(localUrl, { signal });
+      } else {
+        throw err;
+      }
+    }
+    if (!response || !response.ok) throw new Error(`Photon returned ${response ? response.status : 'error'}`);
+    const data = await response.json();
+    const features = Array.isArray(data.features) ? data.features : [];
+    searchCache.set(query, features);
+    return features;
+  }
+
   function searchInlinePoint(input, point, suggestions) {
     clearTimeout(inlineSearchDebounceTimer);
     const query = input.value.trim();
     const requestId = ++routeStartRequestId;
     if (routeStartAbortController) routeStartAbortController.abort();
     suggestions.innerHTML = '';
+    input._searchResults = [];
+    input._highlightedIndex = -1;
 
     if (!query) {
       point.place = null;
@@ -300,70 +357,135 @@
   }
 
   async function executeInlinePointSearch(input, point, suggestions, query, requestId) {
-    if (searchCache.has(query)) {
-      renderInlineSearchSuggestions(searchCache.get(query), input, point, suggestions, requestId);
-      return;
-    }
-
     routeStartAbortController = new AbortController();
     const timeoutId = setTimeout(() => routeStartAbortController.abort(), 4000);
 
     try {
-      let response;
-      const primaryUrl = `${photonUrl}/api/?q=${encodeURIComponent(query)}&limit=${photonSearchLimit}&bbox=${photonBbox}`;
-      try {
-        response = await fetch(primaryUrl, { signal: routeStartAbortController.signal });
-      } catch (err) {
-        const localUrl = `${apiBaseUrl}/api/geocode/api/?q=${encodeURIComponent(query)}&limit=${photonSearchLimit}&bbox=${photonBbox}`;
-        if (primaryUrl !== localUrl) {
-          response = await fetch(localUrl, { signal: routeStartAbortController.signal });
-        } else {
-          throw err;
-        }
-      }
+      const features = await fetchInlineGeocodeFeatures(query, routeStartAbortController.signal);
       clearTimeout(timeoutId);
-      if (!response || !response.ok) throw new Error(`Photon returned ${response ? response.status : 'error'}`);
-      const data = await response.json();
       if (requestId !== routeStartRequestId) return;
-      const features = Array.isArray(data.features) ? data.features : [];
-      searchCache.set(query, features);
       renderInlineSearchSuggestions(features, input, point, suggestions, requestId);
     } catch (error) {
       clearTimeout(timeoutId);
       if (error.name === 'AbortError' && requestId !== routeStartRequestId) return;
       if (requestId !== routeStartRequestId) return;
       suggestions.innerHTML = '';
+      input._searchResults = [];
+      input._highlightedIndex = -1;
       routePlannerHint.innerText = 'Nie udało się wyszukać adresu (serwer geokodowania nie odpowiada).';
     }
+  }
+
+  function updateInlineSuggestionsHighlight(suggestions, highlightedIndex) {
+    [...suggestions.children].forEach((item, index) => {
+      item.classList.toggle('active', index === highlightedIndex);
+    });
   }
 
   function renderInlineSearchSuggestions(features, input, point, suggestions, requestId) {
     if (requestId !== routeStartRequestId) return;
     suggestions.innerHTML = '';
-    features.slice(0, 6).forEach(feature => {
-      const properties = feature.properties || {};
-      const coordinates = feature.geometry && feature.geometry.coordinates;
-      if (!Array.isArray(coordinates) || coordinates.length < 2) return;
-      const place = { ...properties, display_name: inlineRoutePlaceLabel(properties), lon: coordinates[0], lat: coordinates[1] };
+    const places = (Array.isArray(features) ? features : [])
+      .map(parseInlinePhotonFeature)
+      .filter(Boolean)
+      .slice(0, 6);
+
+    input._searchResults = places;
+    input._highlightedIndex = -1;
+
+    places.forEach((place, index) => {
       const item = document.createElement('div');
       item.className = 'route-start-suggestion';
       item.innerText = place.display_name;
       item.addEventListener('click', () => {
-        point.place = place;
-        input.value = place.display_name;
-        suggestions.innerHTML = '';
-        routePlannerHint.innerText = 'Punkt wybrany.';
-        renderInlineRouteMarkers();
-        scheduleInlineRouteCalculation();
+        selectInlinePlace(point, place, input, suggestions);
+      });
+      item.addEventListener('mouseenter', () => {
+        input._highlightedIndex = index;
+        updateInlineSuggestionsHighlight(suggestions, input._highlightedIndex);
       });
       suggestions.appendChild(item);
     });
-    if (!suggestions.children.length) {
+    if (!places.length) {
       routePlannerHint.innerText = 'Nie znaleziono adresu.';
     } else {
-      routePlannerHint.innerText = 'Wybierz podpowiedź z listy.';
+      routePlannerHint.innerText = 'Wybierz podpowiedź z listy lub naciśnij Enter.';
     }
   }
+
+  async function handleInlineSearchSubmit(input, point, suggestions) {
+    const query = input.value.trim();
+    if (!query) {
+      input.focus();
+      return;
+    }
+
+    if (input._searchResults && input._searchResults.length > 0) {
+      const chosenIndex = input._highlightedIndex >= 0 ? input._highlightedIndex : 0;
+      selectInlinePlace(point, input._searchResults[chosenIndex], input, suggestions);
+      return;
+    }
+
+    clearTimeout(inlineSearchDebounceTimer);
+    routePlannerHint.innerText = 'Wyszukiwanie...';
+    try {
+      const abortCtrl = new AbortController();
+      const timer = setTimeout(() => abortCtrl.abort(), 4000);
+      const rawFeatures = await fetchInlineGeocodeFeatures(query, abortCtrl.signal);
+      clearTimeout(timer);
+      const places = (Array.isArray(rawFeatures) ? rawFeatures : [])
+        .map(parseInlinePhotonFeature)
+        .filter(Boolean);
+      if (places.length > 0) {
+        selectInlinePlace(point, places[0], input, suggestions);
+        return;
+      }
+      routePlannerHint.innerText = 'Nie znaleziono adresu.';
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        console.warn('Błąd bezpośredniego wyszukiwania punktu trasy:', err);
+      }
+      routePlannerHint.innerText = 'Nie udało się wyszukać adresu.';
+    }
+  }
+
+  function setupRouteInputEvents(input, point, suggestions) {
+    input._searchResults = [];
+    input._highlightedIndex = -1;
+
+    input.addEventListener('input', () => searchInlinePoint(input, point, suggestions));
+
+    input.addEventListener('keydown', (e) => {
+      const results = input._searchResults || [];
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (!results.length) return;
+        e.preventDefault();
+        const direction = e.key === 'ArrowDown' ? 1 : -1;
+        input._highlightedIndex = (input._highlightedIndex + direction + results.length) % results.length;
+        updateInlineSuggestionsHighlight(suggestions, input._highlightedIndex);
+        suggestions.children[input._highlightedIndex]?.scrollIntoView({ block: 'nearest' });
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        handleInlineSearchSubmit(input, point, suggestions);
+      } else if (e.key === 'Escape') {
+        if (suggestions.children.length > 0) {
+          e.stopPropagation();
+          suggestions.innerHTML = '';
+          input._searchResults = [];
+          input._highlightedIndex = -1;
+        }
+      }
+    });
+  }
+
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.route-point-row')) {
+      const allSuggestions = routePlannerStops.querySelectorAll('.route-point-suggestions');
+      allSuggestions.forEach(box => {
+        box.innerHTML = '';
+      });
+    }
+  });
 
   map.on('contextmenu', event => {
     event.preventDefault();
@@ -567,36 +689,24 @@
       item.innerHTML = `<span class="route-point-icon" style="background-color: ${pointColor};" aria-hidden="true"></span>`;
       const suggestions = document.createElement('div');
       suggestions.className = 'route-point-suggestions';
+      const input = document.createElement('input');
+      input.type = 'search';
+      input.setAttribute('role', 'searchbox');
+      input.className = 'route-field';
       if (point.place) {
-        const input = document.createElement('input');
-        input.type = 'search';
-        input.setAttribute('role', 'searchbox');
-        input.className = 'route-field';
         input.value = inlineRoutePlaceLabel(place);
         input.placeholder = 'Wpisz adres';
-        input.autocomplete = 'off';
-        input.name = `route_stop_${index}`;
-        input.setAttribute('data-lpignore', 'true');
-        input.setAttribute('data-1p-ignore', 'true');
-        input.setAttribute('data-bwignore', 'true');
-        input.setAttribute('data-form-type', 'other');
-        input.addEventListener('input', () => searchInlinePoint(input, point, suggestions));
-        item.appendChild(input);
       } else {
-        const input = document.createElement('input');
-        input.type = 'search';
-        input.setAttribute('role', 'searchbox');
-        input.className = 'route-field';
         input.placeholder = index === 0 ? 'Wpisz miejsce startu' : 'Wpisz punkt trasy';
-        input.autocomplete = 'off';
-        input.name = `route_stop_${index}`;
-        input.setAttribute('data-lpignore', 'true');
-        input.setAttribute('data-1p-ignore', 'true');
-        input.setAttribute('data-bwignore', 'true');
-        input.setAttribute('data-form-type', 'other');
-        input.addEventListener('input', () => searchInlinePoint(input, point, suggestions));
-        item.appendChild(input);
       }
+      input.autocomplete = 'off';
+      input.name = `route_stop_${index}`;
+      input.setAttribute('data-lpignore', 'true');
+      input.setAttribute('data-1p-ignore', 'true');
+      input.setAttribute('data-bwignore', 'true');
+      input.setAttribute('data-form-type', 'other');
+      setupRouteInputEvents(input, point, suggestions);
+      item.appendChild(input);
       item.appendChild(suggestions);
       const up = document.createElement('button');
       up.type = 'button';

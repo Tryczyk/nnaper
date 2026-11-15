@@ -37,14 +37,22 @@ func NewLRUCache(capacity int) *LRUCache {
 }
 
 func (c *LRUCache) Get(key string) ([]byte, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.mu.RLock()
+	elem, ok := c.items[key]
+	if !ok {
+		c.mu.RUnlock()
+		return nil, false
+	}
+	val := elem.Value.(*lruEntry).value
+	c.mu.RUnlock()
 
+	c.mu.Lock()
 	if elem, ok := c.items[key]; ok {
 		c.evict.MoveToFront(elem)
-		return elem.Value.(*lruEntry).value, true
 	}
-	return nil, false
+	c.mu.Unlock()
+
+	return val, true
 }
 
 func (c *LRUCache) Set(key string, value []byte) {
@@ -94,6 +102,16 @@ func (s *Service) ClearCache() {
 }
 
 func (s *Service) HandleClearCache(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
+	authHeader := r.Header.Get("Authorization")
+	userID := auth.GetAuthUserID(r.Context(), s.pool, token, authHeader)
+	if userID == "" {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"status":"unauthorized","error":"Wymagana autoryzacja"}`))
+		return
+	}
+
 	s.ClearCache()
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
@@ -136,8 +154,9 @@ func (s *Service) HandleGetTrackTile(w http.ResponseWriter, r *http.Request) {
 		mode = "snapped"
 	}
 	profileID := query.Get("profile_id")
+	isAtomic := query.Get("atomic") == "true" || z >= 14
 
-	cacheKey := fmt.Sprintf("%s:%s:%d:%d:%d:%s:%t:%s", userID, profileID, z, x, y, days, snapped, mode)
+	cacheKey := fmt.Sprintf("%s:%s:%d:%d:%d:%s:%t:%s:%t", userID, profileID, z, x, y, days, snapped, mode, isAtomic)
 	if cached, ok := s.cache.Get(cacheKey); ok {
 		w.Header().Set("Content-Type", "application/vnd.mapbox-vector-tile")
 		w.Header().Set("Cache-Control", "private, max-age=1800, stale-while-revalidate=3600")
@@ -147,7 +166,7 @@ func (s *Service) HandleGetTrackTile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var dayList []string
-	if days != "" && days != "__none__" && days != "none" && days != "empty" && days != "false" {
+	if days != "" && days != "__none__" && days != "none" && days != "empty" && days != "false" && days != "all" && days != "0" && days != "all-history" {
 		for _, d := range strings.Split(days, ",") {
 			d = strings.TrimSpace(d)
 			if d != "" {
@@ -199,13 +218,21 @@ func (s *Service) HandleGetTrackTile(w http.ResponseWriter, r *http.Request) {
 
 	if days == "__none__" || days == "none" || days == "empty" || days == "false" {
 		whereClauses = append(whereClauses, "FALSE")
+	} else if days == "all" || days == "0" || days == "all-history" {
+		// Brak filtra dat - zwracamy całą historię
 	} else if len(dayList) > 0 {
 		var validDates []string
+		var yearList []string
+		var monthList []string
 		hasNullDate := false
 		for _, d := range dayList {
 			if d == "None" || d == "null" {
 				hasNullDate = true
-			} else {
+			} else if len(d) == 4 {
+				yearList = append(yearList, d)
+			} else if len(d) == 7 {
+				monthList = append(monthList, d)
+			} else if len(d) == 10 {
 				validDates = append(validDates, d)
 			}
 		}
@@ -225,6 +252,16 @@ func (s *Service) HandleGetTrackTile(w http.ResponseWriter, r *http.Request) {
 			dateConditions = append(dateConditions, fmt.Sprintf("(e.timestamp::date = ANY($%d::date[]) AND e.timestamp >= $%d::date AND e.timestamp < ($%d::date + INTERVAL '1 day'))", nextArg, nextArg+1, nextArg+2))
 			args = append(args, validDates, minDate, maxDate)
 			nextArg += 3
+		}
+		for _, y := range yearList {
+			dateConditions = append(dateConditions, fmt.Sprintf("(e.timestamp >= $%d::date AND e.timestamp < ($%d::date + INTERVAL '1 year'))", nextArg, nextArg))
+			args = append(args, y+"-01-01")
+			nextArg++
+		}
+		for _, m := range monthList {
+			dateConditions = append(dateConditions, fmt.Sprintf("(e.timestamp >= $%d::date AND e.timestamp < ($%d::date + INTERVAL '1 month'))", nextArg, nextArg))
+			args = append(args, m+"-01")
+			nextArg++
 		}
 		if hasNullDate {
 			dateConditions = append(dateConditions, "(e.timestamp IS NULL)")
@@ -285,6 +322,55 @@ func (s *Service) HandleGetTrackTile(w http.ResponseWriter, r *http.Request) {
 			FROM tile_features
 			WHERE geom IS NOT NULL;
 		`, snapGrid, whereSQL)
+	} else if !isAtomic {
+		gridSize := 360.0 / (float64(uint64(1)<<z) * 1024.0)
+		if z <= 7 {
+			gridSize = 360.0 / (float64(uint64(1)<<z) * 512.0)
+		}
+		gridArg := nextArg
+		args = append(args, gridSize)
+		nextArg++
+
+		sqlQuery = fmt.Sprintf(`
+			WITH bounds AS (
+				SELECT ST_TileEnvelope($1, $2, $3) AS geom
+			),
+			decimated AS (
+				SELECT DISTINCT ON (
+					ST_SnapToGrid(%s, $%d),
+					COALESCE(e.timestamp::date::text, 'None')
+				)
+					COALESCE(e.timestamp::date::text, 'None') AS day,
+					%s AS geom_pt
+				FROM epochs e
+				CROSS JOIN bounds
+				WHERE %s
+				ORDER BY ST_SnapToGrid(%s, $%d), COALESCE(e.timestamp::date::text, 'None'), e.timestamp ASC
+			),
+			tile_features AS (
+				SELECT
+					NULL::text AS epoch_id,
+					day,
+					NULL::text AS timestamp,
+					NULL::text AS h,
+					NULL::text AS m,
+					NULL::text AS s,
+					NULL::numeric AS latitude,
+					NULL::numeric AS longitude,
+					ST_AsMVTGeom(
+						ST_Transform(geom_pt, 3857),
+						bounds.geom,
+						4096,
+						256,
+						TRUE
+					) AS geom
+				FROM decimated
+				CROSS JOIN bounds
+			)
+			SELECT COALESCE(ST_AsMVT(tile_features, 'gps-track', 4096, 'geom'), ''::bytea)
+			FROM tile_features
+			WHERE geom IS NOT NULL;
+		`, activeGeom, gridArg, activeGeom, whereSQL, activeGeom, gridArg)
 	} else {
 		sqlQuery = fmt.Sprintf(`
 			WITH bounds AS (

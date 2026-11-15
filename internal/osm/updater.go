@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"nnaper/internal/auth"
 	"nnaper/internal/config"
 )
 
@@ -421,6 +422,19 @@ func (u *Updater) HandleGetStatus(w http.ResponseWriter, r *http.Request) {
 
 // HandleTriggerUpdate to handler HTTP pozwalający na ręczne wymuszenie aktualizacji.
 func (u *Updater) HandleTriggerUpdate(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
+	authHeader := r.Header.Get("Authorization")
+	userID := auth.GetAuthUserID(r.Context(), u.pool, token, authHeader)
+	if userID == "" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"status": "unauthorized",
+			"detail": "Wymagana autoryzacja do uruchomienia aktualizacji",
+		})
+		return
+	}
+
 	u.mu.Lock()
 	if u.isUpdating {
 		u.mu.Unlock()

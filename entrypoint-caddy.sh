@@ -11,5 +11,5 @@ window.NNAPER_CONFIG = Object.assign(window.NNAPER_CONFIG || {}, {
 });
 EOF
 
-exec caddy run --config /usr/share/caddy/Caddyfile --adapter caddyfile
+exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
 

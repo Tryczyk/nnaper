@@ -146,6 +146,17 @@ CREATE TABLE IF NOT EXISTS osm_import_meta (
     imported_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS osm_update_schedule (
+    id                     SERIAL PRIMARY KEY,
+    file_name              VARCHAR(255) NOT NULL UNIQUE,
+    last_successful_update TIMESTAMPTZ,
+    last_attempt_at        TIMESTAMPTZ,
+    last_status            VARCHAR(32) NOT NULL DEFAULT 'IDLE',
+    last_error             TEXT,
+    consecutive_failures   INT DEFAULT 0,
+    updated_at             TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS osm_infrastructure (
     id          BIGSERIAL PRIMARY KEY,
     osm_id      BIGINT NOT NULL,

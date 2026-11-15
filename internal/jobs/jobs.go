@@ -3,11 +3,10 @@ package jobs
 import (
 	"bufio"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -74,6 +73,18 @@ func NewManager(pool *pgxpool.Pool, cfg *config.Config, tilesService *tiles.Serv
 	parserEng := parser.NewEngine(dbClient, cfg.OSRMURL, cfg.OSRMConcurrency, cfg.MatchChunkSize)
 	jobsFile := filepath.Join(cfg.DataDir, "parser_jobs.json")
 
+	// Czyszczenie osieroconych plików uploadu starszych niż 24h
+	if entries, err := os.ReadDir(cfg.UploadDir); err == nil {
+		cutoff := time.Now().Add(-24 * time.Hour)
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				if info, err := entry.Info(); err == nil && info.ModTime().Before(cutoff) {
+					_ = os.Remove(filepath.Join(cfg.UploadDir, entry.Name()))
+				}
+			}
+		}
+	}
+
 	mgr := &Manager{
 		pool:        pool,
 		cfg:         cfg,
@@ -92,20 +103,22 @@ func (m *Manager) loadJobs() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		rows, err := m.pool.Query(ctx, `
-			SELECT job_id, user_id, COALESCE(profile_id::text, ''), file_name, file_size, status, progress, stage, error_msg, epochs_count, created_at, updated_at
+			SELECT job_id, user_id, COALESCE(profile_id::text, ''), filename, file_size, status, percent, stage, error, epochs, created_at, updated_at
 			FROM parser_jobs
 			ORDER BY updated_at DESC
 			LIMIT 100
 		`)
-		if err == nil {
+		if err != nil {
+			log.Printf("[PARSER JOBS WARNING] Nie udało się załadować zadań z PostgreSQL: %v", err)
+		} else {
 			defer rows.Close()
 			for rows.Next() {
 				var j JobRecord
 				var errStr *string
 				var created, updated time.Time
-				var progress float64
-				if err := rows.Scan(&j.JobID, &j.UserID, &j.ProfileID, &j.Filename, &j.FileSize, &j.Status, &progress, &j.Stage, &errStr, &j.Epochs, &created, &updated); err == nil {
-					j.Percent = int(progress)
+				var percent int
+				if err := rows.Scan(&j.JobID, &j.UserID, &j.ProfileID, &j.Filename, &j.FileSize, &j.Status, &percent, &j.Stage, &errStr, &j.Epochs, &created, &updated); err == nil {
+					j.Percent = percent
 					j.Error = errStr
 					j.CreatedAt = created.Format(time.RFC3339)
 					j.UpdatedAt = updated.Format(time.RFC3339)
@@ -142,31 +155,32 @@ func (m *Manager) persistJobToDB(job *JobRecord) {
 	if job.ProfileID != "" {
 		profID = &job.ProfileID
 	}
-	_, _ = m.pool.Exec(ctx, `
-		INSERT INTO parser_jobs (job_id, user_id, profile_id, file_name, file_size, status, progress, stage, error_msg, epochs_count, updated_at)
+	_, err := m.pool.Exec(ctx, `
+		INSERT INTO parser_jobs (job_id, user_id, profile_id, filename, file_size, status, percent, stage, error, epochs, updated_at)
 		VALUES ($1, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP)
 		ON CONFLICT (job_id) DO UPDATE SET
 			status = EXCLUDED.status,
-			progress = EXCLUDED.progress,
+			percent = EXCLUDED.percent,
 			stage = EXCLUDED.stage,
-			error_msg = EXCLUDED.error_msg,
-			epochs_count = EXCLUDED.epochs_count,
+			error = EXCLUDED.error,
+			epochs = EXCLUDED.epochs,
 			updated_at = CURRENT_TIMESTAMP
-	`, job.JobID, job.UserID, profID, job.Filename, job.FileSize, job.Status, float64(job.Percent), job.Stage, job.Error, job.Epochs)
+	`, job.JobID, job.UserID, profID, job.Filename, job.FileSize, job.Status, job.Percent, job.Stage, job.Error, job.Epochs)
+	if err != nil {
+		log.Printf("[PARSER JOBS WARNING] Błąd zapisu parser_jobs do PostgreSQL (%s): %v", job.JobID, err)
+	}
 }
 
-func (m *Manager) saveJobsLocked() {
+func (m *Manager) saveJobLocked(job *JobRecord) {
 	if m.jobsFile != "" {
 		data, err := json.MarshalIndent(m.jobs, "", "  ")
 		if err == nil {
 			_ = os.WriteFile(m.jobsFile, data, 0o644)
 		}
 	}
-	if m.pool != nil {
-		for _, j := range m.jobs {
-			jCopy := *j
-			go m.persistJobToDB(&jCopy)
-		}
+	if m.pool != nil && job != nil {
+		jCopy := *job
+		go m.persistJobToDB(&jCopy)
 	}
 }
 
@@ -246,25 +260,40 @@ func (m *Manager) HandleUpload(w http.ResponseWriter, r *http.Request) {
 	profileID := query.Get("profile_id")
 
 	filters := parser.DefaultNMEAFilterOptions()
+	if v := query.Get("enable_fix_quality"); v != "" {
+		filters.EnableFixQuality = (v == "true" || v == "1")
+	}
 	if v := query.Get("min_fix_quality"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			filters.MinFixQuality = n
 		}
+	}
+	if v := query.Get("enable_satellites"); v != "" {
+		filters.EnableSatellites = (v == "true" || v == "1")
 	}
 	if v := query.Get("min_satellites"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			filters.MinSatellites = n
 		}
 	}
+	if v := query.Get("enable_hdop"); v != "" {
+		filters.EnableHDOP = (v == "true" || v == "1")
+	}
 	if v := query.Get("max_hdop"); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {
 			filters.MaxHDOP = f
 		}
 	}
+	if v := query.Get("enable_pdop"); v != "" {
+		filters.EnablePDOP = (v == "true" || v == "1")
+	}
 	if v := query.Get("max_pdop"); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {
 			filters.MaxPDOP = f
 		}
+	}
+	if v := query.Get("enable_altitude"); v != "" {
+		filters.EnableAltitude = (v == "true" || v == "1")
 	}
 	if v := query.Get("min_altitude"); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {
@@ -276,6 +305,9 @@ func (m *Manager) HandleUpload(w http.ResponseWriter, r *http.Request) {
 			filters.MaxAltitude = f
 		}
 	}
+	if v := query.Get("enable_max_speed"); v != "" {
+		filters.EnableMaxSpeed = (v == "true" || v == "1")
+	}
 	if v := query.Get("max_speed_kmh"); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {
 			filters.MaxSpeedKmh = f
@@ -285,12 +317,15 @@ func (m *Manager) HandleUpload(w http.ResponseWriter, r *http.Request) {
 		filters.RequireValidRMC = (v == "true" || v == "1")
 	}
 
-	// Wygenerowanie losowego identyfikatora zadania
-	rndBytes := make([]byte, 6)
-	_, _ = rand.Read(rndBytes)
-	jobID := fmt.Sprintf("job_%s", hex.EncodeToString(rndBytes))
+	// Wygenerowanie unikalnego identyfikatora zadania UUID v4
+	jobID := parser.NewUUID()
 
-	savedPath := filepath.Join(m.cfg.UploadDir, fmt.Sprintf("%s_%s_%s", userID, jobID, realFilename))
+	safeFilename := filepath.Base(realFilename)
+	if safeFilename == "" || safeFilename == "." || safeFilename == "/" || safeFilename == "\\" {
+		safeFilename = "plik.txt"
+	}
+
+	savedPath := filepath.Join(m.cfg.UploadDir, fmt.Sprintf("%s_%s_%s", userID, jobID, safeFilename))
 	outFile, err := os.Create(savedPath)
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"detail":"Błąd zapisu pliku: %v"}`, err), http.StatusInternalServerError)
@@ -338,7 +373,7 @@ func (m *Manager) HandleUpload(w http.ResponseWriter, r *http.Request) {
 		UserID:      userID,
 		ProfileID:   targetProfileID,
 		ProfileName: targetProfileName,
-		Filename:    realFilename,
+		Filename:    safeFilename,
 		FileSize:    fileSize,
 		Status:      "queued",
 		Stage:       "queued",
@@ -355,11 +390,11 @@ func (m *Manager) HandleUpload(w http.ResponseWriter, r *http.Request) {
 
 	m.mu.Lock()
 	m.jobs[jobID] = job
-	m.saveJobsLocked()
+	m.saveJobLocked(job)
 	m.mu.Unlock()
 
 	// Uruchomienie parsowania asynchronicznie w goroutine w tle
-	go m.runBackgroundJob(jobID, savedPath, realFilename, userID, targetProfileID, targetProfileName, snap, filters, fileSize)
+	go m.runBackgroundJob(jobID, savedPath, safeFilename, userID, targetProfileID, targetProfileName, snap, filters, fileSize)
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
@@ -383,7 +418,7 @@ func (m *Manager) runBackgroundJob(jobID, filePath, filename, userID, profileID,
 		job.Percent = 1
 		job.Message = "Rozpoczęto odczyt i parsowanie danych GPS..."
 		job.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-		m.saveJobsLocked()
+		m.saveJobLocked(job)
 	}
 	m.mu.Unlock()
 
@@ -422,7 +457,7 @@ func (m *Manager) runBackgroundJob(jobID, filePath, filename, userID, profileID,
 				j.Message = p.Message
 				j.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 				if stageChanged || p.Percent%5 == 0 {
-					m.saveJobsLocked()
+					m.saveJobLocked(j)
 				}
 			}
 		},
@@ -449,7 +484,7 @@ func (m *Manager) runBackgroundJob(jobID, filePath, filename, userID, profileID,
 			job.Message = fmt.Sprintf("Zakończono pomyślnie. Zapisano %d epok.", stats.Epochs)
 			job.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 		}
-		m.saveJobsLocked()
+		m.saveJobLocked(job)
 	}
 	m.mu.Unlock()
 
@@ -460,6 +495,7 @@ func (m *Manager) runBackgroundJob(jobID, filePath, filename, userID, profileID,
 			WITH filtered AS (
 				SELECT
 					e.timestamp,
+					e.geom AS pt_raw,
 					COALESCE(e.geom_snapped, e.geom) AS pt,
 					e.geom_snapped,
 					e.geom_line,
@@ -475,18 +511,18 @@ func (m *Manager) runBackgroundJob(jobID, filePath, filename, userID, profileID,
 					COALESCE(round(avg(speed_kmh)::numeric, 2), 0) AS avg_speed_kmh,
 					COALESCE(round((sum(ST_Length(geom_line) * 85.0))::numeric, 2), 0) AS total_km,
 					COALESCE(round((count(DISTINCT CASE WHEN geom_snapped IS NOT NULL THEN ((floor(ST_X(geom_snapped) * 4000.0)::bigint << 32) | (floor(ST_Y(geom_snapped) * 4000.0)::bigint & 4294967295)) END) * 0.0235)::numeric, 2), 0) AS unique_km,
-					round(min(ST_Y(pt))::numeric, 6) AS min_lat,
-					round(max(ST_Y(pt))::numeric, 6) AS max_lat,
-					round(min(ST_X(pt))::numeric, 6) AS min_lon,
-					round(max(ST_X(pt))::numeric, 6) AS max_lon,
-					(max(ARRAY[ST_Y(pt), ST_X(pt)]))[1] AS north_lat,
-					(max(ARRAY[ST_Y(pt), ST_X(pt)]))[2] AS north_lon,
-					(min(ARRAY[ST_Y(pt), ST_X(pt)]))[1] AS south_lat,
-					(min(ARRAY[ST_Y(pt), ST_X(pt)]))[2] AS south_lon,
-					(max(ARRAY[ST_X(pt), ST_Y(pt)]))[2] AS east_lat,
-					(max(ARRAY[ST_X(pt), ST_Y(pt)]))[1] AS east_lon,
-					(min(ARRAY[ST_X(pt), ST_Y(pt)]))[2] AS west_lat,
-					(min(ARRAY[ST_X(pt), ST_Y(pt)]))[1] AS west_lon
+					round(min(ST_Y(pt_raw))::numeric, 6) AS min_lat,
+					round(max(ST_Y(pt_raw))::numeric, 6) AS max_lat,
+					round(min(ST_X(pt_raw))::numeric, 6) AS min_lon,
+					round(max(ST_X(pt_raw))::numeric, 6) AS max_lon,
+					(max(ARRAY[ST_Y(pt_raw), ST_X(pt_raw)]))[1] AS north_lat,
+					(max(ARRAY[ST_Y(pt_raw), ST_X(pt_raw)]))[2] AS north_lon,
+					(min(ARRAY[ST_Y(pt_raw), ST_X(pt_raw)]))[1] AS south_lat,
+					(min(ARRAY[ST_Y(pt_raw), ST_X(pt_raw)]))[2] AS south_lon,
+					(max(ARRAY[ST_X(pt_raw), ST_Y(pt_raw)]))[2] AS east_lat,
+					(max(ARRAY[ST_X(pt_raw), ST_Y(pt_raw)]))[1] AS east_lon,
+					(min(ARRAY[ST_X(pt_raw), ST_Y(pt_raw)]))[2] AS west_lat,
+					(min(ARRAY[ST_X(pt_raw), ST_Y(pt_raw)]))[1] AS west_lon
 				FROM filtered
 			)
 			UPDATE profiles p
@@ -589,7 +625,7 @@ func (m *Manager) HandleAbortJob(w http.ResponseWriter, r *http.Request) {
 	job.Error = &errMsg
 	job.Message = errMsg
 	job.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-	m.saveJobsLocked()
+	m.saveJobLocked(job)
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_, _ = w.Write([]byte(`{"status":"ok","message":"Zadanie zostało przerwane."}`))

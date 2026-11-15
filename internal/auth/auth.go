@@ -67,15 +67,55 @@ func GenerateToken() string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-func ExtractToken(r *http.Request) string {
-	if t := r.URL.Query().Get("token"); t != "" {
-		return t
+type contextKey string
+
+const UserContextKey contextKey = "nnaper_auth_user"
+
+func UserFromContext(ctx context.Context) *User {
+	if ctx == nil {
+		return nil
 	}
+	if u, ok := ctx.Value(UserContextKey).(*User); ok {
+		return u
+	}
+	return nil
+}
+
+func ExtractToken(r *http.Request) string {
 	authHeader := r.Header.Get("Authorization")
 	if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
 		return strings.TrimSpace(authHeader[7:])
 	}
+	if cookie, err := r.Cookie("token"); err == nil && cookie.Value != "" {
+		return strings.TrimSpace(cookie.Value)
+	}
+	if t := r.URL.Query().Get("token"); t != "" {
+		return strings.TrimSpace(t)
+	}
 	return ""
+}
+
+func AuthMiddleware(pool *pgxpool.Pool, required bool) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			token := ExtractToken(r)
+			if token != "" {
+				user, err := GetUserFromToken(r.Context(), pool, token)
+				if err == nil && user != nil {
+					ctx := context.WithValue(r.Context(), UserContextKey, user)
+					next.ServeHTTP(w, r.WithContext(ctx))
+					return
+				}
+			}
+			if required {
+				w.Header().Set("Content-Type", "application/json; charset=utf-8")
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"detail":"Wymagana autoryzacja"}`))
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func GetUserFromToken(ctx context.Context, pool *pgxpool.Pool, token string) (*User, error) {
@@ -104,8 +144,11 @@ func GetUserFromToken(ctx context.Context, pool *pgxpool.Pool, token string) (*U
 }
 
 func GetAuthUserID(ctx context.Context, pool *pgxpool.Pool, token, authHeader string) string {
+	if u := UserFromContext(ctx); u != nil {
+		return u.UserID
+	}
 	t := strings.TrimSpace(token)
-	if t == "" && authHeader != "" {
+	if authHeader != "" {
 		parts := strings.Split(authHeader, " ")
 		if len(parts) == 2 && strings.EqualFold(parts[0], "bearer") {
 			t = strings.TrimSpace(parts[1])
@@ -119,6 +162,17 @@ func GetAuthUserID(ctx context.Context, pool *pgxpool.Pool, token, authHeader st
 		return ""
 	}
 	return user.UserID
+}
+
+func ResolveUser(r *http.Request, pool *pgxpool.Pool) (*User, error) {
+	if u := UserFromContext(r.Context()); u != nil {
+		return u, nil
+	}
+	token := ExtractToken(r)
+	if token == "" {
+		return nil, nil
+	}
+	return GetUserFromToken(r.Context(), pool, token)
 }
 
 type Service struct {
@@ -207,8 +261,8 @@ func RegisterHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, `{"detail":"Nazwa użytkownika musi mieć od 3 do 64 znaków."}`, http.StatusBadRequest)
 			return
 		}
-		if len(password) < 4 {
-			http.Error(w, `{"detail":"Hasło musi mieć co najmniej 4 znaki."}`, http.StatusBadRequest)
+		if len(password) < 8 {
+			http.Error(w, `{"detail":"Hasło musi mieć co najmniej 8 znaków."}`, http.StatusBadRequest)
 			return
 		}
 
@@ -222,19 +276,8 @@ func RegisterHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		var existingID, existingHash string
 		err := pool.QueryRow(ctx, `SELECT user_id, password_hash FROM users WHERE LOWER(username) = LOWER($1)`, username).Scan(&existingID, &existingHash)
 		if err == nil {
-			if existingHash == "placeholder_hash" {
-				err = pool.QueryRow(ctx, `
-					UPDATE users SET password_hash = $1 WHERE user_id = $2
-					RETURNING user_id, avatar_url
-				`, pwHash, existingID).Scan(&userID, &avatarURL)
-				if err != nil {
-					http.Error(w, `{"detail":"Błąd aktualizacji hasła"}`, http.StatusInternalServerError)
-					return
-				}
-			} else {
-				http.Error(w, `{"detail":"Użytkownik o takiej nazwie już istnieje."}`, http.StatusBadRequest)
-				return
-			}
+			http.Error(w, `{"detail":"Użytkownik o takiej nazwie już istnieje."}`, http.StatusBadRequest)
+			return
 		} else {
 			if req.Email != nil && strings.TrimSpace(*req.Email) != "" {
 				var dummy string
@@ -344,8 +387,7 @@ func LoginHandler(pool *pgxpool.Pool) http.HandlerFunc {
 
 func MeHandler(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		token := ExtractToken(r)
-		user, err := GetUserFromToken(r.Context(), pool, token)
+		user, err := ResolveUser(r, pool)
 		w.Header().Set("Content-Type", "application/json")
 
 		if err != nil || user == nil {
@@ -374,8 +416,7 @@ func AvatarHandler(pool *pgxpool.Pool) http.HandlerFunc {
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
-		token := ExtractToken(r)
-		user, err := GetUserFromToken(r.Context(), pool, token)
+		user, err := ResolveUser(r, pool)
 		if err != nil || user == nil {
 			http.Error(w, `{"detail":"Brak autoryzacji."}`, http.StatusUnauthorized)
 			return
@@ -428,8 +469,7 @@ func LogoutHandler(pool *pgxpool.Pool) http.HandlerFunc {
 
 func ListProfilesHandler(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		token := ExtractToken(r)
-		user, err := GetUserFromToken(r.Context(), pool, token)
+		user, err := ResolveUser(r, pool)
 		if err != nil || user == nil {
 			http.Error(w, `{"detail":"Wymagane logowanie."}`, http.StatusUnauthorized)
 			return
@@ -481,8 +521,7 @@ func CreateProfileHandler(pool *pgxpool.Pool) http.HandlerFunc {
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
-		token := ExtractToken(r)
-		user, err := GetUserFromToken(r.Context(), pool, token)
+		user, err := ResolveUser(r, pool)
 		if err != nil || user == nil {
 			http.Error(w, `{"detail":"Wymagane logowanie."}`, http.StatusUnauthorized)
 			return
@@ -526,8 +565,7 @@ func CreateProfileHandler(pool *pgxpool.Pool) http.HandlerFunc {
 
 func DeleteProfileHandler(pool *pgxpool.Pool, onDeleted func()) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		token := ExtractToken(r)
-		user, err := GetUserFromToken(r.Context(), pool, token)
+		user, err := ResolveUser(r, pool)
 		if err != nil || user == nil {
 			http.Error(w, `{"detail":"Wymagane logowanie."}`, http.StatusUnauthorized)
 			return
@@ -576,14 +614,13 @@ func DeleteProfileHandler(pool *pgxpool.Pool, onDeleted func()) http.HandlerFunc
 			}
 			defer tx.Rollback(bgCtx)
 
-			_, _ = tx.Exec(bgCtx, `SET LOCAL session_replication_role = 'replica'`)
-			_, _ = tx.Exec(bgCtx, `
-				DELETE FROM satellite s
-				USING epochs e
-				WHERE s.epoch_id = e.epoch_id AND e.profile_id = $1::uuid`, pID)
 			_, _ = tx.Exec(bgCtx, `UPDATE map_drawings SET profile_id = NULL WHERE profile_id = $1::uuid`, pID)
-			_, _ = tx.Exec(bgCtx, `DELETE FROM epochs WHERE profile_id = $1::uuid`, pID)
-			_, _ = tx.Exec(bgCtx, `DELETE FROM profiles WHERE profile_id = $1::uuid`, pID)
+			if _, err := tx.Exec(bgCtx, `DELETE FROM epochs WHERE profile_id = $1::uuid`, pID); err != nil {
+				log.Printf("[DELETE PROFILE BG ERROR] Błąd kasowania epochs dla profilu %s: %v", pID, err)
+			}
+			if _, err := tx.Exec(bgCtx, `DELETE FROM profiles WHERE profile_id = $1::uuid`, pID); err != nil {
+				log.Printf("[DELETE PROFILE BG ERROR] Błąd kasowania profilu %s: %v", pID, err)
+			}
 			if err := tx.Commit(bgCtx); err != nil {
 				log.Printf("[DELETE PROFILE BG ERROR] Błąd zatwierdzania usunięcia profilu %s: %v", pID, err)
 				return
@@ -601,8 +638,7 @@ func DeleteProfileHandler(pool *pgxpool.Pool, onDeleted func()) http.HandlerFunc
 // trasami GPS, satelitami, rysunkami, presetami i sesjami.
 func DeleteAccountHandler(pool *pgxpool.Pool, onDeleted func()) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		token := ExtractToken(r)
-		user, err := GetUserFromToken(r.Context(), pool, token)
+		user, err := ResolveUser(r, pool)
 		if err != nil || user == nil {
 			http.Error(w, `{"detail":"Wymagane logowanie."}`, http.StatusUnauthorized)
 			return
@@ -617,34 +653,7 @@ func DeleteAccountHandler(pool *pgxpool.Pool, onDeleted func()) http.HandlerFunc
 		}
 		defer tx.Rollback(ctx)
 
-		// Bypasujemy kosztowne wyzwalacze sprawdzania kluczy obcych
-		_, _ = tx.Exec(ctx, `SET LOCAL session_replication_role = 'replica'`)
-
-		// 1. Usuwamy satelity dla wszystkich epok należących do profili użytkownika
-		_, _ = tx.Exec(ctx, `
-			DELETE FROM satellite s
-			USING epochs e, profiles p
-			WHERE s.epoch_id = e.epoch_id AND e.profile_id = p.profile_id AND p.user_id = $1::uuid`, user.UserID)
-
-		// 2. Usuwamy wszystkie epoki powiązane z profilami użytkownika
-		_, _ = tx.Exec(ctx, `
-			DELETE FROM epochs e
-			USING profiles p
-			WHERE e.profile_id = p.profile_id AND p.user_id = $1::uuid`, user.UserID)
-
-		// 3. Usuwamy rysunki mapy użytkownika
-		_, _ = tx.Exec(ctx, `DELETE FROM map_drawings WHERE user_id = $1::uuid`, user.UserID)
-
-		// 4. Usuwamy presety warstw użytkownika
-		_, _ = tx.Exec(ctx, `DELETE FROM layer_presets WHERE user_id = $1::uuid`, user.UserID)
-
-		// 5. Usuwamy wszystkie profile użytkownika
-		_, _ = tx.Exec(ctx, `DELETE FROM profiles WHERE user_id = $1::uuid`, user.UserID)
-
-		// 6. Usuwamy sesje użytkownika
-		_, _ = tx.Exec(ctx, `DELETE FROM user_sessions WHERE user_id = $1::uuid`, user.UserID)
-
-		// 7. Usuwamy rekord użytkownika
+		// Kaskadowe usunięcie użytkownika (PostgreSQL CASCADE usunie profile, epoki, presety, sesje i rysunki)
 		res, err := tx.Exec(ctx, `DELETE FROM users WHERE user_id = $1::uuid`, user.UserID)
 		if err != nil || res.RowsAffected() == 0 {
 			http.Error(w, `{"detail":"Konto użytkownika nie zostało odnalezione."}`, http.StatusNotFound)
@@ -683,8 +692,7 @@ func UpdateSettingsHandler(pool *pgxpool.Pool) http.HandlerFunc {
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
-		token := ExtractToken(r)
-		user, err := GetUserFromToken(r.Context(), pool, token)
+		user, err := ResolveUser(r, pool)
 		if err != nil || user == nil {
 			http.Error(w, `{"detail":"Wymagane logowanie."}`, http.StatusUnauthorized)
 			return
@@ -767,14 +775,18 @@ func UpdateSettingsHandler(pool *pgxpool.Pool) http.HandlerFunc {
 				http.Error(w, `{"detail":"Nowe hasło musi mieć co najmniej 4 znaki."}`, http.StatusBadRequest)
 				return
 			}
-			if req.CurrentPassword != nil && strings.TrimSpace(*req.CurrentPassword) != "" {
-				var curHash string
-				if err := pool.QueryRow(ctx, `SELECT password_hash FROM users WHERE user_id = $1::uuid`, user.UserID).Scan(&curHash); err == nil {
-					if curHash != "placeholder_hash" && !VerifyPassword(strings.TrimSpace(*req.CurrentPassword), curHash) {
-						http.Error(w, `{"detail":"Aktualne hasło jest nieprawidłowe."}`, http.StatusBadRequest)
-						return
-					}
-				}
+			if req.CurrentPassword == nil || strings.TrimSpace(*req.CurrentPassword) == "" {
+				http.Error(w, `{"detail":"Podanie obecnego hasła jest wymagane do zmiany hasła."}`, http.StatusBadRequest)
+				return
+			}
+			var curHash string
+			if err := pool.QueryRow(ctx, `SELECT password_hash FROM users WHERE user_id = $1::uuid`, user.UserID).Scan(&curHash); err != nil {
+				http.Error(w, `{"detail":"Błąd pobierania danych użytkownika"}`, http.StatusInternalServerError)
+				return
+			}
+			if !VerifyPassword(strings.TrimSpace(*req.CurrentPassword), curHash) {
+				http.Error(w, `{"detail":"Aktualne hasło jest nieprawidłowe."}`, http.StatusBadRequest)
+				return
 			}
 			newHash := HashPassword(newPass)
 			_, err = pool.Exec(ctx, `UPDATE users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2::uuid`, newHash, user.UserID)
@@ -813,8 +825,7 @@ func UpdateSettingsHandler(pool *pgxpool.Pool) http.HandlerFunc {
 // - Min / Max Lat / Lon (min_lat, max_lat, min_lon, max_lon)
 func GetAccountStatsHandler(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		token := ExtractToken(r)
-		user, err := GetUserFromToken(r.Context(), pool, token)
+		user, err := ResolveUser(r, pool)
 		if err != nil || user == nil {
 			http.Error(w, `{"detail":"Wymagane logowanie."}`, http.StatusUnauthorized)
 			return
@@ -822,9 +833,10 @@ func GetAccountStatsHandler(pool *pgxpool.Pool) http.HandlerFunc {
 
 		ctx := r.Context()
 		profileID := strings.TrimSpace(r.URL.Query().Get("profile_id"))
+		force := r.URL.Query().Get("force") == "true" || r.URL.Query().Get("refresh") == "true"
 
 		// Instant-load: jeśli profil ma już zapisane przeliczone statystyki, serwujemy je natychmiast z tabeli profiles
-		if profileID != "" && profileID != "all" && profileID != "__all__" && len(profileID) == 36 {
+		if !force && profileID != "" && profileID != "all" && profileID != "__all__" && len(profileID) == 36 {
 			var nLat, nLon, sLat, sLon, eLat, eLon, wLat, wLon *float64
 			var statsUpdatedAt *time.Time
 			var pEpochs, pDays int64
@@ -889,6 +901,7 @@ func GetAccountStatsHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			WITH filtered AS (
 				SELECT
 					e.timestamp,
+					e.geom AS pt_raw,
 					COALESCE(e.geom_snapped, e.geom) AS pt,
 					e.geom_snapped,
 					e.geom_line,
@@ -903,14 +916,14 @@ func GetAccountStatsHandler(pool *pgxpool.Pool) http.HandlerFunc {
 				COALESCE(round(avg(speed_kmh)::numeric, 2), 0) AS avg_speed_kmh,
 				COALESCE(round((sum(ST_Length(geom_line) * 85.0))::numeric, 2), 0) AS snapped_total_km,
 				COALESCE(round((count(DISTINCT CASE WHEN geom_snapped IS NOT NULL THEN ((floor(ST_X(geom_snapped) * 4000.0)::bigint << 32) | (floor(ST_Y(geom_snapped) * 4000.0)::bigint & 4294967295)) END) * 0.0235)::numeric, 2), 0) AS unique_km,
-				round(min(ST_Y(pt))::numeric, 6) AS min_lat,
-				round(max(ST_Y(pt))::numeric, 6) AS max_lat,
-				round(min(ST_X(pt))::numeric, 6) AS min_lon,
-				round(max(ST_X(pt))::numeric, 6) AS max_lon,
-				max(ARRAY[ST_Y(pt), ST_X(pt)]) AS north_pt,
-				min(ARRAY[ST_Y(pt), ST_X(pt)]) AS south_pt,
-				max(ARRAY[ST_X(pt), ST_Y(pt)]) AS east_pt,
-				min(ARRAY[ST_X(pt), ST_Y(pt)]) AS west_pt
+				round(min(ST_Y(pt_raw))::numeric, 6) AS min_lat,
+				round(max(ST_Y(pt_raw))::numeric, 6) AS max_lat,
+				round(min(ST_X(pt_raw))::numeric, 6) AS min_lon,
+				round(max(ST_X(pt_raw))::numeric, 6) AS max_lon,
+				max(ARRAY[ST_Y(pt_raw), ST_X(pt_raw)]) AS north_pt,
+				min(ARRAY[ST_Y(pt_raw), ST_X(pt_raw)]) AS south_pt,
+				max(ARRAY[ST_X(pt_raw), ST_Y(pt_raw)]) AS east_pt,
+				min(ARRAY[ST_X(pt_raw), ST_Y(pt_raw)]) AS west_pt
 			FROM filtered;
 		`, whereProfile)
 
@@ -1031,8 +1044,7 @@ type LayerPreset struct {
 
 func ListPresetsHandler(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		token := ExtractToken(r)
-		user, _ := GetUserFromToken(r.Context(), pool, token)
+		user, _ := ResolveUser(r, pool)
 
 		var list []LayerPreset
 		if user != nil {
@@ -1072,8 +1084,7 @@ func SavePresetHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		Config map[string]interface{} `json:"config"`
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		token := ExtractToken(r)
-		user, err := GetUserFromToken(r.Context(), pool, token)
+		user, err := ResolveUser(r, pool)
 		if err != nil || user == nil {
 			http.Error(w, `{"detail":"Wymagane logowanie."}`, http.StatusUnauthorized)
 			return
@@ -1120,8 +1131,7 @@ func SavePresetHandler(pool *pgxpool.Pool) http.HandlerFunc {
 
 func DeletePresetHandler(pool *pgxpool.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		token := ExtractToken(r)
-		user, err := GetUserFromToken(r.Context(), pool, token)
+		user, err := ResolveUser(r, pool)
 		if err != nil || user == nil {
 			http.Error(w, `{"detail":"Wymagane logowanie."}`, http.StatusUnauthorized)
 			return

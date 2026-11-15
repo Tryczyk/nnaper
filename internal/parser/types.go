@@ -60,27 +60,39 @@ type SatelliteData struct {
 
 // NMEAFilterOptions definiuje parametry filtrowania danych NMEA / GPS
 type NMEAFilterOptions struct {
-	MinFixQuality   int     `json:"min_fix_quality"`   // 0 = dowolny, 1 = GPS SPS (zalecane), 2 = DGPS, 4 = RTK
-	MinSatellites   int     `json:"min_satellites"`    // min liczba satelitow (zalecane: 4)
-	MaxHDOP         float64 `json:"max_hdop"`          // maks dopuszczalny blad HDOP (zalecane: 5.0, 0 = wylaczony)
-	MaxPDOP         float64 `json:"max_pdop"`          // maks dopuszczalny blad PDOP (zalecane: 6.0, 0 = wylaczony)
-	MinAltitude     float64 `json:"min_altitude"`      // min wysokosc n.p.m. w metrach (zalecane: -50.0)
-	MaxAltitude     float64 `json:"max_altitude"`      // maks wysokosc n.p.m. w metrach (zalecane: 5000.0)
-	MaxSpeedKmh     float64 `json:"max_speed_kmh"`     // maks predkosc km/h do odciecia teleportacji (zalecane: 250.0)
-	RequireValidRMC bool    `json:"require_valid_rmc"` // czy wymagac statusu 'A' (Valid) z RMC (zalecane: true)
+	EnableFixQuality bool    `json:"enable_fix_quality"` // czy aktywny wybierak jakości Fix
+	MinFixQuality    int     `json:"min_fix_quality"`    // 0 = dowolny, 1 = GPS SPS (zalecane), 2 = DGPS, 4 = RTK
+	EnableSatellites bool    `json:"enable_satellites"`  // czy aktywny wybierak liczby satelitów
+	MinSatellites    int     `json:"min_satellites"`     // min liczba satelitow (zalecane: 4)
+	EnableHDOP       bool    `json:"enable_hdop"`        // czy aktywny wybierak błędu HDOP
+	MaxHDOP          float64 `json:"max_hdop"`           // maks dopuszczalny blad HDOP (zalecane: 5.0)
+	EnablePDOP       bool    `json:"enable_pdop"`        // czy aktywny wybierak błędu PDOP
+	MaxPDOP          float64 `json:"max_pdop"`           // maks dopuszczalny blad PDOP (zalecane: 6.0)
+	EnableAltitude   bool    `json:"enable_altitude"`    // czy aktywny wybierak pułapu wysokości
+	MinAltitude      float64 `json:"min_altitude"`       // min wysokosc n.p.m. w metrach (zalecane: -50.0)
+	MaxAltitude      float64 `json:"max_altitude"`       // maks wysokosc n.p.m. w metrach (zalecane: 5000.0)
+	EnableMaxSpeed   bool    `json:"enable_max_speed"`   // czy aktywny wybierak prędkości maksymalnej
+	MaxSpeedKmh      float64 `json:"max_speed_kmh"`      // maks predkosc km/h do odciecia teleportacji (zalecane: 250.0)
+	RequireValidRMC  bool    `json:"require_valid_rmc"`  // czy wymagac statusu 'A' (Valid) z RMC (zalecane: true)
 }
 
 // DefaultNMEAFilterOptions zwraca standardowe, zalecane parametry filtracji
 func DefaultNMEAFilterOptions() NMEAFilterOptions {
 	return NMEAFilterOptions{
-		MinFixQuality:   1,
-		MinSatellites:   4,
-		MaxHDOP:         5.0,
-		MaxPDOP:         6.0,
-		MinAltitude:     -50.0,
-		MaxAltitude:     5000.0,
-		MaxSpeedKmh:     250.0,
-		RequireValidRMC: true,
+		EnableFixQuality: true,
+		MinFixQuality:    1,
+		EnableSatellites: true,
+		MinSatellites:    4,
+		EnableHDOP:       true,
+		MaxHDOP:          5.0,
+		EnablePDOP:       true,
+		MaxPDOP:          6.0,
+		EnableAltitude:   true,
+		MinAltitude:      -50.0,
+		MaxAltitude:      5000.0,
+		EnableMaxSpeed:   true,
+		MaxSpeedKmh:      250.0,
+		RequireValidRMC:  true,
 	}
 }
 

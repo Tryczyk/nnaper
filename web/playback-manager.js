@@ -141,6 +141,87 @@
   const chkFollow = document.getElementById('chk-playback-follow');
   let lastWheelScrollTime = 0;
 
+  // Strumieniowe buforowanie w oknie przesuwnym w stylu YouTube (Streaming Replay)
+  let isStreamMode = false;
+  let streamTotalCount = 0;
+  let streamWindowOffset = 0; // globalny indeks pierwszego elementu w trackData
+  let streamFetchingNext = false;
+  let currentLoadedDayStr = '';
+
+  function getLocalIndex(globalIdx = currentIndex) {
+    return isStreamMode ? (globalIdx - streamWindowOffset) : globalIdx;
+  }
+
+  function getCurrentTrackPoint() {
+    const lIdx = getLocalIndex();
+    return (lIdx >= 0 && lIdx < trackData.length) ? trackData[lIdx] : null;
+  }
+
+  async function fetchStreamChunk(dayStr, offset, limit = 5000, afterTs = '') {
+    const token = window.getAuthToken?.() || '';
+    const trackMode = localStorage.getItem('nnaper_track_mode');
+    const isSnapped = (trackMode === 'snapped' || trackMode === 'osm' || localStorage.getItem('nnaper_snap_roads') === 'true');
+    const snapParam = isSnapped ? '&snapped=true' : '';
+    const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
+    const rawProf = (typeof window.getActiveProfileId === 'function') ? window.getActiveProfileId() : '';
+    const profileId = (rawProf && rawProf !== 'undefined' && rawProf !== 'null' && rawProf !== 'all') ? rawProf : '';
+    const profParam = profileId ? `&profile_id=${encodeURIComponent(profileId)}` : '';
+    const afterParam = afterTs ? `&after_ts=${encodeURIComponent(afterTs)}` : '';
+
+    const url = `${apiBaseUrl}/api/playback-day?day=${encodeURIComponent(dayStr)}${snapParam}${tokenParam}${profParam}&limit=${limit}&offset=${offset}${afterParam}`;
+    const res = await fetch(url, { credentials: 'include' });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    return await res.json();
+  }
+
+  async function fetchNextStreamChunk() {
+    if (!isStreamMode || streamFetchingNext) return;
+    const nextOffset = streamWindowOffset + trackData.length;
+    if (nextOffset >= streamTotalCount) return;
+    streamFetchingNext = true;
+    try {
+      const lastPt = trackData[trackData.length - 1];
+      const afterTs = (lastPt && lastPt.timestamp) ? lastPt.timestamp : '';
+      const chunk = await fetchStreamChunk(currentLoadedDayStr, nextOffset, 5000, afterTs);
+      if (chunk && chunk.length > 0) {
+        trackData = trackData.concat(chunk);
+        // Przytnij bufor z lewej strony, jeśli przekracza 25 000 punktów, zachowując bezpieczny bufor za pojazdem
+        const curLocal = currentIndex - streamWindowOffset;
+        if (trackData.length > 25000 && curLocal > 6000) {
+          const pruneCount = curLocal - 3000;
+          trackData.splice(0, pruneCount);
+          streamWindowOffset += pruneCount;
+        }
+      }
+    } catch (e) {
+      console.warn('Błąd prefetchingu bufora GPS:', e);
+    } finally {
+      streamFetchingNext = false;
+    }
+  }
+
+  async function seekStreamBufferTo(targetGlobalIndex) {
+    if (!isStreamMode) return;
+    pausePlayback();
+    if (loadingBanner) loadingBanner.style.display = 'inline-flex';
+    try {
+      const chunk = await fetchStreamChunk(currentLoadedDayStr, targetGlobalIndex, 5000);
+      if (chunk && chunk.length > 0) {
+        trackData = chunk;
+        streamWindowOffset = targetGlobalIndex;
+        currentIndex = targetGlobalIndex;
+        virtualTime = new Date(chunk[0].timestamp).getTime();
+        renderCarAt(0, true);
+      }
+    } catch (e) {
+      console.error('Błąd przewijania bufora GPS:', e);
+    } finally {
+      if (loadingBanner) loadingBanner.style.display = 'none';
+    }
+  }
+
   let chartStats = {
     maxLatG: 0,
     maxLonG: 0
@@ -296,6 +377,9 @@
   }
 
   function getDistanceKm(lat1, lon1, lat2, lon2) {
+    if (typeof window.haversineDistanceKm === 'function') {
+      return window.haversineDistanceKm(lat1, lon1, lat2, lon2);
+    }
     const R = 6371;
     const dLat = (lat2 - lat1) * Math.PI / 180;
     const dLon = (lon2 - lon1) * Math.PI / 180;
@@ -472,7 +556,7 @@
 
     const followCheckbox = chkFollow || document.getElementById('chk-playback-follow');
     if (centerCamera || (followCheckbox && followCheckbox.checked)) {
-      const isUserZooming = (performance.now() - lastWheelScrollTime < 400) || (typeof m.isZooming === 'function' && m.isZooming());
+      const isUserZooming = (performance.now() - lastWheelScrollTime < 1000) || (typeof m.isZooming === 'function' && m.isZooming());
       if (isUserZooming && m.transform) {
         m.transform.center = maplibregl.LngLat.convert([pt.lon, pt.lat]);
         m.triggerRepaint();
@@ -520,7 +604,15 @@
     }
 
     const d = new Date(pt.timestamp);
-    if (hudTime) hudTime.innerText = isNaN(d.getTime()) ? (pt.timestamp || '--:--:--') : d.toTimeString().split(' ')[0];
+    const dateStr = !isNaN(d.getTime()) ? d.toISOString().split('T')[0] : '';
+    const timeStr = !isNaN(d.getTime()) ? d.toTimeString().split(' ')[0] : (pt.timestamp || '--:--:--');
+    if (hudTime) {
+      if (dateStr && (isStreamMode || currentLoadedDayStr === '0' || currentLoadedDayStr === 'all' || selDay?.value === '0' || selDay?.value === 'all')) {
+        hudTime.innerText = `${timeStr} | ${dateStr}`;
+      } else {
+        hudTime.innerText = timeStr;
+      }
+    }
     const spd = (pt.speed_kmh !== null && pt.speed_kmh !== undefined && !isNaN(Number(pt.speed_kmh)))
       ? Number(pt.speed_kmh).toFixed(1)
       : '0.0';
@@ -534,13 +626,18 @@
     updateSatellitesDisplay(pt);
 
     if (slider && !isUserSeeking) {
-      if (slider.max != trackData.length - 1) {
-        slider.max = trackData.length - 1;
+      const maxIdx = isStreamMode ? (streamTotalCount - 1) : (trackData.length - 1);
+      if (slider.max != maxIdx) {
+        slider.max = maxIdx;
       }
-      slider.value = index;
+      slider.value = currentIndex;
     }
-    if (hudProgressInfo && trackData.length > 0) {
-      hudProgressInfo.innerText = `${index + 1} / ${trackData.length} epok`;
+    if (hudProgressInfo) {
+      if (isStreamMode) {
+        hudProgressInfo.innerText = `${currentIndex + 1} / ${streamTotalCount} epok (buforowane)`;
+      } else if (trackData.length > 0) {
+        hudProgressInfo.innerText = `${currentIndex + 1} / ${trackData.length} epok`;
+      }
     }
   }
 
@@ -830,32 +927,15 @@
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const rawTree = await res.json();
-      const cleanTree = {};
+      const cleanTree = (typeof window.sanitizeDatesTree === 'function') ? window.sanitizeDatesTree(rawTree) : (rawTree || {});
       availableDates = [];
-      if (rawTree && typeof rawTree === 'object') {
-        Object.keys(rawTree).forEach(y => {
-          if (/^\d{4}$/.test(y) && rawTree[y] && typeof rawTree[y] === 'object') {
-            cleanTree[y] = {};
-            Object.keys(rawTree[y]).forEach(m => {
-              const mPadded = String(m).padStart(2, '0');
-              if (/^\d{2}$/.test(mPadded) && Array.isArray(rawTree[y][m])) {
-                const daysClean = rawTree[y][m]
-                  .map(d => String(d).padStart(2, '0'))
-                  .filter(d => /^\d{2}$/.test(d));
-                if (daysClean.length > 0) {
-                  cleanTree[y][mPadded] = Array.from(new Set(daysClean)).sort().reverse();
-                  cleanTree[y][mPadded].forEach(d => {
-                    availableDates.push(`${y}-${mPadded}-${d}`);
-                  });
-                }
-              }
-            });
-            if (Object.keys(cleanTree[y]).length === 0) {
-              delete cleanTree[y];
-            }
-          }
+      Object.keys(cleanTree).forEach(y => {
+        Object.keys(cleanTree[y]).forEach(m => {
+          cleanTree[y][m].forEach(d => {
+            availableDates.push(`${y}-${m}-${d}`);
+          });
         });
-      }
+      });
       datesTree = cleanTree;
       availableDates = Array.from(new Set(availableDates)).sort().reverse();
       loadedDatesContextKey = `${token}:${profileId}`;
@@ -926,12 +1006,35 @@
       const rawProf = (typeof window.getActiveProfileId === 'function') ? window.getActiveProfileId() : '';
       const profileId = (rawProf && rawProf !== 'undefined' && rawProf !== 'null' && rawProf !== 'all') ? rawProf : '';
       const profParam = profileId ? `&profile_id=${encodeURIComponent(profileId)}` : '';
-      const res = await fetch(`${apiBaseUrl}/api/playback-day?day=${encodeURIComponent(dayStr)}${snapParam}${tokenParam}${profParam}`, { signal, credentials: 'include' });
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.detail || `HTTP ${res.status}`);
+      currentLoadedDayStr = dayStr;
+      if (dayStr === '0' || dayStr === 'all' || dayStr === 'all-history') {
+        isStreamMode = true;
+        streamWindowOffset = 0;
+        // 1. Najpierw pobieramy same metadane dla całej historii (łączna liczba punktów, zakres dat)
+        const metaRes = await fetch(`${apiBaseUrl}/api/playback-day?day=${encodeURIComponent(dayStr)}${snapParam}${tokenParam}${profParam}&meta_only=true`, { signal, credentials: 'include' });
+        if (!metaRes.ok) throw new Error(`HTTP ${metaRes.status}`);
+        const meta = await metaRes.json();
+        streamTotalCount = Number(meta.total) || 0;
+
+        if (streamTotalCount === 0) {
+          trackData = [];
+        } else {
+          // 2. Pobieramy pierwszy chunk 5 000 punktów do bufora
+          const chunkRes = await fetch(`${apiBaseUrl}/api/playback-day?day=${encodeURIComponent(dayStr)}${snapParam}${tokenParam}${profParam}&limit=5000&offset=0`, { signal, credentials: 'include' });
+          if (!chunkRes.ok) throw new Error(`HTTP ${chunkRes.status}`);
+          trackData = await chunkRes.json();
+        }
+      } else {
+        isStreamMode = false;
+        streamTotalCount = 0;
+        streamWindowOffset = 0;
+        const res = await fetch(`${apiBaseUrl}/api/playback-day?day=${encodeURIComponent(dayStr)}${snapParam}${tokenParam}${profParam}`, { signal, credentials: 'include' });
+        if (!res.ok) {
+          const errJson = await res.json().catch(() => ({}));
+          throw new Error(errJson.detail || `HTTP ${res.status}`);
+        }
+        trackData = await res.json();
       }
-      trackData = await res.json();
       currentIndex = 0;
 
       // Wyczyszczenie warstwy śladu przy nowej trasie
@@ -1039,7 +1142,7 @@
       if (hudMaxGxyz) hudMaxGxyz.innerText = hasG ? `${maxGx.toFixed(2)} / ${maxGy.toFixed(2)} / ${maxGz.toFixed(2)} G` : '--';
 
       if (slider) {
-        slider.max = trackData.length - 1;
+        slider.max = isStreamMode ? (streamTotalCount - 1) : (trackData.length - 1);
         slider.value = 0;
       }
 
@@ -1083,30 +1186,46 @@
     const mult = (!isNaN(parsedMult) && parsedMult > 0) ? parsedMult : 60;
     virtualTime += deltaWallClock * mult;
 
-    let targetIndex = currentIndex;
-    while (targetIndex < trackData.length - 1) {
-      const nextPtTime = new Date(trackData[targetIndex + 1].timestamp).getTime();
-      const currPtTime = new Date(trackData[targetIndex].timestamp).getTime();
+    let localIdx = getLocalIndex();
+    let advanced = false;
+
+    while (localIdx < trackData.length - 1) {
+      const nextPtTime = new Date(trackData[localIdx + 1].timestamp).getTime();
+      const currPtTime = new Date(trackData[localIdx].timestamp).getTime();
 
       if ((nextPtTime - currPtTime) > (5 * 60 * 1000) && virtualTime < nextPtTime) {
         virtualTime = nextPtTime;
       }
 
       if (virtualTime >= nextPtTime) {
-        targetIndex++;
+        localIdx++;
+        currentIndex++;
+        advanced = true;
       } else {
         break;
       }
     }
 
-    if (targetIndex !== currentIndex) {
-      currentIndex = targetIndex;
-      renderCarAt(currentIndex);
+    if (advanced || localIdx >= 0) {
+      if (localIdx >= 0 && localIdx < trackData.length) {
+        renderCarAt(localIdx);
+      }
     }
 
-    if (currentIndex >= trackData.length - 1) {
+    // Lookahead pre-fetch w stylu YouTube:
+    if (isStreamMode && !streamFetchingNext) {
+      const remainingInBuffer = (streamWindowOffset + trackData.length) - currentIndex;
+      if (remainingInBuffer < 1500 && (streamWindowOffset + trackData.length) < streamTotalCount) {
+        fetchNextStreamChunk();
+      }
+    }
+
+    const maxGlobal = isStreamMode ? (streamTotalCount - 1) : (trackData.length - 1);
+    if (currentIndex >= maxGlobal) {
       pausePlayback();
-      if (hudProgressInfo) hudProgressInfo.innerText = `Koniec trasy (${trackData.length} epok)`;
+      if (hudProgressInfo) {
+        hudProgressInfo.innerText = `Koniec trasy (${isStreamMode ? streamTotalCount : trackData.length} epok)`;
+      }
       return;
     }
 
@@ -1115,13 +1234,18 @@
 
   function startPlayback() {
     if (!trackData.length) return;
-    if (currentIndex >= trackData.length - 1) {
-      currentIndex = 0;
-      virtualTime = new Date(trackData[0].timestamp).getTime();
-      if (hudProgressInfo) {
-        hudProgressInfo.innerText = '';
+    const maxGlobal = isStreamMode ? (streamTotalCount - 1) : (trackData.length - 1);
+    if (currentIndex >= maxGlobal) {
+      if (isStreamMode) {
+        seekStreamBufferTo(0);
+      } else {
+        currentIndex = 0;
+        virtualTime = new Date(trackData[0].timestamp).getTime();
+        if (hudProgressInfo) {
+          hudProgressInfo.innerText = '';
+        }
+        renderCarAt(0, true);
       }
-      renderCarAt(0, true);
     }
     isPlaying = true;
     lastWallClockTime = performance.now();
@@ -1133,7 +1257,8 @@
     isPlaying = false;
     if (animFrameId) cancelAnimationFrame(animFrameId);
     if (btnPlay) btnPlay.innerText = 'Odtwarzaj';
-    if (trackData[currentIndex]) updateSatellitesDisplay(trackData[currentIndex]);
+    const pt = getCurrentTrackPoint();
+    if (pt) updateSatellitesDisplay(pt);
   }
 
   function updatePlaybackButtonState(active) {
@@ -1282,10 +1407,22 @@
     slider.addEventListener('input', (e) => {
       isUserSeeking = true;
       pausePlayback();
-      currentIndex = parseInt(e.target.value, 10);
-      if (trackData[currentIndex]) {
-        virtualTime = new Date(trackData[currentIndex].timestamp).getTime();
-        renderCarAt(currentIndex, true);
+      const targetGlobalIndex = parseInt(e.target.value, 10);
+      currentIndex = targetGlobalIndex;
+
+      if (!isStreamMode) {
+        if (trackData[currentIndex]) {
+          virtualTime = new Date(trackData[currentIndex].timestamp).getTime();
+          renderCarAt(currentIndex, true);
+        }
+      } else {
+        const localIdx = currentIndex - streamWindowOffset;
+        if (localIdx >= 0 && localIdx < trackData.length) {
+          virtualTime = new Date(trackData[localIdx].timestamp).getTime();
+          renderCarAt(localIdx, true);
+        } else {
+          seekStreamBufferTo(currentIndex);
+        }
       }
     });
     slider.addEventListener('change', () => {
@@ -1324,8 +1461,9 @@
   if (speedMultiplier) {
     const onSpeedChange = () => {
       lastWallClockTime = performance.now();
-      if (trackData[currentIndex]) {
-        virtualTime = new Date(trackData[currentIndex].timestamp).getTime();
+      const curPt = getCurrentTrackPoint();
+      if (curPt) {
+        virtualTime = new Date(curPt.timestamp).getTime();
       }
     };
     speedMultiplier.addEventListener('input', onSpeedChange);
@@ -1334,7 +1472,8 @@
 
   if (satViewSelect) {
     satViewSelect.addEventListener('change', () => {
-      if (trackData[currentIndex]) updateSatellitesDisplay(trackData[currentIndex]);
+      const curPt = getCurrentTrackPoint();
+      if (curPt) updateSatellitesDisplay(curPt);
     });
   }
 
@@ -1363,7 +1502,7 @@
         const trailSrc = m?.getSource('playback-trail-source');
         if (trailSrc) trailSrc.setData({ type: 'FeatureCollection', features: [] });
       } else if (trackData.length > 0 && currentIndex > 0) {
-        renderCarAt(currentIndex);
+        renderCarAt(getLocalIndex());
       }
     });
   }
@@ -1374,8 +1513,9 @@
       if (!m) return;
       if (chkFollow.checked) {
         m.scrollZoom?.enable({ around: 'center' });
-        if (trackData[currentIndex]) {
-          renderCarAt(currentIndex, true);
+        const curPt = getCurrentTrackPoint();
+        if (curPt) {
+          renderCarAt(getLocalIndex(), true);
         }
       } else {
         m.scrollZoom?.enable();
@@ -1393,18 +1533,18 @@
       const currentZoom = m.getZoom();
       const zoomStep = delta < 0 ? 0.35 : -0.35;
       const targetZoom = Math.min(m.getMaxZoom(), Math.max(m.getMinZoom(), currentZoom + zoomStep));
-      if (m.transform) {
-        m.transform.zoom = targetZoom;
-        if (trackData[currentIndex] && (chkFollow && chkFollow.checked)) {
-          m.transform.center = maplibregl.LngLat.convert([trackData[currentIndex].lon, trackData[currentIndex].lat]);
-        }
-        m.triggerRepaint();
-      } else {
-        m.easeTo({ zoom: targetZoom, duration: 150 });
-      }
+      m.easeTo({ zoom: targetZoom, duration: 200, easing: (t) => t * (2 - t) });
       e.preventDefault();
     }, { passive: false });
   }
+
+  // Obsługa wyjścia klawiszem ESC z trybu Replay
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && (isPlaybackActive || document.body.classList.contains('playback-mode'))) {
+      e.preventDefault();
+      closePlaybackMode();
+    }
+  });
 
   // Automatyczny start przy parametrze URL ?mode=playback
   function checkUrlForPlaybackMode() {
