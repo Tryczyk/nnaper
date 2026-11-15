@@ -12,14 +12,20 @@ Cały backend, lokalny geocoder, indeksator PBF oraz grafowy silnik wyznaczania 
 
 ## Główne możliwości platformy
 
-### 1. Ultra-szybki silnik parsowania i Map Matchingu (Go)
+### 1. Ultra-szybki silnik parsowania, Map Matchingu (Go) i zaawansowanych filtrów NMEA
 * **Wydajność 15–30 MB/s**: Przetwarzanie plików o rozmiarach od kilkunastu kilobajtów do wielu gigabajtów (nawet 650 MB – 10 GB) ze znikomym zużyciem pamięci RAM (~25 MB).
 * **Obsługiwane formaty**:
   * **NMEA 0183**: Pełna agregacja cykli `$GPRMC`, `$GPGGA`, `$GPGSV` (satelity) oraz `$GSENSORD` (trójosiowe przeciążenia akcelerometru $G_x$, $G_y$, $G_z$).
-  * **GPX**: Ślady rejestrowane przez zegarki i aplikacje sportowe (Garmin, Strava, OsmAnd).
-  * **CSV**: Elastyczne dopasowywanie kolumn (szerokość, długość, czas, prędkość, akceleracja).
+  * **Automatyczne rozpoznawanie NMEA w plikach `.txt`**: Natychmiastowa identyfikacja prefiksów `$GP`, `$GN`, `$GL`, `$GA`, `$GB`, `$BD` w próbce pliku tekstowego przed próbą parsowania jako CSV.
+  * **GPX**: Ślady rejestrowane przez zegarki i aplikacje sportowe (Garmin, Strava, OsmAnd) wraz z wysokością `<ele>`.
+  * **CSV**: Elastyczne dopasowywanie kolumn (szerokość, długość, czas, wysokość `alt`/`altitude`/`ele`, prędkość, akceleracja $G$).
+* **Filtry jakości NMEA z szybkimi profilami**:
+  * Konfigurowalny zestaw parametrów: minimalna jakość Fix (GGA Quality), minimalna liczba satelitów, dopuszczalne rozmycie precyzji HDOP i PDOP, zakres wysokości n.p.m., maksymalna prędkość (km/h) oraz weryfikacja statusu RMC.
+  * Szybkie profile filtru: **Zalecany** (optymalny GPS), **Brak filtrów** (surowe dane bez odrzucania), **Ścisły** (wysoka precyzja, HDOP $\le 2.5$) oraz **Własny**.
+* **Ciągłość konstelacji satelitów GSV**:
+  * Precyzyjne scalanie wieloczęściowych pakietów zdań GSV i buforowanie ostatniej znanej konstelacji, eliminujące problem migania i gubienia satelitów na mapie.
 * **Map Matching OSRM**: Równoległe (16 wątków) dopasowywanie punktów do sieci ulic z natychmiastową interpolacją wektorową geometrii dróg (`LINESTRING`) oraz filtrowaniem dryfu postojowego GPS.
-* **Zadania w tle i trwałość**: Pełna asynchroniczność zadań na serwerze z zapisem stanu na dysku (`jobs_state.json`). Odświeżenie przeglądarki czy restart serwera nie gubi postępu ani importowanego pliku.
+* **Zadania w tle i trwałość**: Pełna asynchroniczność zadań na serwerze z zapisem stanu na dysku (`jobs_state.json`). Automatyczna synchronizacja profili użytkownika (profil „Główny”) oraz natychmiastowe odświeżanie drzewa dat (Filtr Czasu) i kafelków tras bez przeładowywania strony.
 
 ### 2. Dynamiczne kafelki wektorowe MVT (`/api/track/{z}/{x}/{y}.pbf`) i 3 tryby śladu
 * Generowanie kafelków wektorowych bezpośrednio z PostGIS w czasie poniżej 10 milisekund za pomocą `ST_AsMVT` i `ST_TileEnvelope`.
@@ -69,10 +75,18 @@ Cały backend, lokalny geocoder, indeksator PBF oraz grafowy silnik wyznaczania 
 * **Odkrywanie mapy / Mgła Wojny (`/api/fog-of-war`)**: Podział obszaru na mikro-działki ograniczone siecią dróg, torów i rzek oraz trójkątną siatkę na terenach otwartych z licznikiem odkrytej powierzchni w $\text{km}^2$.
 * **Rysowanie po mapie (`/api/drawings`)**: Pędzel swobodny, linie, wielokąty i notatki tekstowe przypisane do konta użytkownika.
 
-### 7. Odtwarzacz trasy (Playback & HUD), Edytor epok i Eksport danych
-* **Odtwarzacz trasy i Timelapse**: Animacja przejazdu z HUD prędkości, wysokości, przeciążeń 3D ($G_x, G_y, G_z$), wykresem przewyższeń, diagramem G-G oraz wizualizacją satelitów (Skyplot + orbita MEO).
+### 7. Odtwarzacz trasy (Playback & HUD), Płynna kamera WebGL i Eksport danych
+* **Odtwarzacz trasy i Timelapse**: Animacja przejazdu z HUD prędkości, wysokości, przeciążeń 3D ($G_x, G_y, G_z$), wykresem przewyższeń, diagramem G-G oraz ciągłą wizualizacją satelitów (Skyplot + orbita MEO).
+* **Natywna synchronizacja WebGL i swobodne sterowanie kamerą**:
+  * Płynne zoomowanie i scrollowanie mapy kółkiem myszy podczas śledzenia poruszającego się pojazdu.
+  * Renderowanie wskaźnika pojazdu i poświaty bezpośrednio na natywnych warstwach WebGL MapLibre, gwarantujące zero opóźnień (brak przeciągania ikony za kamerą i idealne centrowanie).
 * **Edycja punktów telemetrycznych**: Pojedyncze dodawanie/przesuwanie/usuwanie punktów oraz zaznaczanie ramką (`Box Select`) do masowego przesuwania lub usuwania.
 * **Eksport danych**: Pobieranie tras w formatach **HTML (mapa offline)**, **PNG**, **SVG**, **GIF (animacja)**, **GPX**, **CSV**, **GeoJSON** oraz **KML**.
+
+### 8. Ergonomia UI i Pełna Ochrona przed Autouzupełnianiem Loginu (Chrome)
+* **Zabezpieczenie przed autouzupełnianiem**: Wyszukiwarka i punkty trasy posiadają semantyczną rolę ARIA `role="search"` / `role="searchbox"` oraz atrybuty `data-form-type="other"`, całkowicie eliminując problem wstrzykiwania loginu użytkownika przez Chrome Password Manager.
+* **Szybki dostęp do planera trasy**: Dedykowany przycisk planowania zintegrowany bezpośrednio z paskiem wyszukiwania.
+* **Uporządkowany panel boczny**: Prawy panel boczny został w 100% dedykowany dla profilu użytkownika, statystyk, skrajnych punktów (N/S/E/W) i logowania.
 
 ---
 
@@ -141,7 +155,7 @@ Usługi są dostępne pod adresami:
 
 ---
 
-## Automatyczne testy regresyjne i 14 400+ przypadków brzegowych
+## Automatyczne testy regresyjne i 14 500+ przypadków brzegowych (27 grup testowych)
 
 Projekt zawiera rozbudowany zestaw testów automatycznych w pliku [`tests/run_tests.js`](tests/run_tests.js), przeznaczony dla programistów i agentów AI w celu weryfikacji, że żadna zmiana nie psuje istniejących endpointów, kontraktów UI ani algorytmów geometrycznych i routingowych.
 
@@ -152,10 +166,10 @@ node tests/run_tests.js
 ```
 
 Zakres weryfikacji obejmuje:
-1. Walidację składni wszystkich modułów JavaScript oraz obecność warstw, ikon znaków drogowych (`D-6`, `A-11a`, `D-51`, `D-51a`, sygnalizacji świetlnej) i elementów interfejsu.
+1. Walidację składni wszystkich modułów JavaScript (w tym brak emoji w kodzie produkcyjnym) oraz obecność warstw, ikon znaków drogowych (`D-6`, `A-11a`, `D-51`, `D-51a`, sygnalizacji świetlnej) i elementów interfejsu.
 2. Testy integracyjne wszystkich endpointów REST API na żywo (`/api/health`, `/api/auth/*`, `/api/stats`, `/api/presets`, `/api/dates-tree`, `/api/time-tree`, `/api/track/*`, `/api/infrastructure/*`, `/api/poi/*`, `/api/poi/details`, `/api/geocode/*`, `/api/route/plan`, `/api/heatmap/*`, `/api/fog-of-war`, `/api/drawings`).
 3. Weryfikację bazy PostGIS (przestrzenna deduplikacja sygnalizacji świetlnej oraz czystość geometrii śladów OSM).
-4. Ponad **14 400 deterministycznych przypadków brzegowych (Edge Cases)**:
+4. Łącznie **14 505 zweryfikowanych asercji i deterministycznych przypadków brzegowych (Edge Cases)** w 27 grupach testowych:
    * `2 600` testów parsera i generatora linków Google Maps (w tym odporność na uszkodzone URL, współrzędne poza zakresem, SQLi oraz XSS),
    * `3 000` testów funkcji kosztu routingu, unikania autostrad, stref wykluczonych oraz trybu `MAX = 11 (Minimum totalne)`,
    * `2 500` testów geometrii sferycznej, odległości punkt-łamana oraz pola powierzchni wielokątów i trójkątów Mgły Wojny,
