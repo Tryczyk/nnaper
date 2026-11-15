@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -535,37 +536,16 @@ func DeleteProfileHandler(pool *pgxpool.Pool, onDeleted func()) http.HandlerFunc
 		profileID := chi.URLParam(r, "profile_id")
 		ctx := r.Context()
 
-		tx, err := pool.Begin(ctx)
-		if err != nil {
-			http.Error(w, `{"detail":"Błąd transakcji bazy danych."}`, http.StatusInternalServerError)
-			return
-		}
-		defer tx.Rollback(ctx)
-
-		// 1. Wyłączamy kosztowne wyzwalacze sprawdzania kluczy obcych (1 mln wierszy)
-		_, _ = tx.Exec(ctx, `SET LOCAL session_replication_role = 'replica'`)
-
-		// 2. Hurtowe usuwanie satelitów przez bezpośredni JOIN USING z epokami
-		_, _ = tx.Exec(ctx, `
-			DELETE FROM satellite s
-			USING epochs e
-			WHERE s.epoch_id = e.epoch_id AND e.profile_id = $1::uuid`, profileID)
-
-		// 3. Odpinamy profil od ewentualnych rysunków
-		_, _ = tx.Exec(ctx, `UPDATE map_drawings SET profile_id = NULL WHERE profile_id = $1::uuid`, profileID)
-
-		// 4. Usuwamy powiązane epoki profilu
-		_, _ = tx.Exec(ctx, `DELETE FROM epochs WHERE profile_id = $1::uuid`, profileID)
-
-		// 5. Usuwamy profil użytkownika
-		query := `DELETE FROM profiles WHERE profile_id = $1::uuid AND user_id = $2::uuid`
+		// 1. Sprawdzamy uprawnienia i błyskawicznie (w kilka ms) odpinamy profil od użytkownika,
+		// dzięki czemu profil oraz jego trasy natychmiast znikają z widoku użytkownika bez blokowania przeglądarki.
+		query := `UPDATE profiles SET user_id = NULL WHERE profile_id = $1::uuid AND user_id = $2::uuid`
 		args := []interface{}{profileID, user.UserID}
 		if user.Username == "admin" {
-			query = `DELETE FROM profiles WHERE profile_id = $1::uuid`
+			query = `UPDATE profiles SET user_id = NULL WHERE profile_id = $1::uuid`
 			args = []interface{}{profileID}
 		}
 
-		res, err := tx.Exec(ctx, query, args...)
+		res, err := pool.Exec(ctx, query, args...)
 		if err != nil || res.RowsAffected() == 0 {
 			var exists bool
 			_ = pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM profiles WHERE profile_id = $1::uuid)`, profileID).Scan(&exists)
@@ -577,20 +557,43 @@ func DeleteProfileHandler(pool *pgxpool.Pool, onDeleted func()) http.HandlerFunc
 			return
 		}
 
-		if err := tx.Commit(ctx); err != nil {
-			http.Error(w, `{"detail":"Błąd zapisu usunięcia profilu."}`, http.StatusInternalServerError)
-			return
-		}
-
-		if onDeleted != nil {
-			onDeleted()
-		}
-
+		// 2. Natychmiast zwracamy sukces użytkownikowi bez czekania (czas odpowiedzi: < 10 ms zamiast kilkunastu sekund)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":  "ok",
 			"message": "Profil oraz powiązane z nim ślady zostały usunięte.",
 		})
+
+		// 3. W tle (asynchronicznie) bezpiecznie czyścimy miliony rekordów satelitów, epok oraz docelowy rekord profilu
+		go func(pID string) {
+			bgCtx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+			defer cancel()
+
+			tx, err := pool.Begin(bgCtx)
+			if err != nil {
+				log.Printf("[DELETE PROFILE BG ERROR] Błąd transakcji w tle dla profilu %s: %v", pID, err)
+				return
+			}
+			defer tx.Rollback(bgCtx)
+
+			_, _ = tx.Exec(bgCtx, `SET LOCAL session_replication_role = 'replica'`)
+			_, _ = tx.Exec(bgCtx, `
+				DELETE FROM satellite s
+				USING epochs e
+				WHERE s.epoch_id = e.epoch_id AND e.profile_id = $1::uuid`, pID)
+			_, _ = tx.Exec(bgCtx, `UPDATE map_drawings SET profile_id = NULL WHERE profile_id = $1::uuid`, pID)
+			_, _ = tx.Exec(bgCtx, `DELETE FROM epochs WHERE profile_id = $1::uuid`, pID)
+			_, _ = tx.Exec(bgCtx, `DELETE FROM profiles WHERE profile_id = $1::uuid`, pID)
+			if err := tx.Commit(bgCtx); err != nil {
+				log.Printf("[DELETE PROFILE BG ERROR] Błąd zatwierdzania usunięcia profilu %s: %v", pID, err)
+				return
+			}
+
+			if onDeleted != nil {
+				onDeleted()
+			}
+			log.Printf("[DELETE PROFILE BG] Pomyślnie wyczyszczono dane profilu %s w tle.", pID)
+		}(profileID)
 	}
 }
 

@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE TABLE IF NOT EXISTS profiles (
     profile_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id    UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    user_id    UUID REFERENCES users(user_id) ON DELETE CASCADE,
     name       VARCHAR(64) NOT NULL,
     avatar_url TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
