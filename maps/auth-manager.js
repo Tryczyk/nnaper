@@ -357,8 +357,8 @@
           el.style.cssText = 'display:flex; flex-direction:column; align-items:center; pointer-events:auto; cursor:pointer; z-index:2;';
           el.title = `${d.title}: ${pt.lat.toFixed(5)}°, ${pt.lon.toFixed(5)}°`;
           el.innerHTML = `
-            <div style="padding:2px 6px; border-radius:999px; background:rgba(15,23,42,0.94); border:1.5px solid ${d.color}; color:${d.color}; font-size:10px; font-weight:800; white-space:nowrap; box-shadow:0 2px 8px rgba(0,0,0,0.65); margin-bottom:2px;">
-              ${d.title}
+            <div style="min-width:14px; text-align:center; padding:1px 5px; border-radius:999px; background:rgba(15,23,42,0.94); border:1.5px solid ${d.color}; color:${d.color}; font-size:10px; font-weight:800; white-space:nowrap; box-shadow:0 2px 8px rgba(0,0,0,0.65); margin-bottom:2px;">
+              ${d.code}
             </div>
             <div style="width:12px; height:12px; border-radius:50%; background:${d.color}; border:2px solid #ffffff; box-shadow:0 0 10px ${d.color};"></div>
           `;
