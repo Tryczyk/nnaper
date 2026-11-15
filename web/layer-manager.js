@@ -1079,12 +1079,29 @@
             const timeSection = document.createElement('div');
             timeSection.className = 'time-filter-section';
 
+            const parserBtn = document.createElement('button');
+            parserBtn.type = 'button';
+            parserBtn.id = 'btn-open-parser';
+            parserBtn.className = 'menu-action-btn btn-trigger-parser';
+            parserBtn.title = 'Otwórz panel importu i parsowania plików GPS (GPX, KML, NMEA, FIT, TCX, ZIP)';
+            parserBtn.style.cssText = 'width: 100%; margin: 6px 0 4px 0; padding: 7px 10px; font-size: 12px; font-weight: 700; background: rgba(56, 189, 248, 0.16); border: 1px solid rgba(56, 189, 248, 0.45); color: #38bdf8; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.3); transition: all 0.2s;';
+            parserBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg><span>Parsowanie plików</span>`;
+            parserBtn.addEventListener('click', (e) => {
+              e.stopPropagation();
+              if (window.ParserManager && typeof window.ParserManager.open === 'function') {
+                window.ParserManager.open();
+              } else if (typeof window.openParserModal === 'function') {
+                window.openParserModal();
+              }
+            });
+            timeSection.appendChild(parserBtn);
+
             const replayBtn = document.createElement('button');
             replayBtn.type = 'button';
             replayBtn.id = 'btn-open-playback';
             replayBtn.className = 'menu-action-btn btn-trigger-playback';
             replayBtn.title = 'Uruchom odtwarzacz telemetryczny (Replay trasy)';
-            replayBtn.style.cssText = 'width: 100%; margin: 6px 0 10px 0; padding: 7px 10px; font-size: 12px; font-weight: 700; background: rgba(56, 189, 248, 0.16); border: 1px solid rgba(56, 189, 248, 0.45); color: #38bdf8; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.3); transition: all 0.2s;';
+            replayBtn.style.cssText = 'width: 100%; margin: 4px 0 10px 0; padding: 7px 10px; font-size: 12px; font-weight: 700; background: rgba(56, 189, 248, 0.16); border: 1px solid rgba(56, 189, 248, 0.45); color: #38bdf8; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.3); transition: all 0.2s;';
             replayBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg><span>Replay trasy</span>`;
             timeSection.appendChild(replayBtn);
 

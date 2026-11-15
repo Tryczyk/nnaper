@@ -225,13 +225,16 @@
   }
 
   function updateMenuButtonRunningState(isRunning, job) {
-    if (!btnOpenMenu) return;
-    if (isRunning && job) {
-      const pct = job.percent || 0;
-      btnOpenMenu.innerHTML = `<span style="display:inline-flex;align-items:center;gap:6px;"><span class="running-dot" style="width:7px;height:7px;border-radius:50%;background:#38bdf8;box-shadow:0 0 8px #38bdf8;display:inline-block;"></span>Parsowanie (${pct}%)</span>`;
-    } else {
-      btnOpenMenu.innerText = 'Parsowanie plików';
-    }
+    const btns = document.querySelectorAll('#btn-open-parser, .btn-trigger-parser');
+    if (!btns || !btns.length) return;
+    btns.forEach(btn => {
+      if (isRunning && job) {
+        const pct = job.percent || 0;
+        btn.innerHTML = `<span style="display:inline-flex;align-items:center;gap:6px;"><span class="running-dot" style="width:7px;height:7px;border-radius:50%;background:#38bdf8;box-shadow:0 0 8px #38bdf8;display:inline-block;"></span>Parsowanie (${pct}%)</span>`;
+      } else {
+        btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg><span>Parsowanie plików</span>`;
+      }
+    });
   }
 
   function openParserModal() {
@@ -1382,6 +1385,13 @@
     setupBeforeUnloadProtection();
 
     if (btnOpenMenu) btnOpenMenu.addEventListener('click', openParserModal);
+    document.addEventListener('click', (e) => {
+      const trigger = e.target.closest('#btn-open-parser, .btn-trigger-parser');
+      if (trigger) {
+        e.stopPropagation();
+        openParserModal();
+      }
+    });
     if (btnClose) btnClose.addEventListener('click', closeParserModal);
     if (btnCancel) btnCancel.addEventListener('click', closeParserModal);
     if (btnAbort) btnAbort.addEventListener('click', abortProcessing);
@@ -1529,6 +1539,7 @@
     setupEventListeners();
   }
 
+  window.openParserModal = openParserModal;
   window.ParserManager = {
     open: openParserModal,
     close: closeParserModal,
