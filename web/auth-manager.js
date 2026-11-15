@@ -773,6 +773,25 @@
     renderProfilesUI(container, profiles, token) {
       container.innerHTML = '';
 
+      if (!profiles || profiles.length === 0) {
+        window.setActiveProfileId('');
+        const addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.className = 'auth-btn-add-profile-empty';
+        addBtn.innerHTML = `
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px; vertical-align: middle;">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>Dodaj profil
+        `;
+        addBtn.title = 'Utwórz nowy profil (np. Samochodowy, Rowerowy, Lotniczy, Do biegu)';
+        addBtn.onclick = () => {
+          this.showCreateProfileModal(() => this.populateProfilesUI(container, token));
+        };
+        container.appendChild(addBtn);
+        return;
+      }
+
       const head = document.createElement('div');
       head.className = 'auth-profiles-head';
 
@@ -800,39 +819,29 @@
       const select = document.createElement('select');
       select.className = 'auth-profiles-select';
 
-      if (!profiles || profiles.length === 0) {
-        const noOpt = document.createElement('option');
-        noOpt.value = '';
-        noOpt.innerText = 'Brak profili (kliknij "+ Nowy profil")';
-        noOpt.selected = true;
-        select.appendChild(noOpt);
-        window.setActiveProfileId('');
-        currentActive = '';
-      } else {
-        const allOpt = document.createElement('option');
-        allOpt.value = '';
-        allOpt.innerText = 'Wszystkie profile (zsumowane)';
-        if (!currentActive) allOpt.selected = true;
-        select.appendChild(allOpt);
+      const allOpt = document.createElement('option');
+      allOpt.value = '';
+      allOpt.innerText = 'Wszystkie profile (zsumowane)';
+      if (!currentActive) allOpt.selected = true;
+      select.appendChild(allOpt);
 
-        let activeFound = false;
-        profiles.forEach(p => {
-          const opt = document.createElement('option');
-          opt.value = p.profile_id;
-          opt.innerText = `${p.name} (${p.epochs_count || 0} pkt)`;
-          if (p.profile_id === currentActive) {
-            opt.selected = true;
-            activeFound = true;
-          }
-          select.appendChild(opt);
-        });
-
-        if (currentActive && !activeFound) {
-          // Jeśli zapisany profil już nie istnieje
-          window.setActiveProfileId('');
-          allOpt.selected = true;
-          currentActive = '';
+      let activeFound = false;
+      profiles.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.profile_id;
+        opt.innerText = `${p.name} (${p.epochs_count || 0} pkt)`;
+        if (p.profile_id === currentActive) {
+          opt.selected = true;
+          activeFound = true;
         }
+        select.appendChild(opt);
+      });
+
+      if (currentActive && !activeFound) {
+        // Jeśli zapisany profil już nie istnieje
+        window.setActiveProfileId('');
+        allOpt.selected = true;
+        currentActive = '';
       }
 
       selectWrap.appendChild(select);
