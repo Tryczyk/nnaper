@@ -2283,6 +2283,13 @@ gap: 8px;
   cursor: default;
 }
 
+.auth-avatar-relative-box {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .auth-avatar-box {
   width: 76px;
   height: 76px;
@@ -2296,6 +2303,39 @@ gap: 8px;
   align-items: center;
   justify-content: center;
   transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.auth-btn-remove-avatar-badge {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #0f172a;
+  border: 1.5px solid #ef4444;
+  color: #ef4444;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+  padding: 0;
+  z-index: 10;
+  transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+  box-sizing: border-box;
+}
+
+.auth-btn-remove-avatar-badge:hover {
+  background: #ef4444;
+  color: #ffffff;
+  border-color: #f87171;
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.75);
+  transform: scale(1.15);
+}
+
+.auth-btn-remove-avatar-badge:active {
+  transform: scale(0.95);
 }
 
 .auth-avatar-wrapper:hover:not(.preview-only) .auth-avatar-box {

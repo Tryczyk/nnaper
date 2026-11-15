@@ -217,6 +217,9 @@
       avatarWrapper.setAttribute('role', 'button');
       avatarWrapper.setAttribute('tabindex', '0');
 
+      const avatarRelativeBox = document.createElement('div');
+      avatarRelativeBox.className = 'auth-avatar-relative-box';
+
       const avatarBox = document.createElement('div');
       avatarBox.className = 'auth-avatar-box';
 
@@ -236,7 +239,47 @@
       overlay.innerHTML = '<span class="overlay-text">Zmień</span>';
       avatarBox.appendChild(overlay);
 
-      avatarWrapper.appendChild(avatarBox);
+      avatarRelativeBox.appendChild(avatarBox);
+
+      // Czerwony symbol śmietnika w kółeczku w prawym dolnym rogu profilowego
+      if (user.avatar_url) {
+        const removeAvatarBtn = document.createElement('button');
+        removeAvatarBtn.type = 'button';
+        removeAvatarBtn.id = 'btn-delete-avatar';
+        removeAvatarBtn.className = 'auth-btn-remove-avatar-badge';
+        removeAvatarBtn.title = 'Usuń zdjęcie profilowe i przywróć domyślny awatar';
+        removeAvatarBtn.innerHTML = `
+          <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 6h18"/>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>
+            <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+            <line x1="10" y1="11" x2="10" y2="17"/>
+            <line x1="14" y1="11" x2="14" y2="17"/>
+          </svg>
+        `;
+        removeAvatarBtn.onclick = async (ev) => {
+          ev.stopPropagation();
+          ev.preventDefault();
+          if (confirm('Czy na pewno chcesz usunąć zdjęcie profilowe i przywrócić domyślny awatar?')) {
+            try {
+              avatarWrapper.classList.add('loading');
+              await window.deleteUserAvatar();
+              user.avatar_url = null;
+              const s = getStoredSession() || {};
+              s.user = user;
+              saveStoredSession(s);
+              this.render();
+            } catch (err) {
+              alert('Błąd usuwania zdjęcia: ' + err.message);
+            } finally {
+              avatarWrapper.classList.remove('loading');
+            }
+          }
+        };
+        avatarRelativeBox.appendChild(removeAvatarBtn);
+      }
+
+      avatarWrapper.appendChild(avatarRelativeBox);
 
       // Ukryty input pliku
       const fileInput = document.createElement('input');
@@ -298,36 +341,6 @@
 
       card.appendChild(avatarWrapper);
       card.appendChild(fileInput);
-
-      // 1.5. Opcja usunięcia zdjęcia profilowego jeśli użytkownik ma wgrane własne zdjęcie
-      if (user.avatar_url) {
-        const removeAvatarBtn = document.createElement('button');
-        removeAvatarBtn.type = 'button';
-        removeAvatarBtn.id = 'btn-delete-avatar';
-        removeAvatarBtn.className = 'auth-btn-remove-avatar';
-        removeAvatarBtn.style.cssText = 'background:none; border:none; color:#f87171; font-size:10px; cursor:pointer; margin-top:2px; margin-bottom:2px; padding:2px 6px; text-decoration:underline; font-weight:500; display:block; text-align:center;';
-        removeAvatarBtn.innerText = 'Usuń zdjęcie';
-        removeAvatarBtn.title = 'Usuń zdjęcie profilowe i przywróć domyślny awatar';
-        removeAvatarBtn.onclick = async (ev) => {
-          ev.stopPropagation();
-          if (confirm('Czy na pewno chcesz usunąć zdjęcie profilowe i przywrócić domyślny awatar?')) {
-            try {
-              avatarWrapper.classList.add('loading');
-              await window.deleteUserAvatar();
-              user.avatar_url = null;
-              const s = getStoredSession() || {};
-              s.user = user;
-              saveStoredSession(s);
-              this.render();
-            } catch (err) {
-              alert('Błąd usuwania zdjęcia: ' + err.message);
-            } finally {
-              avatarWrapper.classList.remove('loading');
-            }
-          }
-        };
-        card.appendChild(removeAvatarBtn);
-      }
 
       // 2. Nazwa konta pod ludkiem
       const userDetails = document.createElement('div');
