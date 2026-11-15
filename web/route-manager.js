@@ -801,7 +801,7 @@
 
       <div class="route-clean-section">
         <label class="route-clean-toggle-row" style="padding:0; border:none; background:none;">
-          <span style="color:#38bdf8; font-weight:600;">Generator trasy automatycznej</span>
+          <span style="color:#38bdf8; font-weight:600;">Generator trasy rekreacyjnej</span>
           <input type="checkbox" id="chk-route-auto-mode" style="accent-color:#38bdf8;" />
         </label>
         <div id="route-auto-params" style="display:none; flex-direction:column; gap:8px; margin-top:8px; padding-top:8px; border-top:1px solid rgba(148,163,184,0.12);">
@@ -820,7 +820,7 @@
             <span>Pętla powrotna do startu</span>
           </label>
           <button type="button" id="btn-route-generate-auto" class="route-clean-primary-btn">
-            Wyznacz trasę automatyczną
+            Wyznacz trasę rekreacyjną
           </button>
         </div>
       </div>
