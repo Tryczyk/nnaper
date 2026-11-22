@@ -397,8 +397,63 @@ const MAP_STYLE = {
 window.MAP_STYLE = MAP_STYLE;
 
 (function () {
-  // Zewnętrzne pliki SVG znaków drogowych w katalogu /assets/icons/signs/
+  // Zewnętrzne pliki SVG oraz definicje wektorowe znaków drogowych
+  const SVG_APPLE_TRAFFIC_SIGNALS = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+    <defs>
+      <linearGradient id="tlBody" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#2c2c2e"/>
+        <stop offset="100%" stop-color="#141416"/>
+      </linearGradient>
+    </defs>
+    <rect x="15" y="3" width="34" height="58" rx="17" ry="17" fill="url(#tlBody)" stroke="#ffffff" stroke-width="3"/>
+    <rect x="18" y="6" width="28" height="52" rx="14" ry="14" fill="none" stroke="#3a3a3c" stroke-width="1.2"/>
+    <circle cx="32" cy="16.5" r="6.8" fill="#ff3b30"/>
+    <circle cx="30" cy="14.5" r="2.2" fill="#ff9f99" opacity="0.75"/>
+    <circle cx="32" cy="32" r="6.8" fill="#ffcc00"/>
+    <circle cx="30" cy="30" r="2.2" fill="#fff099" opacity="0.75"/>
+    <circle cx="32" cy="47.5" r="6.8" fill="#30d158"/>
+    <circle cx="30" cy="45.5" r="2.2" fill="#a4f5b8" opacity="0.75"/>
+  </svg>`;
+
   const SVG_A11A_SPEED_BUMP = '/assets/icons/signs/speed-bump.svg';
+
+  const SVG_D6_CROSSING = `<svg id="D-6" xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+    <rect x="3" y="3" width="58" height="58" rx="14" ry="14" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+    <circle cx="34" cy="14" r="5" fill="#18181b"/>
+    <path d="M31 20 C29 20 27.5 21.5 27.5 23.5 L27 29.5 L22.5 32 C21.7 32.5 21.4 33.5 21.8 34.3 C22.2 35.1 23.2 35.4 24 35 L28 32.8 L29 37 L24 45.5 C23.4 46.4 23.7 47.6 24.6 48.2 C25.5 48.8 26.7 48.5 27.3 47.6 L33 38.5 L34 32.5 L37 35.5 L40.5 43.5 C40.9 44.4 41.9 44.8 42.8 44.4 C43.7 44 44.1 43 43.7 42.1 L39.5 33 C39 32 38.2 31.2 37.2 30.7 L35 29.5 L35.2 23.5 C35.2 21.5 33.2 20 31 20 Z" fill="#18181b"/>
+    <path d="M7 54 L12 42 L16 42 L11 54 Z" fill="#18181b"/>
+    <path d="M19 54 L22 42 L26 42 L23 54 Z" fill="#18181b"/>
+    <path d="M30 54 L31 42 L35 42 L34 54 Z" fill="#18181b"/>
+    <path d="M41 54 L40 42 L44 42 L45 54 Z" fill="#18181b"/>
+    <path d="M52 54 L49 42 L53 42 L56 54 Z" fill="#18181b"/>
+  </svg>`;
+
+  const SVG_D51_SPEED_CAMERA = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+    <rect x="3" y="3" width="58" height="58" rx="14" ry="14" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+    <rect x="7" y="10" width="34" height="44" rx="8" ry="8" fill="#18181b"/>
+    <circle cx="21" cy="38" r="11" fill="#18181b" stroke="#ffffff" stroke-width="3.5"/>
+    <circle cx="15" cy="44" r="1.5" fill="#ffffff"/>
+    <circle cx="31" cy="22" r="5.5" fill="#18181b" stroke="#ffffff" stroke-width="2.8"/>
+    <rect x="44" y="15" width="2.8" height="34" rx="1" fill="#18181b"/>
+    <rect x="48" y="17" width="2.8" height="30" rx="1" fill="#18181b"/>
+    <rect x="52" y="22" width="2.8" height="20" rx="1" fill="#18181b"/>
+    <rect x="54" y="27" width="6" height="10" rx="1" fill="#18181b"/>
+  </svg>`;
+
+  const SVG_D51A_AVERAGE_SPEED = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+    <rect x="3" y="3" width="58" height="58" rx="14" ry="14" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
+    <g transform="translate(3, -2) scale(0.85)">
+      <rect x="7" y="10" width="34" height="44" rx="8" ry="8" fill="#18181b"/>
+      <circle cx="21" cy="38" r="11" fill="#18181b" stroke="#ffffff" stroke-width="3.5"/>
+      <circle cx="15" cy="44" r="1.5" fill="#ffffff"/>
+      <circle cx="31" cy="22" r="5.5" fill="#18181b" stroke="#ffffff" stroke-width="2.8"/>
+      <rect x="44" y="15" width="2.8" height="34" rx="1" fill="#18181b"/>
+      <rect x="48" y="17" width="2.8" height="30" rx="1" fill="#18181b"/>
+      <rect x="52" y="22" width="2.8" height="20" rx="1" fill="#18181b"/>
+      <rect x="54" y="27" width="6" height="10" rx="1" fill="#18181b"/>
+    </g>
+    <path d="M12 55 L52 55 M48 51 L52 55 L48 59 M16 51 L12 55 L16 59" fill="none" stroke="#dc2626" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>`;
 
   // Rasteryzacja SVG w wysokiej rozdzielczości (4x lub więcej przy ekranach HiDPI), aby znaki były ostre
   // przy każdym przybliżeniu. width/height to rozmiar logiczny ikony w pikselach CSS przy icon-size = 1.
@@ -490,6 +545,10 @@ window.MAP_STYLE = MAP_STYLE;
 
     // Rozmiary logiczne ikon (px CSS przy icon-size = 1) - jedna tabela dla rejestracji i fallbacku
     const ICON_DEFS = {
+      'icon-infra-traffic-signals': { svg: SVG_APPLE_TRAFFIC_SIGNALS, w: 28, h: 28 },
+      'icon-infra-crossing': { svg: SVG_D6_CROSSING, w: 28, h: 28 },
+      'icon-infra-speed-camera': { svg: SVG_D51_SPEED_CAMERA, w: 28, h: 28 },
+      'icon-infra-average-speed': { svg: SVG_D51A_AVERAGE_SPEED, w: 28, h: 28 },
       'icon-infra-speed-bump': { svg: SVG_A11A_SPEED_BUMP, w: 28, h: 28 }
     };
 
