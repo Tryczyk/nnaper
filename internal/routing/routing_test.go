@@ -246,7 +246,7 @@ func TestNieborowskaAutoRouteLive(t *testing.T) {
 	defer pool.Close()
 
 	svc := NewService(pool, "http://localhost:5000")
-	pts := [][2]float64{{18.618, 54.336}} // ul. Nieborowska 28a
+	pts := [][2]float64{{18.610483, 54.331540}} // ul. Nieborowska 28
 	targetKM := 84.0
 	envRadiusKM := math.Max(10.0, math.Min(150.0, targetKM*0.65))
 	cosLat := math.Max(0.2, math.Cos(pts[0][1]*math.Pi/180.0))
@@ -278,6 +278,13 @@ func TestNieborowskaAutoRouteLive(t *testing.T) {
 			AutoExploratory:        true,
 		},
 	}
+	startNode, okStart := g.FindNearestNode(pts[0][0], pts[0][1])
+	t.Logf("FindNearestNode: node=%d, ok=%v, coords=%v, adjs=%d", startNode, okStart, g.NodeCoords[startNode], len(g.Adj[startNode]))
+	for _, a := range g.Adj[startNode] {
+		e := g.Edges[a.edgeIdx]
+		t.Logf("  Adj edge: id=%d, hw=%s, toNode=%d", e.EdgeID, e.Highway, a.toNode)
+	}
+
 	resp, ok := g.buildIntelligentAutoRoute(req, targetKM)
 	if !ok {
 		t.Fatalf("buildIntelligentAutoRoute powinno zwrócić trasę dla ul. Nieborowskiej")
@@ -286,5 +293,59 @@ func TestNieborowskaAutoRouteLive(t *testing.T) {
 	t.Logf("Wyznaczona trasa dla Nieborowskiej 84km: %.1f km (oczekiwano ~84km)", distKM)
 	if distKM < 65.0 || distKM > 105.0 {
 		t.Fatalf("Dystans trasy %.1f km zbyt mocno odbiega od zadanego 84km", distKM)
+	}
+}
+
+func TestNoServiceRoadsOrLivingStreetsInTransit(t *testing.T) {
+	g := NewGraph()
+
+	// Trasa tranzytowa 1 -> 2 (primary, 1000m, przebyta)
+	// oraz 2 -> 3 (primary, 1000m, przebyta)
+	g.AddEdge(GraphEdge{
+		EdgeID: 501, SourceNode: 1, TargetNode: 2,
+		LengthM: 1000, SpeedKMH: 70, DurationS: 51.0,
+		Highway: "primary", Traversed: true,
+		Coords: [][2]float64{{18.6000, 54.3400}, {18.6100, 54.3400}},
+	})
+	g.AddEdge(GraphEdge{
+		EdgeID: 502, SourceNode: 2, TargetNode: 3,
+		LengthM: 1000, SpeedKMH: 70, DurationS: 51.0,
+		Highway: "primary", Traversed: true,
+		Coords: [][2]float64{{18.6100, 54.3400}, {18.6200, 54.3400}},
+	})
+
+	// Skrót przez parking / drogę service: 2 -> 4 -> 3 (service, 400m, nieprzebyta!)
+	g.AddEdge(GraphEdge{
+		EdgeID: 503, SourceNode: 2, TargetNode: 4,
+		LengthM: 200, SpeedKMH: 20, DurationS: 36.0,
+		Highway: "service", Traversed: false,
+		Coords: [][2]float64{{18.6100, 54.3400}, {18.6150, 54.3420}},
+	})
+	g.AddEdge(GraphEdge{
+		EdgeID: 504, SourceNode: 4, TargetNode: 3,
+		LengthM: 200, SpeedKMH: 20, DurationS: 36.0,
+		Highway: "service", Traversed: false,
+		Coords: [][2]float64{{18.6150, 54.3420}, {18.6200, 54.3400}},
+	})
+
+	prefs := RoutePreferences{
+		AutoExploratory:   true,
+		AversionTraversed: 7,
+		AvoidTraversed:    true,
+	}
+
+	steps, _, _, ok := g.findShortestPathSteps(18.6000, 54.3400, 18.6200, 54.3400, nil, "high_cost", prefs)
+	if !ok {
+		t.Fatalf("nie znaleziono trasy 1 -> 3")
+	}
+
+	for _, st := range steps {
+		e := g.Edges[st.edgeIdx]
+		if e.Highway == "service" || e.Highway == "living_street" {
+			t.Fatalf("trasa tranzytowa nie powinna zjeżdżać na parking/service (krawędź %d, highway=%s)", e.EdgeID, e.Highway)
+		}
+	}
+	if len(steps) != 2 {
+		t.Fatalf("oczekiwano 2 kroków po drodze primary (501 i 502), otrzymano %d", len(steps))
 	}
 }

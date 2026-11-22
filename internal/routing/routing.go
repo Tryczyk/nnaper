@@ -267,24 +267,32 @@ func ComputeEdgeCost(e GraphEdge, avoidPoints []AvoidPoint, avoidMode string, pr
 		rank := highwayRank(e.Highway)
 		if prefs.AvoidHighways && isHighwayClass(e.Highway) {
 			cost = cost*5000.0 + 2500000.0
-		} else if !isTraversed {
-			// Nowa nieprzejechana droga - premiujemy scisle wg hierarchii klas (od najwyzszej klasy do najgorszej)
-			switch rank {
-			case 5:
-				cost *= 0.12
-			case 4:
-				cost *= 0.18
-			case 3:
-				cost *= 0.30
-			case 2:
-				cost *= 0.48
-			case 1:
-				cost *= 0.72
-			default:
-				cost *= 0.95
-			}
 		} else {
-			cost = cost*80.0 + 5000.0
+			// Hierarchia klas dróg - wyższe klasy są naturalnie faworyzowane w trasach rekreacyjnych
+			switch rank {
+			case 5: // motorway, trunk
+				cost *= 0.90
+			case 4: // primary
+				cost *= 1.00
+			case 3: // secondary
+				cost *= 1.06
+			case 2: // tertiary
+				cost *= 1.15
+			case 1:
+				if e.Highway == "residential" {
+					cost *= 2.80 // ulice osiedlowe są znacząco wolniejsze i nie powinny być tranzytem
+				} else {
+					cost *= 1.30 // unclassified (drogi gminne/lokalne)
+				}
+			default:
+				// service, living_street, track - parkingi, rampy, strefy zamieszkania
+				cost = cost*30.0 + 5000.0
+			}
+
+			// Premia dla nowych, nieprzebytych dróg tranzytowych
+			if !isTraversed {
+				cost *= 0.50
+			}
 		}
 	}
 	hitAvoid := false
@@ -357,13 +365,10 @@ func ComputeEdgeCost(e GraphEdge, avoidPoints []AvoidPoint, avoidMode string, pr
 	// 3. Unikanie przebytych już dróg (kara za wjazd na drogę ze śladem GPS LUB już użytą w bieżącej trasie)
 	if (prefs.AvoidTraversed || prefs.AversionTraversed > 0) && isTraversed {
 		if prefs.AversionTraversed > 0 {
-			cost += (cost*30.0 + 2000.0) * prefs.AversionTraversed
+			cost += (cost*2.5 + 35.0) * prefs.AversionTraversed
 		} else {
-			cost = cost*280.0 + 18000.0
+			cost = cost*16.0 + 200.0
 		}
-	} else if prefs.AutoExploratory && !isTraversed {
-		// W trybie auto-eksploracji premiujemy nowe nieodwiedzone ulice
-		cost *= 0.45
 	}
 
 	// 4. Unikanie jechania 2 razy tą samą drogą w ramach wyznaczanej trasy
@@ -489,7 +494,7 @@ func isTransitHighway(hw string) bool {
 	switch hw {
 	case "motorway", "motorway_link", "trunk", "trunk_link",
 		"primary", "primary_link", "secondary", "secondary_link",
-		"tertiary", "tertiary_link", "unclassified", "residential":
+		"tertiary", "tertiary_link":
 		return true
 	default:
 		return false
@@ -699,12 +704,21 @@ func (g *Graph) findShortestPathSteps(
 			}
 
 			e := g.Edges[adj.edgeIdx]
+
 			edgeCost, excluded, hitAvoid := ComputeEdgeCost(e, avoidPoints, avoidMode, prefs)
 			if hitAvoid {
 				avoidedHits++
 			}
 			if excluded {
 				continue
+			}
+
+			// W trybie AutoExploratory nakładamy karę za zjazd z arterii tranzytowej na drogę osiedlową (residential)
+			if prefs.AutoExploratory && hasPrev {
+				prevE := g.Edges[prevSt.edgeIdx]
+				if isTransitHighway(prevE.Highway) && e.Highway == "residential" && adj.toNode != endNode {
+					edgeCost += 600.0
+				}
 			}
 
 			tentativeG := gU + edgeCost
