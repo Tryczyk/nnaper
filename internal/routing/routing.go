@@ -485,6 +485,133 @@ func (g *Graph) FindNearestNodeWithMinDegree(lon, lat float64, minDegree int) (i
 	return bestID, found
 }
 
+func isTransitHighway(hw string) bool {
+	switch hw {
+	case "motorway", "motorway_link", "trunk", "trunk_link",
+		"primary", "primary_link", "secondary", "secondary_link",
+		"tertiary", "tertiary_link", "unclassified", "residential":
+		return true
+	default:
+		return false
+	}
+}
+
+// isDeadEnd sprawdza czy węzeł nodeID nie posiada żadnego innego wyjścia poza natychmiastowym
+// zawróceniem krawędzią incomingEdgeIdx.
+func (g *Graph) isDeadEnd(nodeID int64, incomingEdgeIdx int) bool {
+	for _, adj := range g.Adj[nodeID] {
+		if adj.edgeIdx != incomingEdgeIdx {
+			return false
+		}
+	}
+	return true
+}
+
+func (g *Graph) isTransitNode(nodeID int64) bool {
+	adjs := g.Adj[nodeID]
+	if len(adjs) < 2 {
+		return false
+	}
+	hasTransitEdge := false
+	distinctOutNodes := make(map[int64]bool)
+	for _, a := range adjs {
+		e := g.Edges[a.edgeIdx]
+		if isTransitHighway(e.Highway) {
+			hasTransitEdge = true
+		}
+		distinctOutNodes[a.toNode] = true
+	}
+	return hasTransitEdge && len(distinctOutNodes) >= 2
+}
+
+func (g *Graph) FindNearestTransitNode(lon, lat float64) (int64, bool) {
+	if len(g.NodeCoords) == 0 {
+		return 0, false
+	}
+
+	var bestID int64
+	bestDist := math.MaxFloat64
+	found := false
+
+	if len(g.spatialGrid) > 0 {
+		centerGx, centerGy := nodeToGridCell(lon, lat)
+		maxRadius := int64(25) // do ok. 25 km
+		for r := int64(0); r <= maxRadius; r++ {
+			for dx := -r; dx <= r; dx++ {
+				for dy := -r; dy <= r; dy++ {
+					if r > 0 && dx > -r && dx < r && dy > -r && dy < r {
+						continue
+					}
+					cellKey := spatialNodeGridKey(centerGx+dx, centerGy+dy)
+					nodes := g.spatialGrid[cellKey]
+					for _, nid := range nodes {
+						if !g.isTransitNode(nid) {
+							continue
+						}
+						c := g.NodeCoords[nid]
+						d := haversineM(lat, lon, c[1], c[0])
+						if d < bestDist {
+							bestDist = d
+							bestID = nid
+							found = true
+						}
+					}
+				}
+			}
+
+			if found {
+				approxDistToNextRingM := float64(r) * 600.0
+				if bestDist < approxDistToNextRingM {
+					return bestID, true
+				}
+			}
+		}
+
+		if found {
+			return bestID, true
+		}
+	}
+
+	for nid, c := range g.NodeCoords {
+		if !g.isTransitNode(nid) {
+			continue
+		}
+		d := haversineM(lat, lon, c[1], c[0])
+		if d < bestDist {
+			bestDist = d
+			bestID = nid
+			found = true
+		}
+	}
+	if found {
+		return bestID, true
+	}
+	return g.FindNearestNodeWithMinDegree(lon, lat, 2)
+}
+
+func pruneAntennaSteps(steps []prevStep) []prevStep {
+	if len(steps) < 2 {
+		return steps
+	}
+	for {
+		pruned := false
+		var out []prevStep
+		for i := 0; i < len(steps); i++ {
+			if i+1 < len(steps) && steps[i].edgeIdx == steps[i+1].edgeIdx && steps[i].reverse != steps[i+1].reverse {
+				i++
+				pruned = true
+			} else {
+				out = append(out, steps[i])
+			}
+		}
+		steps = out
+		if !pruned {
+			break
+		}
+	}
+	return steps
+}
+
 type prevStep struct {
 	fromNode int64
 	edgeIdx  int
@@ -566,8 +693,8 @@ func (g *Graph) findShortestPathSteps(
 				continue
 			}
 
-			// Zakaz wjeżdżania w ślepe zaułki (węzły o stopniu <= 1), jeśli nie są punktem docelowym
-			if adj.toNode != endNode && len(g.Adj[adj.toNode]) <= 1 {
+			// Zakaz wjeżdżania w ślepe zaułki (węzły bez żadnego innego wyjazdu niż natychmiastowe zawrócenie)
+			if adj.toNode != endNode && g.isDeadEnd(adj.toNode, adj.edgeIdx) {
 				continue
 			}
 
@@ -923,8 +1050,8 @@ func (g *Graph) extractOptimal10Waypoints(steps []prevStep, pathNodes []int64, s
 func (g *Graph) buildCircularLoopRoute(req RoutePlanRequest, startNode int64, startCoord [2]float64, targetKM float64) (RoutePlanResponse, bool) {
 	cosLat := math.Max(0.2, math.Cos(startCoord[1]*math.Pi/180.0))
 
-	// Rzeczywisty dystans drogowy 6-wierzchołkowej pętli to około 7.68 * R (obwód sześciokąta 6*R z uwzględnieniem współczynnika krętości polskich dróg ~1.28)
-	baseR := math.Max(400.0, (targetKM*1000.0)/7.68)
+	// Rzeczywisty dystans drogowy 6-wierzchołkowej pętli to około 13.8 * R (w siatce drogowej z uwzględnieniem krętości i unikania nawrotów)
+	baseR := math.Max(400.0, (targetKM*1000.0)/13.8)
 
 	type loopCandidate struct {
 		anchorCoords [][2]float64
@@ -957,7 +1084,7 @@ func (g *Graph) buildCircularLoopRoute(req RoutePlanRequest, startNode int64, st
 					targetLon := centerLon + (R*math.Sin(stepAng))/(111320.0*cosLat)
 					targetLat := centerLat + (R*math.Cos(stepAng))/111320.0
 
-					nodeID, okNode := g.FindNearestNodeWithMinDegree(targetLon, targetLat, 2)
+					nodeID, okNode := g.FindNearestTransitNode(targetLon, targetLat)
 					if !okNode {
 						valid = false
 						break
@@ -1080,6 +1207,8 @@ func (g *Graph) buildCircularLoopRoute(req RoutePlanRequest, startNode int64, st
 			return RoutePlanResponse{}, 0, false
 		}
 
+		allSteps = pruneAntennaSteps(allSteps)
+		allSteps = pruneAntennaSteps(allSteps)
 		fullCoords, distM, durS, obs := g.materializeSteps(allSteps, false)
 		resp := RoutePlanResponse{
 			Status:       "ok",
@@ -1139,7 +1268,7 @@ func (g *Graph) buildCircularLoopRoute(req RoutePlanRequest, startNode int64, st
 	// Jeśli dystans odbiega o > 12%, wykonujemy precyzyjną kalibrację promienia R na zwycięskim azymucie
 	if foundAny && bestCandidate != nil && bestDiffKM > targetKM*0.12 && bestResp.DistanceM > 0 {
 		calibRatio := (targetKM * 1000.0) / bestResp.DistanceM
-		calibRatio = math.Max(0.5, math.Min(1.8, calibRatio))
+		calibRatio = math.Max(0.2, math.Min(2.5, calibRatio))
 		calibR := baseR * calibRatio
 		calibCands := buildAnchorsForR(calibR)
 		for _, cc := range calibCands {
@@ -1147,6 +1276,7 @@ func (g *Graph) buildCircularLoopRoute(req RoutePlanRequest, startNode int64, st
 				if calibResp, calibDistM, okCalib := routeAnchors(cc.anchorCoords); okCalib {
 					calibDiffKM := math.Abs((calibDistM / 1000.0) - targetKM)
 					if calibDiffKM < bestDiffKM {
+						bestDiffKM = calibDiffKM
 						bestResp = calibResp
 					}
 				}
@@ -1449,6 +1579,7 @@ func (g *Graph) buildIntelligentAutoRoute(req RoutePlanRequest, targetKM float64
 			continue
 		}
 
+		allSteps = pruneAntennaSteps(allSteps)
 		fullCoords, distM, durS, obs := g.materializeSteps(allSteps, false)
 		candResp := RoutePlanResponse{
 			Status:       "ok",

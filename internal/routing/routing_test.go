@@ -1,8 +1,11 @@
 package routing
 
 import (
+	"context"
 	"math"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func buildTestGraph() *Graph {
@@ -157,5 +160,131 @@ func TestCulDeSacSpurAvoidance(t *testing.T) {
 	}
 	if len(steps) != 2 {
 		t.Fatalf("oczekiwano 2 kroków (1->2 i 2->3), got %d", len(steps))
+	}
+}
+
+func TestPruneAntennaSteps(t *testing.T) {
+	// 1 -> 2 -> 3 -> 4 -> 3 -> 2 -> 5
+	// Krok 3->4 (edge 103) i zaraz powrót 4->3 (edge 103 rev) to ślepa odnoga (antena), która powinna zniknąć.
+	steps := []prevStep{
+		{fromNode: 1, edgeIdx: 101, reverse: false},
+		{fromNode: 2, edgeIdx: 102, reverse: false},
+		{fromNode: 3, edgeIdx: 103, reverse: false},
+		{fromNode: 4, edgeIdx: 103, reverse: true},
+		{fromNode: 3, edgeIdx: 105, reverse: false},
+	}
+	pruned := pruneAntennaSteps(steps)
+	if len(pruned) != 3 {
+		t.Fatalf("oczekiwano 3 kroków po usunięciu anteny 103, got %d", len(pruned))
+	}
+	if pruned[0].edgeIdx != 101 || pruned[1].edgeIdx != 102 || pruned[2].edgeIdx != 105 {
+		t.Fatalf("nieprawidłowa sekwencja po usunięciu anteny: %+v", pruned)
+	}
+}
+
+func TestDeadEndAvoidanceWithOneWay(t *testing.T) {
+	g := NewGraph()
+
+	// Ulica jednokierunkowa 1 -> 2 -> 3 (oneway = 1)
+	g.AddEdge(GraphEdge{
+		EdgeID: 401, SourceNode: 1, TargetNode: 2, Oneway: 1,
+		LengthM: 300, SpeedKMH: 50, DurationS: 21.6,
+		Coords: [][2]float64{{18.6400, 54.3500}, {18.6400, 54.3530}},
+	})
+	g.AddEdge(GraphEdge{
+		EdgeID: 402, SourceNode: 2, TargetNode: 3, Oneway: 1,
+		LengthM: 300, SpeedKMH: 50, DurationS: 21.6,
+		Coords: [][2]float64{{18.6400, 54.3530}, {18.6400, 54.3560}},
+	})
+	g.AddEdge(GraphEdge{
+		EdgeID: 404, SourceNode: 3, TargetNode: 4, Oneway: 1,
+		LengthM: 300, SpeedKMH: 50, DurationS: 21.6,
+		Coords: [][2]float64{{18.6400, 54.3560}, {18.6400, 54.3590}},
+	})
+	// Ślepa uliczka dwukierunkowa od węzła 2: 2 <-> 5 (węzeł 5 ma wyjście tylko do 2)
+	g.AddEdge(GraphEdge{
+		EdgeID: 403, SourceNode: 2, TargetNode: 5, Oneway: 0,
+		LengthM: 100, SpeedKMH: 30, DurationS: 12.0,
+		Coords: [][2]float64{{18.6400, 54.3530}, {18.6450, 54.3530}},
+	})
+
+	// Węzeł 2 leży na ulicy jednokierunkowej, więc jego out-degree wynosi 2 (do 3 i do 5),
+	// ale węzeł 5 jest prawdziwym ślepym zaułkiem.
+	edgeIdx403 := 3
+	edgeIdx401 := 0
+	if !g.isDeadEnd(5, edgeIdx403) {
+		t.Fatalf("węzeł 5 powinien zostać zidentyfikowany jako dead end dla krawędzi 403")
+	}
+	if g.isDeadEnd(2, edgeIdx401) {
+		t.Fatalf("węzeł 2 nie jest dead endem dla krawędzi 401")
+	}
+
+	sN, _ := g.FindNearestNode(18.6400, 54.3500)
+	eN, _ := g.FindNearestNode(18.6400, 54.3560)
+	t.Logf("FindNearestNode: start=%d, end=%d", sN, eN)
+	steps, pathNodes, _, ok := g.findShortestPathSteps(18.6400, 54.3500, 18.6400, 54.3560, nil, "high_cost", RoutePreferences{})
+	if !ok {
+		t.Fatalf("oczekiwano wyznaczenia trasy po ulicy jednokierunkowej 1->2->3")
+	}
+	t.Logf("Steps count: %d, steps: %+v, pathNodes: %+v", len(steps), steps, pathNodes)
+	for _, nid := range pathNodes {
+		if nid == 5 {
+			t.Fatalf("trasa nie może wjeżdżać w ślepy zaułek 5")
+		}
+	}
+	if len(steps) != 2 {
+		t.Fatalf("oczekiwano 2 kroków (401 i 402), got %d", len(steps))
+	}
+}
+
+func TestNieborowskaAutoRouteLive(t *testing.T) {
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, "postgresql://nnaper:nnaper@localhost:5432/nnaper_db")
+	if err != nil {
+		t.Skip("Brak bazy PostgreSQL")
+	}
+	defer pool.Close()
+
+	svc := NewService(pool, "http://localhost:5000")
+	pts := [][2]float64{{18.618, 54.336}} // ul. Nieborowska 28a
+	targetKM := 84.0
+	envRadiusKM := math.Max(10.0, math.Min(150.0, targetKM*0.65))
+	cosLat := math.Max(0.2, math.Cos(pts[0][1]*math.Pi/180.0))
+	dLat := envRadiusKM / 111.32
+	dLon := envRadiusKM / (111.32 * cosLat)
+	bboxPts := [][2]float64{
+		{pts[0][0] - dLon, pts[0][1] - dLat},
+		{pts[0][0] + dLon, pts[0][1] + dLat},
+	}
+	g, err := svc.loadSubgraphFromDB(ctx, "", "", bboxPts)
+	if err != nil {
+		t.Fatalf("loadSubgraph err: %v", err)
+	}
+
+	req := RoutePlanRequest{
+		Points:        pts,
+		AutoGenerate:  true,
+		TargetKM:      targetKM,
+		ReturnToStart: true,
+		Preferences: RoutePreferences{
+			AversionTraversed:      7,
+			AvoidTraversed:          true,
+			AversionHighways:       3,
+			AversionSpeedBumps:     6,
+			AversionTrafficSignals: 5,
+			AversionIntersections:  4,
+			AversionCrossings:      1,
+			AversionRoundabouts:    2,
+			AutoExploratory:        true,
+		},
+	}
+	resp, ok := g.buildIntelligentAutoRoute(req, targetKM)
+	if !ok {
+		t.Fatalf("buildIntelligentAutoRoute powinno zwrócić trasę dla ul. Nieborowskiej")
+	}
+	distKM := resp.DistanceM / 1000.0
+	t.Logf("Wyznaczona trasa dla Nieborowskiej 84km: %.1f km (oczekiwano ~84km)", distKM)
+	if distKM < 65.0 || distKM > 105.0 {
+		t.Fatalf("Dystans trasy %.1f km zbyt mocno odbiega od zadanego 84km", distKM)
 	}
 }
