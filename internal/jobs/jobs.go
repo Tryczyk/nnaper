@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -55,6 +56,27 @@ type FileHistoryItem struct {
 	ProfileID   string `json:"profile_id"`
 	ProfileName string `json:"profile_name"`
 	ParsedAt    string `json:"parsed_at"`
+}
+
+type diskSpaceWriter struct {
+	w             io.Writer
+	uploadDir     string
+	written       int64
+	lastCheck     int64
+	checkInterval int64
+	minFreeBytes  uint64
+}
+
+func (dsw *diskSpaceWriter) Write(p []byte) (n int, err error) {
+	if dsw.written-dsw.lastCheck >= dsw.checkInterval {
+		if freeBytes, err := GetFreeDiskSpace(dsw.uploadDir); err == nil && freeBytes < dsw.minFreeBytes {
+			return 0, fmt.Errorf("niewystarczająca ilość wolnego miejsca na dysku (pozostało: %d MB, wymagany bufor bezpieczeństwa: %d MB)", freeBytes/(1024*1024), dsw.minFreeBytes/(1024*1024))
+		}
+		dsw.lastCheck = dsw.written
+	}
+	n, err = dsw.w.Write(p)
+	dsw.written += int64(n)
+	return n, err
 }
 
 type Manager struct {
@@ -325,6 +347,28 @@ func (m *Manager) HandleUpload(w http.ResponseWriter, r *http.Request) {
 		safeFilename = "plik.txt"
 	}
 
+	// Weryfikacja wolnego miejsca na dysku (minimum 500 MB bufora bezpieczeństwa)
+	const minSafetyReserve = 500 * 1024 * 1024
+	freeBytes, diskErr := GetFreeDiskSpace(m.cfg.UploadDir)
+	if diskErr == nil {
+		if freeBytes < minSafetyReserve {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusInsufficientStorage)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"detail": fmt.Sprintf("Brak wolnego miejsca na dysku serwera (dostępne: %d MB, wymagany bufor bezpieczeństwa: %d MB).", freeBytes/(1024*1024), minSafetyReserve/(1024*1024)),
+			})
+			return
+		}
+		if r.ContentLength > 0 && freeBytes < uint64(r.ContentLength)+minSafetyReserve {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusInsufficientStorage)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"detail": fmt.Sprintf("Plik o rozmiarze %d MB przekracza dostępne miejsce na dysku (dostępne z rezerwą: %d MB).", r.ContentLength/(1024*1024), (freeBytes-minSafetyReserve)/(1024*1024)),
+			})
+			return
+		}
+	}
+
 	savedPath := filepath.Join(m.cfg.UploadDir, fmt.Sprintf("%s_%s_%s", userID, jobID, safeFilename))
 	outFile, err := os.Create(savedPath)
 	if err != nil {
@@ -332,16 +376,28 @@ func (m *Manager) HandleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Szybki strumieniowy zapis pliku na dysk z buforem 2 MB
+	// Szybki strumieniowy zapis pliku na dysk z buforem 2 MB i dynamiczną kontrolą wolnego miejsca
 	bufWriter := bufio.NewWriterSize(outFile, 2*1024*1024)
-	fileSize, copyErr := io.Copy(bufWriter, r.Body)
+	dsw := &diskSpaceWriter{
+		w:             bufWriter,
+		uploadDir:     m.cfg.UploadDir,
+		checkInterval: 16 * 1024 * 1024, // sprawdzaj co 16 MB
+		minFreeBytes:  minSafetyReserve,
+	}
+	fileSize, copyErr := io.Copy(dsw, r.Body)
 	if flushErr := bufWriter.Flush(); flushErr != nil && copyErr == nil {
 		copyErr = flushErr
 	}
 	_ = outFile.Close()
 	if copyErr != nil {
 		_ = os.Remove(savedPath)
-		http.Error(w, fmt.Sprintf(`{"detail":"Błąd odczytu strumienia: %v"}`, copyErr), http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		if strings.Contains(copyErr.Error(), "niewystarczająca ilość wolnego miejsca") {
+			w.WriteHeader(http.StatusInsufficientStorage)
+			_ = json.NewEncoder(w).Encode(map[string]string{"detail": copyErr.Error()})
+		} else {
+			http.Error(w, fmt.Sprintf(`{"detail":"Błąd odczytu strumienia: %v"}`, copyErr), http.StatusInternalServerError)
+		}
 		return
 	}
 
