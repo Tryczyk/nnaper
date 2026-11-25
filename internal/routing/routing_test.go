@@ -66,6 +66,27 @@ func TestAStarAvoidanceAndAversions(t *testing.T) {
 	if !ok4 || math.Abs(dist4-1500) > 1 {
 		t.Fatalf("expected AvoidTraversed to avoid edge 101 and pick node 4 (1500m), got dist=%f", dist4)
 	}
+
+	// 5. Unikanie dróg < 55 km/h (droga 1->2->3 ma 50 km/h, objazd 1->4->3 ma 60 km/h)
+	g.ResetUsedEdges()
+	_, dist5, _, _, _, ok5 := g.FindShortestPath(18.6400, 54.3500, 18.6400, 54.3600, nil, "high_cost", RoutePreferences{
+		AvoidBelowSpeedKMH: 55,
+		AversionBelowSpeed: 5,
+	})
+	if !ok5 || math.Abs(dist5-1500) > 1 {
+		t.Fatalf("expected AvoidBelowSpeedKMH to avoid 50 km/h edges and pick node 4 (1500m), got dist=%f", dist5)
+	}
+
+	// 6. Unikanie dróg > 55 km/h (droga 1->4->3 ma 60 km/h, droga 1->2->3 ma 50 km/h)
+	g.ResetUsedEdges()
+	_, dist6, _, _, _, ok6 := g.FindShortestPath(18.6400, 54.3500, 18.6400, 54.3600, nil, "high_cost", RoutePreferences{
+		AversionSpeedBumps: 5,
+		AvoidAboveSpeedKMH: 55,
+		AversionAboveSpeed: 10,
+	})
+	if !ok6 || math.Abs(dist6-1100) > 1 {
+		t.Fatalf("expected AvoidAboveSpeedKMH to avoid 60 km/h edges and pick node 2 (1100m), got dist=%f", dist6)
+	}
 }
 
 func TestEdgeBecomesTraversedWhenAddedToRoute(t *testing.T) {

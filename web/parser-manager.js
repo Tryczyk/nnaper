@@ -1892,6 +1892,16 @@
       syncWithServerJobs();
     });
 
+    // Zapewnienie plynnego przewijania modalu myszka nad polami numerycznymi filtrow
+    const filterNumberInputs = document.querySelectorAll('.parser-filters-body input[type="number"]');
+    filterNumberInputs.forEach((inp) => {
+      inp.addEventListener('wheel', () => {
+        if (document.activeElement === inp) {
+          inp.blur();
+        }
+      }, { passive: true });
+    });
+
     window.addEventListener('dragover', (e) => {
       e.preventDefault();
     });

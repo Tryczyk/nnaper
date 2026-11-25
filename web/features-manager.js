@@ -349,18 +349,80 @@
   };
 
   /* ============================================================================
-   * 5. HEATMAPA KAFELKOWA (0 = przezroczysty, 1 = zielony, max = czerwony)
+   * 5. DYNAMICZNA HEATMAPA (Wysoka rozdzielczosc, plynna, stabilna, nieprzeklamana)
    * ============================================================================ */
   let heatmapActive = false;
+  let heatmapVersion = Date.now();
+
+  function getHeatmapRasterUrl() {
+    const token = getAuthTokenSafe();
+    const profileId = getActiveProfileIdSafe();
+    return `${apiBase}/api/heatmap/tiles/{z}/{x}/{y}.png?token=${encodeURIComponent(token)}&profile_id=${encodeURIComponent(profileId)}&days=all&filter_stops=true&v=${heatmapVersion}`;
+  }
+
+  function applyHeatmapLayers() {
+    if (!window.map || !heatmapActive) return;
+
+    // Usuwamy ewentualne pozostalosci po starych warstwach wektorowych
+    if (window.map.getLayer('nnaper-heatmap-layer')) {
+      try { window.map.removeLayer('nnaper-heatmap-layer'); } catch (e) {}
+    }
+    if (window.map.getSource('nnaper-heatmap-vector-source')) {
+      try { window.map.removeSource('nnaper-heatmap-vector-source'); } catch (e) {}
+    }
+
+    const rasterUrl = getHeatmapRasterUrl();
+    const existingRasterSrc = window.map.getSource('nnaper-heatmap-raster-source');
+    if (existingRasterSrc && typeof existingRasterSrc.setTiles === 'function') {
+      existingRasterSrc.setTiles([rasterUrl]);
+    } else {
+      if (window.map.getLayer('nnaper-heatmap-raster-layer')) {
+        try { window.map.removeLayer('nnaper-heatmap-raster-layer'); } catch (e) {}
+      }
+      if (window.map.getSource('nnaper-heatmap-raster-source')) {
+        try { window.map.removeSource('nnaper-heatmap-raster-source'); } catch (e) {}
+      }
+      window.map.addSource('nnaper-heatmap-raster-source', {
+        type: 'raster',
+        tiles: [rasterUrl],
+        tileSize: 256,
+        minzoom: 0,
+        maxzoom: 18
+      });
+    }
+
+    if (!window.map.getLayer('nnaper-heatmap-raster-layer')) {
+      window.map.addLayer({
+        id: 'nnaper-heatmap-raster-layer',
+        type: 'raster',
+        source: 'nnaper-heatmap-raster-source',
+        paint: {
+          'raster-opacity': 0.88,
+          'raster-resampling': 'linear', // Interpolacja dwuliniowa GPU - zero pikselozy
+          'raster-fade-duration': 150
+        }
+      });
+    } else {
+      window.map.setLayoutProperty('nnaper-heatmap-raster-layer', 'visibility', 'visible');
+      window.map.setPaintProperty('nnaper-heatmap-raster-layer', 'raster-opacity', 0.88);
+      window.map.setPaintProperty('nnaper-heatmap-raster-layer', 'raster-resampling', 'linear');
+    }
+  }
 
   async function toggleHeatmap(forceState) {
     heatmapActive = typeof forceState === 'boolean' ? forceState : !heatmapActive;
+    heatmapVersion = Date.now();
     const btn = document.getElementById('btn-toggle-heatmap');
     if (btn) {
       btn.classList.toggle('active', heatmapActive);
       btn.setAttribute('aria-pressed', heatmapActive ? 'true' : 'false');
     }
-    const legend = document.getElementById('nnaper-heatmap-legend');
+
+    // Usuniecie ewentualnego istniejacego panelu z DOM
+    const oldLegend = document.getElementById('nnaper-heatmap-legend');
+    if (oldLegend) {
+      oldLegend.remove();
+    }
 
     if (!window.map) return;
 
@@ -368,104 +430,149 @@
       if (window.map.getLayer('nnaper-heatmap-raster-layer')) {
         window.map.setLayoutProperty('nnaper-heatmap-raster-layer', 'visibility', 'none');
       }
-      if (legend) legend.style.display = 'none';
+
+      // Przywracamy standardowa widocznosc tras GPS
+      if (typeof window.updateTrackFilters === 'function') {
+        window.updateTrackFilters();
+      }
       return;
     }
 
-    const token = getAuthTokenSafe();
-    const profileId = getActiveProfileIdSafe();
-    const tileUrl = `${apiBase}/api/heatmap/tiles/{z}/{x}/{y}.png?token=${encodeURIComponent(token)}&profile_id=${encodeURIComponent(profileId)}&v=${Date.now()}`;
-
-    if (window.map.getLayer('nnaper-heatmap-raster-layer')) {
-      window.map.removeLayer('nnaper-heatmap-raster-layer');
+    // Ukrywamy jednolite linie i punkty sladu GPS na czas heatmapy, by nie przeslanialy kolorow
+    if (window.map.getLayer('GPS / Ślad trasy / linie')) {
+      window.map.setLayoutProperty('GPS / Ślad trasy / linie', 'visibility', 'none');
     }
-    if (window.map.getSource('nnaper-heatmap-raster-source')) {
-      window.map.removeSource('nnaper-heatmap-raster-source');
+    if (window.map.getLayer('GPS / Ślad trasy')) {
+      window.map.setLayoutProperty('GPS / Ślad trasy', 'visibility', 'none');
     }
 
-    window.map.addSource('nnaper-heatmap-raster-source', {
-      type: 'raster',
-      tiles: [tileUrl],
-      tileSize: 256,
-      minzoom: 0,
-      maxzoom: 18
-    });
-
-    window.map.addLayer({
-      id: 'nnaper-heatmap-raster-layer',
-      type: 'raster',
-      source: 'nnaper-heatmap-raster-source',
-      paint: {
-        'raster-opacity': 0.85,
-        'raster-resampling': 'nearest'
-      }
-    });
-
-    if (legend) {
-      legend.style.display = 'flex';
-      try {
-        const b = window.map.getBounds();
-        const bboxStr = `${b.getWest()},${b.getSouth()},${b.getEast()},${b.getNorth()}`;
-        const res = await fetch(`${apiBase}/api/heatmap/grid?token=${encodeURIComponent(token)}&profile_id=${encodeURIComponent(profileId)}&bbox=${encodeURIComponent(bboxStr)}&cols=64&rows=64`);
-        if (res.ok) {
-          const data = await res.json();
-          const maxEl = document.getElementById('heatmap-legend-max');
-          if (maxEl) maxEl.innerText = `Max: ${data.max_count || 1} pkt/px (Czerwony)`;
-        }
-      } catch (e) {}
-    }
+    applyHeatmapLayers();
   }
   window.toggleHeatmap = toggleHeatmap;
+  window.isHeatmapActive = () => heatmapActive;
+  window.shouldShowTrackOverHeatmap = () => false;
 
   /* ============================================================================
    * 6. ODKRYWANIE MAPY (MGŁA WOJNY - ZASŁANIAJĄCE TRÓJKĄTY DZIAŁEK)
    * ============================================================================ */
   let fogOfWarActive = false;
   let fogMoveListenerAttached = false;
+  let fogDebounceTimer = null;
+  let fogAbortCtrl = null;
 
   async function refreshFogOfWarData() {
     if (!fogOfWarActive || !window.map) return;
     const token = getAuthTokenSafe();
     const profileId = getActiveProfileIdSafe();
+
+    if (fogAbortCtrl) {
+      fogAbortCtrl.abort();
+    }
+    fogAbortCtrl = new AbortController();
+
     try {
       const b = window.map.getBounds();
       const bboxStr = `${b.getWest()},${b.getSouth()},${b.getEast()},${b.getNorth()}`;
-      const res = await fetch(`${apiBase}/api/fog-of-war?token=${encodeURIComponent(token)}&profile_id=${encodeURIComponent(profileId)}&bbox=${encodeURIComponent(bboxStr)}`);
+      const res = await fetch(`${apiBase}/api/fog-of-war?token=${encodeURIComponent(token)}&profile_id=${encodeURIComponent(profileId)}&bbox=${encodeURIComponent(bboxStr)}`, {
+        signal: fogAbortCtrl.signal
+      });
       if (!res.ok) return;
       const data = await res.json();
 
-      const unvisitedParcels = data.parcels || [];
-      const parcelsGeoJSON = {
+      // 1. Biała chmura mgły wojny (zakrywa nieodkryty teren na biało, z wyciętymi otworami na odkryte działki)
+      let maskFeatures = [];
+      if (data.fog_mask) {
+        maskFeatures = [{
+          type: 'Feature',
+          geometry: data.fog_mask,
+          properties: {}
+        }];
+      } else {
+        // Fallback: jeśli serwer nie zwrócił maski (np. brak odkryć w kadrze), zasłaniamy cały widoczny kadr białą chmurą
+        maskFeatures = [{
+          type: 'Feature',
+          geometry: {
+            type: 'Polygon',
+            coordinates: [[
+              [b.getWest(), b.getSouth()],
+              [b.getEast(), b.getSouth()],
+              [b.getEast(), b.getNorth()],
+              [b.getWest(), b.getNorth()],
+              [b.getWest(), b.getSouth()]
+            ]]
+          },
+          properties: {}
+        }];
+      }
+
+      const maskGeoJSON = {
         type: 'FeatureCollection',
-        features: unvisitedParcels
+        features: maskFeatures
       };
 
-      if (!window.map.getSource('nnaper-fog-parcels-source')) {
-        window.map.addSource('nnaper-fog-parcels-source', {
+      if (!window.map.getSource('nnaper-fog-mask-source')) {
+        window.map.addSource('nnaper-fog-mask-source', {
           type: 'geojson',
-          data: parcelsGeoJSON
+          data: maskGeoJSON,
+          tolerance: 0.5,
+          buffer: 32
         });
         window.map.addLayer({
           id: 'nnaper-fog-mask-layer',
           type: 'fill',
-          source: 'nnaper-fog-parcels-source',
+          source: 'nnaper-fog-mask-source',
           paint: {
-            'fill-color': '#020617',
-            'fill-opacity': 0.84
-          }
-        });
-        window.map.addLayer({
-          id: 'nnaper-fog-parcels-outline',
-          type: 'line',
-          source: 'nnaper-fog-parcels-source',
-          paint: {
-            'line-color': '#0284c7',
-            'line-width': 1.0,
-            'line-opacity': 0.50
+            'fill-color': '#ffffff',
+            'fill-opacity': 0.95
           }
         });
       } else {
-        window.map.getSource('nnaper-fog-parcels-source').setData(parcelsGeoJSON);
+        window.map.getSource('nnaper-fog-mask-source').setData(maskGeoJSON);
+      }
+
+      // 2. Odkryte działki (przezroczyste z wyraźnymi granicami działek i trójkątów)
+      const discoveredParcels = data.discovered_parcels || data.parcels || [];
+      const discoveredGeoJSON = {
+        type: 'FeatureCollection',
+        features: discoveredParcels
+      };
+
+      if (!window.map.getSource('nnaper-fog-discovered-source')) {
+        window.map.addSource('nnaper-fog-discovered-source', {
+          type: 'geojson',
+          data: discoveredGeoJSON,
+          tolerance: 0.5,
+          buffer: 32
+        });
+        window.map.addLayer({
+          id: 'nnaper-fog-discovered-fill',
+          type: 'fill',
+          source: 'nnaper-fog-discovered-source',
+          paint: {
+            'fill-color': '#38bdf8',
+            'fill-opacity': 0.0
+          }
+        });
+        window.map.addLayer({
+          id: 'nnaper-fog-discovered-outline',
+          type: 'line',
+          source: 'nnaper-fog-discovered-source',
+          paint: {
+            'line-color': '#0284c7',
+            'line-width': 1.6,
+            'line-opacity': 0.85
+          }
+        });
+      } else {
+        window.map.getSource('nnaper-fog-discovered-source').setData(discoveredGeoJSON);
+      }
+
+      // Usunięcie ewentualnych starych warstw czarnych wielokątów z pamięci MapLibre
+      if (window.map?.getLayer('nnaper-fog-parcels-outline')) {
+        try { window.map.removeLayer('nnaper-fog-parcels-outline'); } catch (e) {}
+      }
+      if (window.map?.getSource('nnaper-fog-parcels-source')) {
+        try { window.map.removeSource('nnaper-fog-parcels-source'); } catch (e) {}
       }
 
       const badge = document.getElementById('nnaper-fog-stats-badge');
@@ -477,8 +584,16 @@
         `;
       }
     } catch (err) {
-      console.error('Błąd pobierania mgły odkrywania mapy:', err);
+      if (err.name !== 'AbortError') {
+        console.error('Błąd pobierania mgły odkrywania mapy:', err);
+      }
     }
+  }
+
+  function scheduleRefreshFogOfWar() {
+    if (!fogOfWarActive) return;
+    if (fogDebounceTimer) clearTimeout(fogDebounceTimer);
+    fogDebounceTimer = setTimeout(refreshFogOfWarData, 160);
   }
 
   window.toggleFogOfWar = async function (forceState) {
@@ -494,8 +609,17 @@
       if (window.map?.getLayer('nnaper-fog-mask-layer')) {
         window.map.setLayoutProperty('nnaper-fog-mask-layer', 'visibility', 'none');
       }
+      if (window.map?.getLayer('nnaper-fog-discovered-fill')) {
+        window.map.setLayoutProperty('nnaper-fog-discovered-fill', 'visibility', 'none');
+      }
+      if (window.map?.getLayer('nnaper-fog-discovered-outline')) {
+        window.map.setLayoutProperty('nnaper-fog-discovered-outline', 'visibility', 'none');
+      }
       if (window.map?.getLayer('nnaper-fog-parcels-outline')) {
-        window.map.setLayoutProperty('nnaper-fog-parcels-outline', 'visibility', 'none');
+        try { window.map.removeLayer('nnaper-fog-parcels-outline'); } catch (e) {}
+      }
+      if (window.map?.getSource('nnaper-fog-parcels-source')) {
+        try { window.map.removeSource('nnaper-fog-parcels-source'); } catch (e) {}
       }
       if (badge) badge.style.display = 'none';
       return;
@@ -503,16 +627,17 @@
 
     if (window.map && !fogMoveListenerAttached) {
       fogMoveListenerAttached = true;
-      window.map.on('moveend', () => {
-        if (fogOfWarActive) refreshFogOfWarData();
-      });
+      window.map.on('moveend', scheduleRefreshFogOfWar);
     }
 
     if (window.map?.getLayer('nnaper-fog-mask-layer')) {
       window.map.setLayoutProperty('nnaper-fog-mask-layer', 'visibility', 'visible');
     }
-    if (window.map?.getLayer('nnaper-fog-parcels-outline')) {
-      window.map.setLayoutProperty('nnaper-fog-parcels-outline', 'visibility', 'visible');
+    if (window.map?.getLayer('nnaper-fog-discovered-fill')) {
+      window.map.setLayoutProperty('nnaper-fog-discovered-fill', 'visibility', 'visible');
+    }
+    if (window.map?.getLayer('nnaper-fog-discovered-outline')) {
+      window.map.setLayoutProperty('nnaper-fog-discovered-outline', 'visibility', 'visible');
     }
     await refreshFogOfWarData();
   };
@@ -1048,21 +1173,7 @@
    * 10. INICJALIZACJA ELEMENTÓW DOM I BINDOWANIE ZDARZEŃ
    * ============================================================================ */
   function injectFloatingUiPanels() {
-    // 1. Legenda Heatmapy
-    const heatLegend = document.createElement('div');
-    heatLegend.id = 'nnaper-heatmap-legend';
-    heatLegend.className = 'nnaper-floating-badge';
-    heatLegend.style.display = 'none';
-    heatLegend.innerHTML = `
-      <span style="font-weight:700; color:#f8fafc;">Heatmapa:</span>
-      <span style="color:#94a3b8;">0 = przezroczysty</span>
-      <span style="color:#00dc3c; font-weight:600;">1 pkt = zielony</span>
-      <div style="width:70px; height:8px; border-radius:4px; background:linear-gradient(90deg, #00dc3c, #facc15, #ff1e1e);"></div>
-      <span id="heatmap-legend-max" style="color:#ff4d4d; font-weight:600;">Max = czerwony</span>
-    `;
-    document.body.appendChild(heatLegend);
-
-    // 3. Odznaka statystyk Mgły Odkrywania Mapy
+    // 1. Odznaka statystyk Mgły Odkrywania Mapy
     const fogBadge = document.createElement('div');
     fogBadge.id = 'nnaper-fog-stats-badge';
     fogBadge.className = 'nnaper-floating-badge';
@@ -1418,6 +1529,9 @@
     });
     window.addEventListener('nnaper_epochs_deleted', () => {
       if (fogOfWarActive) refreshFogOfWarData();
+      if (heatmapActive) toggleHeatmap(true);
+    });
+    window.addEventListener('nnaper_track_filter_changed', () => {
       if (heatmapActive) toggleHeatmap(true);
     });
   }

@@ -305,7 +305,6 @@ func EnsureIndexed(ctx context.Context, pool *pgxpool.Pool, pbfPath string) erro
 	var edgeList []roadEdgeRecord
 	var parcelList []fogParcelRecord
 	seenStreetCity := make(map[string]bool, 50_000)
-	parcelSeq := 1
 
 	for _, w := range relevantWays {
 		coords := make([][2]float64, 0, len(w.nodeIDs))
@@ -475,12 +474,6 @@ func EnsureIndexed(ctx context.Context, pool *pgxpool.Pool, pbfPath string) erro
 				isIntersection: isInter,
 				wkt:            lineStringWKT(segCoords),
 			})
-		}
-
-		// Generowanie deterministycznych trójkątnych działek przydrożnych po obu stronach ulicy
-		if shouldGenerateParcelsForRoad(hw, coords) && len(parcelList) < 60000 {
-			newParcels := buildRoadsideTriangularParcels(coords, &parcelSeq)
-			parcelList = append(parcelList, newParcels...)
 		}
 	}
 
@@ -920,9 +913,10 @@ func saveIndexedDataToDB(
 		_ = br.Close()
 	}
 
-	// 5. Działki mgły wojny (fog_parcels)
-	if err := bulkInsertFogParcels(ctx, pool, parcels); err != nil {
-		log.Printf("[OSM INDEXER WARNING] Błąd zapisu działek mgły: %v", err)
+	// 5. Działki mgły wojny (fog_parcels) generowane z kwartałów otoczonych ulicami
+	log.Printf("[OSM INDEXER] Generowanie działek kwartałów ulicznych dla mgły wojny (rebuild_fog_parcels)...")
+	if _, err := pool.Exec(ctx, `CALL rebuild_fog_parcels();`); err != nil {
+		log.Printf("[OSM INDEXER WARNING] Błąd procedury rebuild_fog_parcels: %v", err)
 	}
 
 	_, _ = pool.Exec(ctx, `

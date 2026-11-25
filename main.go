@@ -132,6 +132,7 @@ func main() {
 
 		// Heatmapa, Odkrywanie mapy (Mgła wojny) oraz Routing
 		api.Get("/heatmap/tiles/{z}/{x}/{y}.png", featuresService.HandleGetHeatmapTile)
+		api.Get("/heatmap/tiles/{z}/{x}/{y}.pbf", featuresService.HandleGetHeatmapVectorTile)
 		api.Get("/heatmap/grid", featuresService.HandleGetHeatmapGrid)
 		api.Get("/fog-of-war", featuresService.HandleGetFogOfWar)
 		api.Post("/route/plan", routingService.HandlePlanRoute)

@@ -281,16 +281,16 @@ func (s *Service) HandlePlaybackDay(w http.ResponseWriter, r *http.Request) {
 		orderClauseCTE = "e.epoch_id ASC"
 	} else if day == "all" || day == "0" || day == "all-history" {
 		whereTime = "1=1"
-		orderClauseCTE = "e.timestamp ASC"
+		orderClauseCTE = "e.timestamp ASC, e.epoch_id ASC"
 	} else if len(day) == 4 && regexp.MustCompile(`^\d{4}$`).MatchString(day) {
 		whereTime = fmt.Sprintf("e.timestamp >= $%d::date AND e.timestamp < ($%d::date + INTERVAL '1 year')", nextArg, nextArg)
 		args = append(args, day+"-01-01")
-		orderClauseCTE = "e.timestamp ASC"
+		orderClauseCTE = "e.timestamp ASC, e.epoch_id ASC"
 		nextArg++
 	} else if len(day) == 7 && regexp.MustCompile(`^\d{4}-\d{2}$`).MatchString(day) {
 		whereTime = fmt.Sprintf("e.timestamp >= $%d::date AND e.timestamp < ($%d::date + INTERVAL '1 month')", nextArg, nextArg)
 		args = append(args, day+"-01")
-		orderClauseCTE = "e.timestamp ASC"
+		orderClauseCTE = "e.timestamp ASC, e.epoch_id ASC"
 		nextArg++
 	} else {
 		if _, err := time.Parse("2006-01-02", day); err != nil {
@@ -299,7 +299,7 @@ func (s *Service) HandlePlaybackDay(w http.ResponseWriter, r *http.Request) {
 		}
 		whereTime = fmt.Sprintf("e.timestamp >= $%d::date AND e.timestamp < ($%d::date + INTERVAL '1 day')", nextArg, nextArg)
 		args = append(args, day)
-		orderClauseCTE = "e.timestamp ASC"
+		orderClauseCTE = "e.timestamp ASC, e.epoch_id ASC"
 		nextArg++
 	}
 
@@ -354,6 +354,7 @@ func (s *Service) HandlePlaybackDay(w http.ResponseWriter, r *http.Request) {
 		whereTime += fmt.Sprintf(" AND e.timestamp > $%d::timestamptz", nextArg)
 		args = append(args, afterTS)
 		nextArg++
+		offset = 0 // Przy stronicowaniu keyset (after_ts) nie stosujemy podwójnego przeskakiwania przez OFFSET
 	}
 
 	activeGeom := "e.geom"

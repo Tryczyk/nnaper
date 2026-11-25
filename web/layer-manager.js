@@ -79,7 +79,7 @@
           'Infrastruktura drogowa/Fotoradary': { visibility: 'visible', circleRadius: 7.5 },
           'Infrastruktura drogowa/Odcinkowe pomiary prędkości': { visibility: 'visible', lineWidth: 3.5 },
           'Infrastruktura drogowa/Sygnalizacja drogowa': { visibility: 'visible', circleRadius: 5.5 },
-          'Infrastruktura drogowa/Progi zwalniające': { visibility: 'visible', circleRadius: 5.5 },
+          'Infrastruktura drogowa/Progi zwalniające': { visibility: 'visible' },
           'Infrastruktura drogowa/Przejścia dla pieszych': { visibility: 'visible', circleRadius: 4.5 }
         },
         categories: {
@@ -291,7 +291,7 @@
 
     // Zastosowanie widoczności całych kategorii oraz poszczególnych warstw z presetu
     styleLayers.forEach(raw => {
-      if (!raw || !raw.id || raw.id === 'bg' || raw.id.startsWith('GPS') || raw.id.startsWith('Budynki')) return;
+      if (!raw || !raw.id || raw.id === 'bg' || raw.id.startsWith('GPS') || raw.id.startsWith('Budynki') || raw.id.startsWith('Podkłady')) return;
       const parts = raw.id.split('/').map(p => p.trim());
       let cat = parts.length > 1 ? parts[0] : 'Inne';
       if (raw.id.startsWith('nnaper-drawings-')) {
@@ -306,6 +306,10 @@
         newCfg.layers[raw.id].visibility = catVis ? 'visible' : 'none';
       }
     });
+
+    newCfg.categories['Podkłady'] = true;
+    newCfg.layers['Podkłady/Satelita (Świat - ESRI)'] = Object.assign(newCfg.layers['Podkłady/Satelita (Świat - ESRI)'] || {}, { visibility: 'visible' });
+    newCfg.layers['Podkłady/Ortofotomapa (Polska - GUGiK)'] = Object.assign(newCfg.layers['Podkłady/Ortofotomapa (Polska - GUGiK)'] || {}, { visibility: 'visible' });
 
     saveStoredConfig(newCfg);
     if (map) {
@@ -326,6 +330,10 @@
           if (!parsed.layers) parsed.layers = {};
           if (!parsed.categories) parsed.categories = {};
           if (!parsed.settings3D) parsed.settings3D = { map3D: false, buildings3D: false };
+          if (!parsed.groupOrder) parsed.groupOrder = null;
+          parsed.categories['Podkłady'] = true;
+          parsed.layers['Podkłady/Satelita (Świat - ESRI)'] = Object.assign(parsed.layers['Podkłady/Satelita (Świat - ESRI)'] || {}, { visibility: 'visible' });
+          parsed.layers['Podkłady/Ortofotomapa (Polska - GUGiK)'] = Object.assign(parsed.layers['Podkłady/Ortofotomapa (Polska - GUGiK)'] || {}, { visibility: 'visible' });
           return parsed;
         }
       }
@@ -333,14 +341,63 @@
       console.warn('Nie udało się odczytać konfiguracji warstw z localStorage:', e);
     }
     return {
-      version: 1,
-      layers: {},
-      categories: {},
+      version: 2,
+      layers: {
+        'Podkłady/Satelita (Świat - ESRI)': { visibility: 'visible' },
+        'Podkłady/Ortofotomapa (Polska - GUGiK)': { visibility: 'visible' }
+      },
+      categories: {
+        'Podkłady': true
+      },
       settings3D: {
         map3D: false,
         buildings3D: false
-      }
+      },
+      groupOrder: null
     };
+  }
+
+  function getCustomGroupOrder() {
+    try {
+      const user = (typeof window.getAuthUser === 'function') ? window.getAuthUser() : null;
+      const profileId = (typeof window.getActiveProfileId === 'function') ? window.getActiveProfileId() : '';
+      const userId = user?.user_id || user?.id || user?.username || '';
+      if (userId || profileId) {
+        const scopedKey = `nnaper_layer_groups_order_${userId || 'anon'}${profileId ? '_' + profileId : ''}`;
+        const rawScoped = localStorage.getItem(scopedKey);
+        if (rawScoped) {
+          const parsed = JSON.parse(rawScoped);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      }
+      const rawGlobal = localStorage.getItem('nnaper_layer_groups_order');
+      if (rawGlobal) {
+        const parsed = JSON.parse(rawGlobal);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+      const cfg = getStoredConfig();
+      if (Array.isArray(cfg.groupOrder) && cfg.groupOrder.length > 0) {
+        return cfg.groupOrder;
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  function saveCustomGroupOrder(order) {
+    if (!Array.isArray(order)) return;
+    try {
+      const user = (typeof window.getAuthUser === 'function') ? window.getAuthUser() : null;
+      const profileId = (typeof window.getActiveProfileId === 'function') ? window.getActiveProfileId() : '';
+      const userId = user?.user_id || user?.id || user?.username || '';
+      if (userId || profileId) {
+        const scopedKey = `nnaper_layer_groups_order_${userId || 'anon'}${profileId ? '_' + profileId : ''}`;
+        localStorage.setItem(scopedKey, JSON.stringify(order));
+      }
+      localStorage.setItem('nnaper_layer_groups_order', JSON.stringify(order));
+      const cfg = getStoredConfig();
+      cfg.groupOrder = order;
+      saveStoredConfig(cfg);
+    } catch (e) {}
   }
 
   function saveStoredConfig(config) {
@@ -550,6 +607,14 @@
     const cfg = getStoredConfig();
     let configModified = false;
 
+    // Podkłady zawsze na stałe włączone (Satelita ESRI + Ortofotomapa GUGiK)
+    if (map.getLayer('Podkłady/Satelita (Świat - ESRI)')) {
+      try { map.setLayoutProperty('Podkłady/Satelita (Świat - ESRI)', 'visibility', 'visible'); } catch (e) { }
+    }
+    if (map.getLayer('Podkłady/Ortofotomapa (Polska - GUGiK)')) {
+      try { map.setLayoutProperty('Podkłady/Ortofotomapa (Polska - GUGiK)', 'visibility', 'visible'); } catch (e) { }
+    }
+
     // 1. Zastosowanie styli poszczególnych warstw
     Object.keys(cfg.layers || {}).forEach(layerId => {
       if (layerId.includes('Zaznaczone drogi') || layerId.startsWith('osm-traversed-') || layerId.includes('outline-line')) {
@@ -633,14 +698,17 @@
 
       // Punkty (circle-radius, stroke)
       if (saved.circleRadius !== undefined && layerExists) {
-        try {
-          const r = parseFloat(saved.circleRadius);
-          if (layerId === 'GPS / Ślad trasy' && typeof window.updateTrackPaintProperty === 'function') {
-            window.updateTrackPaintProperty('circle-radius', r);
-          } else {
-            map.setPaintProperty(layerId, 'circle-radius', r);
-          }
-        } catch (e) { }
+        const raw = getRawLayer(map, layerId);
+        if (!raw || raw.type === 'circle') {
+          try {
+            const r = parseFloat(saved.circleRadius);
+            if (layerId === 'GPS / Ślad trasy' && typeof window.updateTrackPaintProperty === 'function') {
+              window.updateTrackPaintProperty('circle-radius', r);
+            } else {
+              map.setPaintProperty(layerId, 'circle-radius', r);
+            }
+          } catch (e) { }
+        }
       }
       if (saved.strokeColor && layerExists) {
         try {
@@ -678,6 +746,10 @@
             if (raw.type === 'fill') map.setPaintProperty(layerId, 'fill-opacity', opVal);
             else if (raw.type === 'line') map.setPaintProperty(layerId, 'line-opacity', opVal);
             else if (raw.type === 'circle') map.setPaintProperty(layerId, 'circle-opacity', opVal);
+            else if (raw.type === 'symbol') {
+              try { map.setPaintProperty(layerId, 'icon-opacity', opVal); } catch (e) { }
+              try { map.setPaintProperty(layerId, 'text-opacity', opVal); } catch (e) { }
+            }
             else if (raw.type === 'fill-extrusion') map.setPaintProperty(layerId, 'fill-extrusion-opacity', opVal);
             else if (raw.type === 'raster') map.setPaintProperty(layerId, 'raster-opacity', opVal);
           } catch (e) { }
@@ -804,123 +876,6 @@
     // Zainicjalizuj inteligentne Studio Stylizacji
     setupStyleStudio(map);
 
-    // Panel akcji na górze drzewa warstw
-    const actionBar = document.createElement('div');
-    actionBar.className = 'layer-tree-action-bar';
-    actionBar.style.cssText = 'padding: 2px 2px 8px 2px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); margin-bottom: 8px; display: flex; flex-direction: column; gap: 6px;';
-
-    // Sekcja Presetów Warstw (domyślne + własne)
-    const presetBox = document.createElement('div');
-    presetBox.className = 'layer-presets-box';
-    presetBox.style.cssText = 'margin-top: 4px; padding-top: 6px; border-top: 1px dashed rgba(255,255,255,0.1); display: flex; flex-direction: column; gap: 6px; width: 100%; box-sizing: border-box;';
-
-    const presetHeaderRow = document.createElement('div');
-    presetHeaderRow.style.cssText = 'display: flex; justify-content: space-between; align-items: center; gap: 4px; width: 100%;';
-
-    const presetLabel = document.createElement('label');
-    presetLabel.htmlFor = 'layer-preset-select';
-    presetLabel.innerText = 'PRESETY WARSTW:';
-    presetLabel.style.cssText = 'font-size: 10px; font-weight: 700; color: #94a3b8; letter-spacing: 0.05em;';
-
-    const presetBtnsWrap = document.createElement('div');
-    presetBtnsWrap.style.cssText = 'display: flex; gap: 4px; align-items: center;';
-
-    const btnSavePreset = document.createElement('button');
-    btnSavePreset.type = 'button';
-    btnSavePreset.innerText = '+ Zapisz obecny';
-    btnSavePreset.title = 'Zapisz obecny układ i kolory warstw jako własny preset';
-    btnSavePreset.style.cssText = 'padding: 3px 8px; font-size: 10px; font-weight: 600; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #34d399; border-radius: 5px; cursor: pointer; white-space: nowrap;';
-
-    const btnDelPreset = document.createElement('button');
-    btnDelPreset.type = 'button';
-    btnDelPreset.innerText = 'Usuń';
-    btnDelPreset.title = 'Usuń wybrany własny preset';
-    btnDelPreset.style.cssText = 'padding: 3px 7px; font-size: 10px; background: rgba(239, 68, 68, 0.14); border: 1px solid rgba(239, 68, 68, 0.35); color: #f87171; border-radius: 5px; cursor: pointer; display: none; white-space: nowrap;';
-
-    presetBtnsWrap.appendChild(btnSavePreset);
-    presetBtnsWrap.appendChild(btnDelPreset);
-    presetHeaderRow.appendChild(presetLabel);
-    presetHeaderRow.appendChild(presetBtnsWrap);
-
-    const presetSelect = document.createElement('select');
-    presetSelect.id = 'layer-preset-select';
-    presetSelect.style.cssText = 'width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; font-size: 11.5px; padding: 5px 8px; background: #1e293b; color: #f8fafc; border: 1px solid #334155; border-radius: 6px; outline: none; cursor: pointer; text-overflow: ellipsis;';
-
-    function populatePresetOptions() {
-      const savedActiveId = localStorage.getItem('nnaper_active_preset_id') || '';
-      const currentVal = presetSelect.value || savedActiveId;
-      presetSelect.innerHTML = '<option value="">-- Wybierz preset warstw --</option>';
-      const all = getAllPresets();
-      all.forEach(p => {
-        const opt = document.createElement('option');
-        opt.value = p.preset_id;
-        opt.innerText = String(p.name || '').replace(/\s*\([^)]*\)/g, '');
-        presetSelect.appendChild(opt);
-      });
-      if (currentVal && all.some(p => p.preset_id === currentVal)) {
-        presetSelect.value = currentVal;
-      }
-      btnDelPreset.style.display = (presetSelect.value && !presetSelect.value.startsWith('default_')) ? 'inline-block' : 'none';
-    }
-
-    populatePresetOptions();
-    syncPresetsFromServer().then(populatePresetOptions);
-    window.addEventListener('nnaper_presets_updated', populatePresetOptions);
-
-    presetSelect.addEventListener('mousedown', () => {
-      if (presetSelect.value) {
-        presetSelect.dataset.lastVal = presetSelect.value;
-        presetSelect.selectedIndex = -1;
-      }
-    });
-
-    presetSelect.addEventListener('blur', () => {
-      if (!presetSelect.value && presetSelect.dataset.lastVal) {
-        presetSelect.value = presetSelect.dataset.lastVal;
-      }
-    });
-
-    presetSelect.addEventListener('change', (e) => {
-      e.stopPropagation();
-      const val = presetSelect.value || presetSelect.dataset.lastVal || '';
-      if (val) {
-        presetSelect.value = val;
-        presetSelect.dataset.lastVal = val;
-        applyPresetById(map, val);
-      }
-      btnDelPreset.style.display = (val && !val.startsWith('default_')) ? 'inline-block' : 'none';
-    });
-
-    btnSavePreset.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const name = window.prompt('Podaj nazwę nowego presetu warstw:', 'Mój własny preset');
-      if (!name || !name.trim()) return;
-      const created = await createCustomPreset(name.trim(), map);
-      if (created) {
-        localStorage.setItem('nnaper_active_preset_id', created.preset_id);
-        populatePresetOptions();
-        presetSelect.value = created.preset_id;
-        btnDelPreset.style.display = 'inline-block';
-      }
-    });
-
-    btnDelPreset.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const val = presetSelect.value;
-      if (!val || val.startsWith('default_')) return;
-      if (!window.confirm('Czy na pewno usunąć ten własny preset warstw?')) return;
-      await deleteCustomPreset(val);
-      localStorage.removeItem('nnaper_active_preset_id');
-      presetSelect.value = '';
-      populatePresetOptions();
-    });
-
-    presetBox.appendChild(presetHeaderRow);
-    presetBox.appendChild(presetSelect);
-    actionBar.appendChild(presetBox);
-
-    container.appendChild(actionBar);
-
     const cfg = getStoredConfig();
     const layers = map.getStyle().layers || [];
     const groups = {};
@@ -936,6 +891,7 @@
         layer.id.startsWith('osm-traversed-') ||
         layer.id.includes('Zaznaczone drogi') ||
         layer.id.startsWith('Budynki') ||
+        layer.id.startsWith('Podkłady') ||
         (layer.id.startsWith('GPS / ') && layer.id !== 'GPS / Ślad trasy') ||
         layer.id === 'GPS'
       ) return;
@@ -959,18 +915,38 @@
       groups[groupName].push({ id: layer.id, title: leafTitle, raw: JSON.parse(JSON.stringify(layer)) });
     });
 
-    const sortedGroupNames = Object.keys(groups).sort((a, b) => {
-      const getPriority = (name) => {
-        const n = name.trim();
-        if (n === 'GPS') return 1;
-        if (n === 'Podkłady') return 2;
-        return 10;
-      };
-      const pA = getPriority(a);
-      const pB = getPriority(b);
-      if (pA !== pB) return pA - pB;
-      return a.localeCompare(b, 'pl');
-    });
+    const savedOrder = getCustomGroupOrder();
+    let sortedGroupNames;
+    if (savedOrder && savedOrder.length > 0) {
+      const allGroupNames = Object.keys(groups);
+      const ordered = savedOrder.filter(name => allGroupNames.includes(name));
+      const remaining = allGroupNames.filter(name => !ordered.includes(name)).sort((a, b) => {
+        const getPriority = (name) => {
+          const n = name.trim();
+          if (n === 'GPS') return 1;
+          if (n === 'Podkłady') return 2;
+          return 10;
+        };
+        const pA = getPriority(a);
+        const pB = getPriority(b);
+        if (pA !== pB) return pA - pB;
+        return a.localeCompare(b, 'pl');
+      });
+      sortedGroupNames = [...ordered, ...remaining];
+    } else {
+      sortedGroupNames = Object.keys(groups).sort((a, b) => {
+        const getPriority = (name) => {
+          const n = name.trim();
+          if (n === 'GPS') return 1;
+          if (n === 'Podkłady') return 2;
+          return 10;
+        };
+        const pA = getPriority(a);
+        const pB = getPriority(b);
+        if (pA !== pB) return pA - pB;
+        return a.localeCompare(b, 'pl');
+      });
+    }
 
     sortedGroupNames.forEach(groupName => {
       const childList = groups[groupName];
@@ -983,6 +959,14 @@
 
       const label = document.createElement('div');
       label.className = 'node-label';
+
+      const dragHandle = document.createElement('button');
+      dragHandle.type = 'button';
+      dragHandle.className = 'route-drag-handle layer-group-drag-handle';
+      dragHandle.setAttribute('aria-label', `Zmień kolejność grupy ${groupName}`);
+      dragHandle.title = 'Przeciągnij, aby zmienić kolejność grupy (lub użyj strzałek góra/dół)';
+      dragHandle.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="8" cy="5" r="2"/><circle cx="16" cy="5" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="8" cy="19" r="2"/><circle cx="16" cy="19" r="2"/></svg>';
+      dragHandle.addEventListener('click', (e) => e.stopPropagation());
 
       const pCheckbox = document.createElement('input');
       pCheckbox.type = 'checkbox';
@@ -998,6 +982,7 @@
       const pTitle = document.createElement('span');
       pTitle.innerText = groupName;
 
+      label.appendChild(dragHandle);
       label.appendChild(pCheckbox);
       label.appendChild(pTitle);
 
@@ -1104,7 +1089,16 @@
       }
 
       header.addEventListener('click', (e) => {
-        if (pCheckbox && e.target === pCheckbox) return;
+        if (header._suppressClickUntil && Date.now() < header._suppressClickUntil) return;
+        if (pCheckbox && (e.target === pCheckbox || e.target.closest('input[type="checkbox"]'))) return;
+        if (dragHandle && (e.target === dragHandle || e.target.closest('.layer-group-drag-handle'))) return;
+        if (e.target.closest('select, input:not([type="checkbox"])')) return;
+        childrenBox.classList.toggle('collapsed');
+        arrow.classList.toggle('collapsed');
+      });
+
+      arrow.addEventListener('click', (e) => {
+        e.stopPropagation();
         childrenBox.classList.toggle('collapsed');
         arrow.classList.toggle('collapsed');
       });
@@ -1252,6 +1246,232 @@
 
       node.appendChild(header);
       node.appendChild(childrenBox);
+      container.appendChild(node);
+      setupLayerGroupDrag(dragHandle, node, header, container);
+    });
+  }
+
+  function setupLayerGroupDrag(dragElement, node, header, container) {
+    dragElement.addEventListener('keydown', (e) => {
+      const nodes = Array.from(container.querySelectorAll('.tree-node'));
+      const index = nodes.indexOf(node);
+      if (index === -1) return;
+
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (index > 0) {
+          reorderLayerGroups(index, index - 1, container);
+          setTimeout(() => {
+            const nextHandle = node.querySelector('.layer-group-drag-handle');
+            if (nextHandle) nextHandle.focus();
+          }, 0);
+        }
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (index < nodes.length - 1) {
+          reorderLayerGroups(index, index + 1, container);
+          setTimeout(() => {
+            const nextHandle = node.querySelector('.layer-group-drag-handle');
+            if (nextHandle) nextHandle.focus();
+          }, 0);
+        }
+      }
+    });
+
+    function onPointerStart(e) {
+      if (e.button !== 0) return;
+
+      const nodes = Array.from(container.querySelectorAll('.tree-node'));
+      const fromIndex = nodes.indexOf(node);
+      if (fromIndex === -1 || nodes.length <= 1) return;
+
+      const headerRect = header.getBoundingClientRect();
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const offsetY = e.clientY - headerRect.top;
+      let currentDropSlot = fromIndex;
+      let isCanceled = false;
+      let isDraggingActive = false;
+      let ghost = null;
+      let dropIndicator = null;
+
+      function initDragVisuals() {
+        if (isDraggingActive) return;
+        isDraggingActive = true;
+        header._suppressClickUntil = Date.now() + 350;
+        try {
+          if (dragElement.setPointerCapture) dragElement.setPointerCapture(e.pointerId);
+        } catch (_) {}
+
+        ghost = header.cloneNode(true);
+        ghost.classList.add('route-point-ghost', 'layer-group-ghost');
+        ghost.style.position = 'fixed';
+        ghost.style.left = `${headerRect.left}px`;
+        ghost.style.top = `${headerRect.top}px`;
+        ghost.style.width = `${headerRect.width}px`;
+        ghost.style.height = `${headerRect.height}px`;
+        ghost.style.zIndex = '10000';
+        ghost.style.pointerEvents = 'none';
+        ghost.style.boxShadow = '0 6px 18px rgba(0, 0, 0, 0.7)';
+        ghost.style.opacity = '0.92';
+        document.body.appendChild(ghost);
+
+        node.classList.add('route-point-row-dragging', 'layer-node-dragging');
+        dragElement.classList.add('is-dragging');
+        document.body.classList.add('route-dragging-active');
+
+        dropIndicator = container.querySelector('.layer-drop-indicator');
+        if (!dropIndicator) {
+          dropIndicator = document.createElement('div');
+          dropIndicator.className = 'route-drop-indicator layer-drop-indicator';
+          container.appendChild(dropIndicator);
+        }
+        dropIndicator.style.display = 'block';
+        updateDropIndicator();
+      }
+
+      function updateDropIndicator() {
+        if (!dropIndicator) return;
+        const currentNodes = Array.from(container.querySelectorAll('.tree-node'));
+        if (!currentNodes.length) return;
+        const contRect = container.getBoundingClientRect();
+        if (currentDropSlot < currentNodes.length) {
+          const targetRect = currentNodes[currentDropSlot].getBoundingClientRect();
+          const topOffset = (targetRect.top - contRect.top) - 3 + container.scrollTop;
+          dropIndicator.style.top = `${topOffset}px`;
+        } else {
+          const targetRect = currentNodes[currentNodes.length - 1].getBoundingClientRect();
+          const topOffset = (targetRect.bottom - contRect.top) + 3 + container.scrollTop;
+          dropIndicator.style.top = `${topOffset}px`;
+        }
+      }
+
+      function onPointerMove(moveEvent) {
+        if (moveEvent.pointerId !== e.pointerId) return;
+        if (!isDraggingActive) {
+          const dist = Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY);
+          if (dist < 4) return;
+          initDragVisuals();
+        }
+
+        moveEvent.preventDefault();
+        if (ghost) {
+          ghost.style.top = `${moveEvent.clientY - offsetY}px`;
+          ghost.style.left = `${headerRect.left}px`;
+        }
+
+        const contRect = container.getBoundingClientRect();
+        if (moveEvent.clientY < contRect.top + 35) {
+          container.scrollTop -= 8;
+        } else if (moveEvent.clientY > contRect.bottom - 35) {
+          container.scrollTop += 8;
+        }
+
+        const currentNodes = Array.from(container.querySelectorAll('.tree-node'));
+        let targetSlot = 0;
+        for (let i = 0; i < currentNodes.length; i++) {
+          const rRect = currentNodes[i].getBoundingClientRect();
+          const midY = rRect.top + rRect.height / 2;
+          if (moveEvent.clientY > midY) {
+            targetSlot = i + 1;
+          }
+        }
+        currentDropSlot = targetSlot;
+        updateDropIndicator();
+      }
+
+      function onKeyDown(keyEvent) {
+        if (keyEvent.key === 'Escape') {
+          isCanceled = true;
+          cleanup();
+        }
+      }
+
+      function cleanup() {
+        window.removeEventListener('keydown', onKeyDown);
+        window.removeEventListener('pointermove', onPointerMove);
+        window.removeEventListener('pointerup', onPointerUp);
+        window.removeEventListener('pointercancel', onPointerCancel);
+        try {
+          if (dragElement.hasPointerCapture(e.pointerId)) {
+            dragElement.releasePointerCapture(e.pointerId);
+          }
+        } catch (_) {}
+
+        if (ghost && ghost.parentNode) ghost.parentNode.removeChild(ghost);
+        if (dropIndicator) dropIndicator.style.display = 'none';
+        node.classList.remove('route-point-row-dragging', 'layer-node-dragging');
+        dragElement.classList.remove('is-dragging');
+        document.body.classList.remove('route-dragging-active');
+      }
+
+      function onPointerUp(upEvent) {
+        if (upEvent.pointerId !== e.pointerId) return;
+        cleanup();
+        if (isCanceled || !isDraggingActive) return;
+
+        let newIndex = currentDropSlot > fromIndex ? currentDropSlot - 1 : currentDropSlot;
+        const currentNodes = Array.from(container.querySelectorAll('.tree-node'));
+        if (newIndex >= currentNodes.length) newIndex = currentNodes.length - 1;
+        if (newIndex < 0) newIndex = 0;
+        if (newIndex !== fromIndex) {
+          reorderLayerGroups(fromIndex, newIndex, container);
+        }
+      }
+
+      function onPointerCancel(cancelEvent) {
+        if (cancelEvent.pointerId !== e.pointerId) return;
+        isCanceled = true;
+        cleanup();
+      }
+
+      window.addEventListener('keydown', onKeyDown);
+      window.addEventListener('pointermove', onPointerMove, { passive: false });
+      window.addEventListener('pointerup', onPointerUp);
+      window.addEventListener('pointercancel', onPointerCancel);
+    }
+
+    dragElement.addEventListener('pointerdown', onPointerStart);
+  }
+
+  function reorderLayerGroups(fromIndex, toIndex, container) {
+    if (!container) container = document.getElementById('tree-container');
+    if (!container) return;
+    const nodes = Array.from(container.querySelectorAll('.tree-node'));
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= nodes.length || toIndex >= nodes.length) return;
+
+    const movingNode = nodes[fromIndex];
+    if (toIndex >= nodes.length - 1) {
+      container.appendChild(movingNode);
+    } else if (toIndex > fromIndex) {
+      container.insertBefore(movingNode, nodes[toIndex + 1]);
+    } else {
+      container.insertBefore(movingNode, nodes[toIndex]);
+    }
+
+    const updatedNodes = Array.from(container.querySelectorAll('.tree-node'));
+    const newOrder = updatedNodes.map(n => n.dataset.groupName).filter(Boolean);
+    saveCustomGroupOrder(newOrder);
+  }
+
+  function syncGroupOrderUI(containerId = 'tree-container') {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const savedOrder = getCustomGroupOrder();
+    if (!savedOrder || !savedOrder.length) return;
+    const nodes = Array.from(container.querySelectorAll('.tree-node'));
+    const nodeMap = new Map();
+    nodes.forEach(n => {
+      if (n.dataset.groupName) nodeMap.set(n.dataset.groupName, n);
+    });
+    savedOrder.forEach(gName => {
+      const node = nodeMap.get(gName);
+      if (node) {
+        container.appendChild(node);
+        nodeMap.delete(gName);
+      }
+    });
+    nodeMap.forEach(node => {
       container.appendChild(node);
     });
   }
@@ -1960,6 +2180,7 @@
         lid.startsWith('osm-traversed-') ||
         lid.includes('Zaznaczone drogi') ||
         lid.startsWith('Budynki') ||
+        lid.startsWith('Podkłady') ||
         (lid.startsWith('GPS / ') && lid !== 'GPS / Ślad trasy') ||
         lid === 'GPS'
       ) {
@@ -2185,9 +2406,10 @@
 
   function setupSync(map, containerId = 'tree-container') {
     window.addEventListener('storage', (e) => {
-      if (e.key === STORAGE_KEY) {
+      if (e.key === STORAGE_KEY || e.key === 'nnaper_layer_groups_order') {
         applyCustomizationsToMap(map);
         syncTreeUI(map, containerId);
+        syncGroupOrderUI(containerId);
         sync3DButtonsUI();
       }
     });
@@ -2195,11 +2417,19 @@
     window.addEventListener('nnaper_layer_customizations_changed', () => {
       sync3DButtonsUI();
     });
+
+    window.addEventListener('nnaper_profile_changed', () => {
+      syncGroupOrderUI(containerId);
+    });
   }
 
   window.LayerManager = {
     getStoredConfig,
     saveStoredConfig,
+    getCustomGroupOrder,
+    saveCustomGroupOrder,
+    reorderLayerGroups,
+    syncGroupOrderUI,
     updateLayerProperty,
     updateCategoryVisibility,
     update3DSettings,

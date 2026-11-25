@@ -415,6 +415,7 @@ function getEffectiveActiveDaysParam() {
   if (queryTokens.length === 0) return '__none__';
   return queryTokens.join(',');
 }
+window.getEffectiveActiveDaysParam = getEffectiveActiveDaysParam;
 
 function getAllActiveTrackFilters() {
   const activeDays = [];
@@ -504,7 +505,13 @@ function updateTrackFilters() {
 
   const { activeDays, activeHours, activeMinutes, activeSeconds, isAnyPartial } = getAllActiveTrackFilters();
 
-  if (currentTrackMode === 'osm') {
+  const suppressTracksForHeatmap = typeof window.isHeatmapActive === 'function' && window.isHeatmapActive() &&
+    !(typeof window.shouldShowTrackOverHeatmap === 'function' && window.shouldShowTrackOverHeatmap());
+
+  if (suppressTracksForHeatmap) {
+    if (lineLayer) map.setLayoutProperty('GPS / Ślad trasy / linie', 'visibility', 'none');
+    if (circleLayer) map.setLayoutProperty('GPS / Ślad trasy', 'visibility', 'none');
+  } else if (currentTrackMode === 'osm') {
     if (lineLayer) {
       map.setLayoutProperty('GPS / Ślad trasy / linie', 'visibility', 'visible');
       map.setPaintProperty('GPS / Ślad trasy / linie', 'line-color', trackBaseColor);
@@ -598,11 +605,13 @@ window.resetAllCustomizations = function () {
   window.location.reload();
 };
 
-let currentTrackMode = localStorage.getItem('nnaper_track_mode');
-if (!currentTrackMode || !['raw', 'snapped', 'osm'].includes(currentTrackMode)) {
-  currentTrackMode = (localStorage.getItem('nnaper_snap_roads') === 'true') ? 'snapped' : 'raw';
-}
-let isSnapRoadsEnabled = (currentTrackMode === 'snapped');
+let currentTrackMode = 'raw';
+try {
+  localStorage.removeItem('nnaper_track_mode');
+  localStorage.removeItem('nnaper_snap_roads');
+  localStorage.removeItem('nnaper_track_atomic_forced');
+} catch (e) { }
+let isSnapRoadsEnabled = false;
 let trackBaseColor = localStorage.getItem('nnaper_track_color') || '#06b6d4'; // domyślny cyjan
 
 function updateTrackColors() {
@@ -635,16 +644,15 @@ try {
 
 function syncTrackModeUI() {
   document.querySelectorAll('#select-track-mode').forEach(sel => {
-    sel.value = currentTrackMode;
+    sel.value = 'raw';
   });
-  const isSnapped = (currentTrackMode === 'snapped');
   document.querySelectorAll('#btn-toggle-snap-roads').forEach(btn => {
-    btn.classList.toggle('active', isSnapped);
-    btn.setAttribute('aria-pressed', isSnapped ? 'true' : 'false');
+    btn.classList.toggle('active', false);
+    btn.setAttribute('aria-pressed', 'false');
   });
   const chk = document.getElementById('layer-snap-roads-toggle');
   if (chk) {
-    chk.checked = isSnapped;
+    chk.checked = false;
   }
 }
 window.syncTrackModeUI = syncTrackModeUI;
@@ -652,40 +660,24 @@ window.syncSnapButtonsUI = syncTrackModeUI;
 
 function setupSnapButtons() {
   syncTrackModeUI();
-  document.querySelectorAll('#select-track-mode').forEach(sel => {
-    sel.onchange = (e) => {
-      window.setTrackMode(e.target.value);
-    };
-  });
-  document.querySelectorAll('#btn-toggle-snap-roads').forEach(btn => {
-    btn.onclick = (e) => {
-      e.stopPropagation();
-      const current = (currentTrackMode === 'snapped');
-      window.setTrackMode(current ? 'raw' : 'snapped');
-    };
-  });
 }
 
 window.setTrackMode = function (mode) {
-  if (!['raw', 'snapped', 'osm'].includes(mode)) mode = 'raw';
-  currentTrackMode = mode;
-  isSnapRoadsEnabled = (mode === 'snapped' || mode === 'osm');
-  localStorage.setItem('nnaper_track_mode', mode);
-  localStorage.setItem('nnaper_snap_roads', mode === 'snapped' ? 'true' : 'false');
+  currentTrackMode = 'raw';
+  isSnapRoadsEnabled = false;
   syncTrackModeUI();
   updateTrackTilesSource();
 };
 
 window.setSnapRoadsEnabled = function (bool) {
-  window.setTrackMode(bool ? 'snapped' : 'raw');
+  window.setTrackMode('raw');
 };
 
 let trackTilesVersion = Date.now();
-let isAtomicForced = (localStorage.getItem('nnaper_track_atomic_forced') === 'true');
+let isAtomicForced = false;
 
 window.setTrackAtomicForced = function(forced) {
-  isAtomicForced = !!forced;
-  localStorage.setItem('nnaper_track_atomic_forced', isAtomicForced ? 'true' : 'false');
+  isAtomicForced = false;
   updateTrackTilesSource(true);
 };
 
@@ -708,7 +700,7 @@ function ensureBaseTrackLayers() {
       layout: {
         'line-join': 'round',
         'line-cap': 'round',
-        'visibility': (currentTrackMode === 'osm') ? 'visible' : 'none'
+        'visibility': 'none'
       },
       paint: {
         'line-color': trackBaseColor,
@@ -730,7 +722,7 @@ function ensureBaseTrackLayers() {
       'source-layer': 'gps-track',
       type: 'circle',
       layout: {
-        'visibility': (currentTrackMode !== 'osm') ? 'visible' : 'none'
+        'visibility': 'visible'
       },
       paint: {
         'circle-color': trackBaseColor,
@@ -747,15 +739,9 @@ function ensureBaseTrackLayers() {
 function buildTrackTilesUrl(days) {
   const token = (typeof window.getAuthToken === 'function') ? window.getAuthToken() : '';
   const profileId = (typeof window.getActiveProfileId === 'function') ? window.getActiveProfileId() : '';
-  let url = `${TRACK_TILES_URL}?days=${encodeURIComponent(days)}&mode=${currentTrackMode}&token=${encodeURIComponent(token)}&v=${trackTilesVersion}`;
+  let url = `${TRACK_TILES_URL}?days=${encodeURIComponent(days)}&mode=raw&token=${encodeURIComponent(token)}&v=${trackTilesVersion}`;
   if (profileId) {
     url += `&profile_id=${encodeURIComponent(profileId)}`;
-  }
-  if (currentTrackMode === 'snapped') {
-    url += '&snapped=true';
-  }
-  if (isAtomicForced) {
-    url += '&atomic=true';
   }
   return url;
 }
@@ -773,6 +759,7 @@ function updateTrackTilesSource(force = false) {
   if (baseSrc && typeof baseSrc.setTiles === 'function') {
     baseSrc.setTiles(baseTiles);
   }
+  window.dispatchEvent(new CustomEvent('nnaper_track_filter_changed', { detail: { days: daysParam } }));
 
   // Usuwamy ewentualne pozostałości po dawnych wielu źródłach miesięcznych
   trackMonthLayers.forEach(({ layerId, lineLayerId }, key) => {
@@ -1442,14 +1429,20 @@ function autoBuildTree() {
   const layerMenuBodyHTML = menuBody.innerHTML;
   const layerMenuTitle = menuTitle.innerText;
   let previousSearchCamera = null;
-  btnBackLocation.style.display = 'none';
-  btnCloseLocation.style.display = 'none';
+  if (btnBackLocation) btnBackLocation.style.display = 'none';
+  if (btnCloseLocation) btnCloseLocation.style.display = 'none';
 
   function restoreLayerMenu() {
+    menuEl.classList.remove('location-details-active');
     menuTitle.innerText = layerMenuTitle;
     menuBody.innerHTML = layerMenuBodyHTML;
-    btnBackLocation.style.display = 'none';
-    btnCloseLocation.style.display = 'none';
+    if (btnBackLocation) btnBackLocation.style.display = 'none';
+    if (btnCloseLocation) btnCloseLocation.style.display = 'none';
+    if (btnToggleMenu) {
+      const isCollapsed = menuEl.classList.contains('collapsed');
+      btnToggleMenu.setAttribute('title', isCollapsed ? 'Rozwiń wybierak warstw' : 'Zwiń wybierak warstw');
+      btnToggleMenu.setAttribute('aria-label', isCollapsed ? 'Rozwiń wybierak warstw' : 'Zwiń wybierak warstw');
+    }
     autoBuildTree();
   }
 
@@ -1470,6 +1463,10 @@ function autoBuildTree() {
   }
 
   function toggleMenu() {
+    if (menuEl.classList.contains('location-details-active')) {
+      closeLocation(true);
+      return;
+    }
     if (menuEl.classList.contains('collapsed')) {
       expandMenu();
     } else {
@@ -1561,6 +1558,7 @@ function autoBuildTree() {
   window.set3DBuildings = set3DBuildings;
 
   function closeLocation(restoreCamera) {
+    menuEl.classList.remove('location-details-active');
     restoreLayerMenu();
     if (searchMarker) {
       searchMarker.remove();
@@ -1575,12 +1573,13 @@ function autoBuildTree() {
     searchResults = [];
     suggestionsBox.innerHTML = '';
     suggestionsBox.style.display = 'none';
+    collapseMenu();
   }
 
   window.restoreOriginalSearchLocation = () => closeLocation(true);
 
-  btnBackLocation.addEventListener('click', () => closeLocation(true));
-  btnCloseLocation.addEventListener('click', () => closeLocation(false));
+  if (btnBackLocation) btnBackLocation.addEventListener('click', () => closeLocation(true));
+  if (btnCloseLocation) btnCloseLocation.addEventListener('click', () => closeLocation(false));
 
   /* ------------------- WIZUALIZACJA SATELITÓW ------------------- */
   let activeSatelliteContext = null;
@@ -2131,10 +2130,15 @@ function autoBuildTree() {
       return !/^(brak|nieznany|unknown|n\/a)$/i.test(String(value).trim());
     });
 
+    menuEl.classList.add('location-details-active');
     menuTitle.innerText = locationName;
     menuBody.innerHTML = '';
-    btnBackLocation.style.display = '';
-    btnCloseLocation.style.display = '';
+    if (btnBackLocation) btnBackLocation.style.display = 'none';
+    if (btnCloseLocation) btnCloseLocation.style.display = 'none';
+    if (btnToggleMenu) {
+      btnToggleMenu.setAttribute('title', 'Zamknij szczegóły lokalizacji');
+      btnToggleMenu.setAttribute('aria-label', 'Zamknij szczegóły lokalizacji');
+    }
     const table = document.createElement('table');
     table.className = 'kv-table';
     details.forEach(([label, value]) => {

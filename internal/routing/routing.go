@@ -55,6 +55,12 @@ type RoutePreferences struct {
 	AversionTrafficSignals float64 `json:"aversion_traffic_signals"`
 	AversionHighways       float64 `json:"aversion_highways"`
 	AversionTraversed      float64 `json:"aversion_traversed"`
+	AversionBelowSpeed     float64 `json:"aversion_below_speed"`
+	AvoidBelowSpeedKMH     float64 `json:"avoid_below_speed_kmh"`
+	AvoidBelowSpeed        bool    `json:"avoid_below_speed"`
+	AversionAboveSpeed     float64 `json:"aversion_above_speed"`
+	AvoidAboveSpeedKMH     float64 `json:"avoid_above_speed_kmh"`
+	AvoidAboveSpeed        bool    `json:"avoid_above_speed"`
 	AvoidTraversed         bool    `json:"avoid_traversed"`
 	AvoidHighways          bool    `json:"avoid_highways"`
 	AutoExploratory        bool    `json:"auto_exploratory"`
@@ -303,6 +309,50 @@ func ComputeEdgeCost(e GraphEdge, avoidPoints []AvoidPoint, avoidMode string, pr
 			cost += (cost*500.0 + 350000.0) * prefs.AversionHighways
 		} else {
 			cost = cost*5000.0 + 2500000.0
+		}
+	}
+
+	// 0b. Unikanie dróg z dopuszczalną prędkością poniżej zadanego progu (< X km/h)
+	if prefs.AvoidBelowSpeedKMH > 0 && (prefs.AvoidBelowSpeed || prefs.AversionBelowSpeed > 0) {
+		speed := e.SpeedKMH
+		if speed <= 0 {
+			speed = 30.0
+		}
+		if speed < prefs.AvoidBelowSpeedKMH {
+			ratio := (prefs.AvoidBelowSpeedKMH - speed) / prefs.AvoidBelowSpeedKMH
+			if ratio < 0 {
+				ratio = 0
+			}
+			penaltyFactor := 1.0 + ratio*2.0
+			if prefs.AversionBelowSpeed >= 10.5 {
+				cost += 2500000.0 * penaltyFactor
+			} else if prefs.AversionBelowSpeed > 0 {
+				cost += (cost*150.0 + 35000.0) * prefs.AversionBelowSpeed * penaltyFactor
+			} else {
+				cost += (cost*1000.0 + 250000.0) * penaltyFactor
+			}
+		}
+	}
+
+	// 0c. Unikanie dróg z dopuszczalną prędkością powyżej zadanego progu (> X km/h)
+	if prefs.AvoidAboveSpeedKMH > 0 && (prefs.AvoidAboveSpeed || prefs.AversionAboveSpeed > 0) {
+		speed := e.SpeedKMH
+		if speed <= 0 {
+			speed = 30.0
+		}
+		if speed > prefs.AvoidAboveSpeedKMH {
+			ratio := (speed - prefs.AvoidAboveSpeedKMH) / prefs.AvoidAboveSpeedKMH
+			if ratio < 0 {
+				ratio = 0
+			}
+			penaltyFactor := 1.0 + ratio*2.0
+			if prefs.AversionAboveSpeed >= 10.5 {
+				cost += 2500000.0 * penaltyFactor
+			} else if prefs.AversionAboveSpeed > 0 {
+				cost += (cost*150.0 + 35000.0) * prefs.AversionAboveSpeed * penaltyFactor
+			} else {
+				cost += (cost*1000.0 + 250000.0) * penaltyFactor
+			}
 		}
 	}
 
@@ -1058,6 +1108,47 @@ func (g *Graph) extractOptimal10Waypoints(steps []prevStep, pathNodes []int64, s
 	return waypoints, legs
 }
 
+// scoreAutoRouteCandidate ocenia dopasowanie trasy kandydata zgodnie z kryteriami użytkownika:
+// 1. Jeśli jest tylko czas: szukamy trasy najbliższej temu czasowi (|durMin - targetMinutes|).
+// 2. Jeśli jest tylko dystans: szukamy trasy najbliższej temu dystansowi (|distKM - targetKM|), a przy zbliżonym dystansie najszybszej.
+// 3. Jeśli podano oba: szukamy trasy najbliższej obu wartościom naraz (minimalizacja sumy względnych odchyleń).
+func scoreAutoRouteCandidate(req RoutePlanRequest, targetKM float64, distM float64, durationS float64) (score float64, isOptimal bool) {
+	distKM := distM / 1000.0
+	durMin := durationS / 60.0
+
+	// 1. Tylko czas podany
+	if req.TargetMinutes > 0 && req.TargetKM <= 0 {
+		diffMin := math.Abs(durMin - req.TargetMinutes)
+		score = diffMin
+		isOptimal = diffMin <= math.Max(1.0, req.TargetMinutes*0.06)
+		return
+	}
+
+	// 2. Tylko dystans podany (i najszybsza)
+	if req.TargetKM > 0 && req.TargetMinutes <= 0 {
+		diffKM := math.Abs(distKM - req.TargetKM)
+		// Dystans jest priorytetem, a czas trwania w godzinach jest łagodnym bonusem szybkości
+		score = diffKM + (durationS/3600.0)*0.04
+		isOptimal = diffKM <= math.Max(0.5, req.TargetKM*0.06)
+		return
+	}
+
+	// 3. Oba parametry podane: najbliżej do obu wartości
+	if req.TargetKM > 0 && req.TargetMinutes > 0 {
+		relDist := math.Abs(distKM-req.TargetKM) / req.TargetKM
+		relTime := math.Abs(durMin-req.TargetMinutes) / req.TargetMinutes
+		score = relDist + relTime
+		isOptimal = relDist <= 0.08 && relTime <= 0.08
+		return
+	}
+
+	// Domyślnie wg targetKM:
+	diffKM := math.Abs(distKM - targetKM)
+	score = diffKM
+	isOptimal = diffKM <= targetKM*0.10
+	return
+}
+
 // buildCircularLoopRoute buduje idealną, spójną pętlę („kółko”) o zadanej długości targetKM wokół
 // wyznaczonego centrum geometrycznego. Trasa układa się w gładki obieg wielokąta foremnego
 // bez żadnych nawrotów o 180 stopni, ani ponownego przejeżdżania przez te same odcinki.
@@ -1150,6 +1241,24 @@ func (g *Graph) buildCircularLoopRoute(req RoutePlanRequest, startNode int64, st
 						e := g.Edges[a.edgeIdx]
 						if (req.Preferences.AvoidHighways || req.Preferences.AversionHighways > 0) && isHighwayClass(e.Highway) {
 							loopScore -= 5000.0
+						}
+						if req.Preferences.AvoidBelowSpeedKMH > 0 && (req.Preferences.AvoidBelowSpeed || req.Preferences.AversionBelowSpeed > 0) {
+							spd := e.SpeedKMH
+							if spd <= 0 {
+								spd = 30.0
+							}
+							if spd < req.Preferences.AvoidBelowSpeedKMH {
+								loopScore -= 2500.0 * math.Max(1.0, req.Preferences.AversionBelowSpeed)
+							}
+						}
+						if req.Preferences.AvoidAboveSpeedKMH > 0 && (req.Preferences.AvoidAboveSpeed || req.Preferences.AversionAboveSpeed > 0) {
+							spd := e.SpeedKMH
+							if spd <= 0 {
+								spd = 30.0
+							}
+							if spd > req.Preferences.AvoidAboveSpeedKMH {
+								loopScore -= 2500.0 * math.Max(1.0, req.Preferences.AversionAboveSpeed)
+							}
 						}
 						if !e.Traversed && e.UsedCount == 0 {
 							loopScore += e.LengthM * 1.2
@@ -1249,7 +1358,7 @@ func (g *Graph) buildCircularLoopRoute(req RoutePlanRequest, startNode int64, st
 	}
 
 	var bestResp RoutePlanResponse
-	bestDiffKM := math.MaxFloat64
+	bestScore := math.MaxFloat64
 	foundAny := false
 	var bestCandidate *loopCandidate
 
@@ -1265,32 +1374,58 @@ func (g *Graph) buildCircularLoopRoute(req RoutePlanRequest, startNode int64, st
 		if !ok {
 			continue
 		}
-		diffKM := math.Abs((distM / 1000.0) - targetKM)
-		if !foundAny || diffKM < bestDiffKM {
-			bestDiffKM = diffKM
+		score, isOpt := scoreAutoRouteCandidate(req, targetKM, distM, resp.DurationS)
+		if !foundAny || score < bestScore {
+			bestScore = score
 			bestResp = resp
 			foundAny = true
 			candCopy := cand
 			bestCandidate = &candCopy
 		}
-		if diffKM <= targetKM*0.12 {
+		if isOpt {
 			g.ResetUsedEdges()
 			return bestResp, true
 		}
 	}
 
-	// Jeśli dystans odbiega o > 12%, wykonujemy precyzyjną kalibrację promienia R na zwycięskim azymucie
-	if foundAny && bestCandidate != nil && bestDiffKM > targetKM*0.12 && bestResp.DistanceM > 0 {
-		calibRatio := (targetKM * 1000.0) / bestResp.DistanceM
+	// Jeśli trasa nie osiągnęła jeszcze stanu optymalnego, wykonujemy precyzyjną kalibrację promienia R na zwycięskim azymucie
+	calibNeeded := false
+	if foundAny && bestCandidate != nil && bestResp.DistanceM > 0 {
+		if req.TargetMinutes > 0 && req.TargetKM <= 0 {
+			calibNeeded = math.Abs((bestResp.DurationS/60.0)-req.TargetMinutes) > req.TargetMinutes*0.08
+		} else if req.TargetKM > 0 && req.TargetMinutes <= 0 {
+			calibNeeded = math.Abs((bestResp.DistanceM/1000.0)-req.TargetKM) > req.TargetKM*0.08
+		} else if req.TargetKM > 0 && req.TargetMinutes > 0 {
+			relDist := math.Abs((bestResp.DistanceM/1000.0)-req.TargetKM) / req.TargetKM
+			relTime := math.Abs((bestResp.DurationS/60.0)-req.TargetMinutes) / req.TargetMinutes
+			calibNeeded = (relDist + relTime) > 0.16
+		} else {
+			calibNeeded = bestScore > targetKM*0.12
+		}
+	}
+
+	if calibNeeded {
+		var calibRatio float64
+		if req.TargetMinutes > 0 && req.TargetKM <= 0 && bestResp.DurationS > 0 {
+			calibRatio = (req.TargetMinutes * 60.0) / bestResp.DurationS
+		} else if req.TargetKM > 0 && req.TargetMinutes <= 0 && bestResp.DistanceM > 0 {
+			calibRatio = (req.TargetKM * 1000.0) / bestResp.DistanceM
+		} else if req.TargetKM > 0 && req.TargetMinutes > 0 && bestResp.DistanceM > 0 && bestResp.DurationS > 0 {
+			rDist := (req.TargetKM * 1000.0) / bestResp.DistanceM
+			rTime := (req.TargetMinutes * 60.0) / bestResp.DurationS
+			calibRatio = (rDist + rTime) / 2.0
+		} else {
+			calibRatio = (targetKM * 1000.0) / bestResp.DistanceM
+		}
 		calibRatio = math.Max(0.2, math.Min(2.5, calibRatio))
 		calibR := baseR * calibRatio
 		calibCands := buildAnchorsForR(calibR)
 		for _, cc := range calibCands {
 			if cc.bearingDeg == bestCandidate.bearingDeg && cc.clockwise == bestCandidate.clockwise {
 				if calibResp, calibDistM, okCalib := routeAnchors(cc.anchorCoords); okCalib {
-					calibDiffKM := math.Abs((calibDistM / 1000.0) - targetKM)
-					if calibDiffKM < bestDiffKM {
-						bestDiffKM = calibDiffKM
+					sc, _ := scoreAutoRouteCandidate(req, targetKM, calibDistM, calibResp.DurationS)
+					if sc < bestScore {
+						bestScore = sc
 						bestResp = calibResp
 					}
 				}
@@ -1409,6 +1544,24 @@ func (g *Graph) buildIntelligentAutoRoute(req RoutePlanRequest, targetKM float64
 				}
 			}
 			obstaclePenalty += float64(e.SpeedBumps*30 + e.Crossings*10 + e.TrafficSignals*20)
+			if req.Preferences.AvoidBelowSpeedKMH > 0 && (req.Preferences.AvoidBelowSpeed || req.Preferences.AversionBelowSpeed > 0) {
+				spd := e.SpeedKMH
+				if spd <= 0 {
+					spd = 30.0
+				}
+				if spd < req.Preferences.AvoidBelowSpeedKMH {
+					obstaclePenalty += 400.0 * math.Max(1.0, req.Preferences.AversionBelowSpeed)
+				}
+			}
+			if req.Preferences.AvoidAboveSpeedKMH > 0 && (req.Preferences.AvoidAboveSpeed || req.Preferences.AversionAboveSpeed > 0) {
+				spd := e.SpeedKMH
+				if spd <= 0 {
+					spd = 30.0
+				}
+				if spd > req.Preferences.AvoidAboveSpeedKMH {
+					obstaclePenalty += 400.0 * math.Max(1.0, req.Preferences.AversionAboveSpeed)
+				}
+			}
 		}
 		if isBad {
 			continue
@@ -1459,7 +1612,7 @@ func (g *Graph) buildIntelligentAutoRoute(req RoutePlanRequest, targetKM float64
 	// Próbujemy 3 skale promienia korytarza, aby idealnie trafić w zadany dystans targetKM
 	scales := []float64{0.82, 1.0, 1.24}
 	var bestResp RoutePlanResponse
-	bestDiffKM := math.MaxFloat64
+	bestScore := math.MaxFloat64
 	foundAny := false
 
 	for _, sc := range scales {
@@ -1612,9 +1765,9 @@ func (g *Graph) buildIntelligentAutoRoute(req RoutePlanRequest, targetKM float64
 			AvoidedCount: totalAvoided,
 		}
 
-		diffKM := math.Abs((distM / 1000.0) - targetKM)
-		if !foundAny || diffKM < bestDiffKM {
-			bestDiffKM = diffKM
+		score, _ := scoreAutoRouteCandidate(req, targetKM, distM, durS)
+		if !foundAny || score < bestScore {
+			bestScore = score
 			bestResp = candResp
 			foundAny = true
 		}
@@ -1637,7 +1790,7 @@ func (s *Service) HandlePlanRoute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.AvoidMode == "" {
-		req.AvoidMode = "high_cost"
+		req.AvoidMode = "exclude"
 	}
 
 	if req.AutoGenerate && len(req.Points) >= 1 {

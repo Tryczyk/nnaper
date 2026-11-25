@@ -58,11 +58,17 @@
 
   // Stan punktów unikania oraz preferencji wyznaczania trasy (w tym automatycznego)
   let routeAvoidPoints = []; // [{ lon, lat, radius_m: 300 }]
-  let routeAvoidMode = 'high_cost'; // 'high_cost' | 'exclude'
+  let routeAvoidMode = 'exclude'; // 'exclude'
   let pickingAvoidPointOnMap = false;
   let routePreferences = {
     aversion_traversed: 0,
     aversion_highways: 0,
+    aversion_below_speed: 0,
+    avoid_below_speed_kmh: 50,
+    avoid_below_speed: false,
+    aversion_above_speed: 0,
+    avoid_above_speed_kmh: 90,
+    avoid_above_speed: false,
     aversion_speed_bumps: 0,
     aversion_intersections: 0,
     aversion_crossings: 0,
@@ -73,8 +79,8 @@
   };
   let autoRouteConfig = {
     enabled: false,
-    target_km: 15,
-    target_minutes: 25,
+    target_km: 25,
+    target_minutes: 35,
     return_to_start: true
   };
 
@@ -203,6 +209,7 @@
 
   function closeInlineRoutePlanner() {
     routePlannerPanel.classList.remove('active');
+    routePlannerPanel.classList.remove('collapsed');
     routePlannerPanel.setAttribute('aria-hidden', 'true');
     document.getElementById('menu')?.classList.remove('route-planner-open');
 
@@ -239,25 +246,29 @@
     if (place) displayPlaceDetails(place);
   });
 
-  document.getElementById('btn-route-back-to-original').addEventListener('click', () => {
-    closeInlineRoutePlanner();
-    if (typeof window.restoreOriginalSearchLocation === 'function') {
-      window.restoreOriginalSearchLocation();
-    }
-  });
+  const btnRouteBackOriginal = document.getElementById('btn-route-back-to-original');
+  if (btnRouteBackOriginal) {
+    btnRouteBackOriginal.addEventListener('click', () => {
+      closeInlineRoutePlanner();
+      if (typeof window.restoreOriginalSearchLocation === 'function') {
+        window.restoreOriginalSearchLocation();
+      }
+    });
+  }
 
   const btnRouteClose = document.getElementById('btn-route-close');
   if (btnRouteClose) {
-    btnRouteClose.addEventListener('click', closeInlineRoutePlanner);
+    btnRouteClose.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeInlineRoutePlanner();
+    });
   }
 
   const btnToggleRoutePlanner = document.getElementById('btn-toggle-route-planner');
   if (btnToggleRoutePlanner) {
     btnToggleRoutePlanner.addEventListener('click', (e) => {
       e.stopPropagation();
-      const isCollapsed = routePlannerPanel.classList.toggle('collapsed');
-      btnToggleRoutePlanner.setAttribute('title', isCollapsed ? 'Rozwiń panel planowania trasy' : 'Zwiń panel planowania trasy');
-      btnToggleRoutePlanner.setAttribute('aria-label', isCollapsed ? 'Rozwiń panel planowania trasy' : 'Zwiń panel planowania trasy');
+      closeInlineRoutePlanner();
     });
   }
 
@@ -686,7 +697,11 @@
       item.dataset.pointIndex = String(index);
       const place = point.place;
       const pointColor = assignPointColor(point);
-      item.innerHTML = `<span class="route-point-icon" style="background-color: ${pointColor};" aria-hidden="true"></span>`;
+      item.innerHTML = '';
+      item.style.borderLeft = `4px solid ${pointColor}`;
+      item.style.background = `linear-gradient(90deg, ${pointColor}26 0%, rgba(30, 41, 59, 0.6) 42px, #1e293b 100%)`;
+      item.style.boxShadow = `inset 1px 0 6px -1px ${pointColor}33`;
+
       const suggestions = document.createElement('div');
       suggestions.className = 'route-point-suggestions';
       const input = document.createElement('input');
@@ -696,6 +711,9 @@
       if (point.place) {
         input.value = inlineRoutePlaceLabel(place);
         input.placeholder = 'Wpisz adres';
+      } else if (point._pendingQuery) {
+        input.value = point._pendingQuery;
+        input.placeholder = index === 0 ? 'Wpisz miejsce startu' : 'Wpisz punkt trasy';
       } else {
         input.placeholder = index === 0 ? 'Wpisz miejsce startu' : 'Wpisz punkt trasy';
       }
@@ -708,22 +726,22 @@
       setupRouteInputEvents(input, point, suggestions);
       item.appendChild(input);
       item.appendChild(suggestions);
-      const up = document.createElement('button');
-      up.type = 'button';
-      up.innerText = '↑';
-      up.title = 'Przenieś wyżej';
-      up.disabled = index === 0;
-      up.onclick = () => moveInlinePoint(index, -1);
-      const down = document.createElement('button');
-      down.type = 'button';
-      down.innerText = '↓';
-      down.title = 'Przenieś niżej';
-      down.disabled = index === inlineRouteState.points.length - 1;
-      down.onclick = () => moveInlinePoint(index, 1);
-      item.append(up, down);
+
+      const dragHandle = document.createElement('button');
+      dragHandle.type = 'button';
+      dragHandle.className = 'route-drag-handle';
+      dragHandle.setAttribute('aria-label', 'Przeciągnij, aby zmienić kolejność punktu');
+      dragHandle.title = 'Przeciągnij, aby zmienić kolejność (lub użyj strzałek góra/dół)';
+      dragHandle.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="8" cy="5" r="2"/><circle cx="16" cy="5" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="8" cy="19" r="2"/><circle cx="16" cy="19" r="2"/></svg>';
+      setupRoutePointDrag(dragHandle, item, index);
+      item.appendChild(dragHandle);
+
       const remove = document.createElement('button');
       remove.type = 'button';
-      remove.innerText = 'Usuń';
+      remove.className = 'route-point-remove';
+      remove.setAttribute('aria-label', 'Usuń punkt trasy');
+      remove.title = 'Usuń punkt trasy';
+      remove.innerHTML = '&times;';
       remove.onclick = () => {
         inlineRouteState.points.splice(index, 1);
         inlineRouteState.points.forEach((entry, pointIndex) => {
@@ -763,19 +781,207 @@
     updateGoogleMapsOutputIfVisible();
   }
 
-  function moveInlinePoint(index, offset) {
-    const target = index + offset;
-    if (target < 0 || target >= inlineRouteState.points.length) return;
-    const [point] = inlineRouteState.points.splice(index, 1);
-    inlineRouteState.points.forEach((entry, pointIndex) => {
-      entry.type = pointIndex === 0 ? 'start' : pointIndex === inlineRouteState.points.length - 1 ? 'destination' : 'stop';
+  function setupRoutePointDrag(dragElement, row, index) {
+    dragElement.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (index > 0) {
+          moveInlinePoint(index, -1);
+          setTimeout(() => {
+            const nextHandle = routePlannerStops.querySelector(`[data-point-index="${index - 1}"] .route-drag-handle`);
+            if (nextHandle) nextHandle.focus();
+          }, 0);
+        }
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (index < inlineRouteState.points.length - 1) {
+          moveInlinePoint(index, 1);
+          setTimeout(() => {
+            const nextHandle = routePlannerStops.querySelector(`[data-point-index="${index + 1}"] .route-drag-handle`);
+            if (nextHandle) nextHandle.focus();
+          }, 0);
+        }
+      }
     });
-    inlineRouteState.points.splice(target, 0, point);
+
+    if (inlineRouteState.points.length <= 1) {
+      dragElement.style.opacity = '0.35';
+      dragElement.style.cursor = 'default';
+      return;
+    }
+
+    dragElement.style.cursor = 'grab';
+
+    function onPointerStart(e) {
+      if (e.button !== 0) return;
+      e.preventDefault();
+
+      const fromIndex = parseInt(row.dataset.pointIndex, 10);
+      const rowRect = row.getBoundingClientRect();
+      const offsetY = e.clientY - rowRect.top;
+      let currentDropSlot = fromIndex;
+      let isCanceled = false;
+
+      try {
+        if (dragElement.setPointerCapture) dragElement.setPointerCapture(e.pointerId);
+      } catch (_) {}
+
+      // Tworzymy element ghost pod kursorem
+      const ghost = row.cloneNode(true);
+      ghost.classList.add('route-point-ghost');
+      const ghostSug = ghost.querySelector('.route-point-suggestions');
+      if (ghostSug) ghostSug.remove();
+      const origInput = row.querySelector('input');
+      const ghostInput = ghost.querySelector('input');
+      if (origInput && ghostInput) ghostInput.value = origInput.value;
+
+      ghost.style.position = 'fixed';
+      ghost.style.left = `${rowRect.left}px`;
+      ghost.style.top = `${rowRect.top}px`;
+      ghost.style.width = `${rowRect.width}px`;
+      ghost.style.height = `${rowRect.height}px`;
+      ghost.style.zIndex = '10000';
+      ghost.style.pointerEvents = 'none';
+      document.body.appendChild(ghost);
+
+      row.classList.add('route-point-row-dragging');
+      dragElement.classList.add('is-dragging');
+      document.body.classList.add('route-dragging-active');
+
+      let dropIndicator = routePlannerStops.querySelector('.route-drop-indicator');
+      if (!dropIndicator) {
+        dropIndicator = document.createElement('div');
+        dropIndicator.className = 'route-drop-indicator';
+        routePlannerStops.appendChild(dropIndicator);
+      }
+      dropIndicator.style.display = 'block';
+
+      function updateDropIndicator() {
+        const rows = Array.from(routePlannerStops.querySelectorAll('.route-point-row'));
+        if (!rows.length) return;
+        const stopsRect = routePlannerStops.getBoundingClientRect();
+        if (currentDropSlot < rows.length) {
+          const targetRect = rows[currentDropSlot].getBoundingClientRect();
+          const topOffset = (targetRect.top - stopsRect.top) - 2;
+          dropIndicator.style.top = `${topOffset}px`;
+        } else {
+          const targetRect = rows[rows.length - 1].getBoundingClientRect();
+          const topOffset = (targetRect.bottom - stopsRect.top) + 2;
+          dropIndicator.style.top = `${topOffset}px`;
+        }
+      }
+
+      updateDropIndicator();
+
+      function onPointerMove(moveEvent) {
+        if (moveEvent.pointerId !== e.pointerId) return;
+        moveEvent.preventDefault();
+        ghost.style.top = `${moveEvent.clientY - offsetY}px`;
+        ghost.style.left = `${rowRect.left}px`;
+
+        const scrollContainer = routePlannerStops.closest('.route-planner-scroll-body') || routePlannerStops.parentElement;
+        if (scrollContainer) {
+          const containerRect = scrollContainer.getBoundingClientRect();
+          if (moveEvent.clientY < containerRect.top + 35) {
+            scrollContainer.scrollTop -= 8;
+          } else if (moveEvent.clientY > containerRect.bottom - 35) {
+            scrollContainer.scrollTop += 8;
+          }
+        }
+
+        const rows = Array.from(routePlannerStops.querySelectorAll('.route-point-row'));
+        let targetSlot = 0;
+        for (let i = 0; i < rows.length; i++) {
+          const rRect = rows[i].getBoundingClientRect();
+          const midY = rRect.top + rRect.height / 2;
+          if (moveEvent.clientY > midY) {
+            targetSlot = i + 1;
+          }
+        }
+        currentDropSlot = targetSlot;
+        updateDropIndicator();
+      }
+
+      function onKeyDown(keyEvent) {
+        if (keyEvent.key === 'Escape') {
+          isCanceled = true;
+          cleanup();
+        }
+      }
+
+      function cleanup() {
+        window.removeEventListener('keydown', onKeyDown);
+        window.removeEventListener('pointermove', onPointerMove);
+        window.removeEventListener('pointerup', onPointerUp);
+        window.removeEventListener('pointercancel', onPointerCancel);
+        try {
+          if (dragElement.hasPointerCapture(e.pointerId)) {
+            dragElement.releasePointerCapture(e.pointerId);
+          }
+        } catch (_) {}
+
+        if (ghost.parentNode) ghost.parentNode.removeChild(ghost);
+        if (dropIndicator) dropIndicator.style.display = 'none';
+        row.classList.remove('route-point-row-dragging');
+        dragElement.classList.remove('is-dragging');
+        document.body.classList.remove('route-dragging-active');
+      }
+
+      function onPointerUp(upEvent) {
+        if (upEvent.pointerId !== e.pointerId) return;
+        cleanup();
+        if (isCanceled) return;
+
+        let newIndex = currentDropSlot > fromIndex ? currentDropSlot - 1 : currentDropSlot;
+        if (newIndex >= inlineRouteState.points.length) newIndex = inlineRouteState.points.length - 1;
+        if (newIndex < 0) newIndex = 0;
+        if (newIndex !== fromIndex) {
+          reorderInlinePoints(fromIndex, newIndex);
+        }
+      }
+
+      function onPointerCancel(cancelEvent) {
+        if (cancelEvent.pointerId !== e.pointerId) return;
+        isCanceled = true;
+        cleanup();
+      }
+
+      window.addEventListener('keydown', onKeyDown);
+      window.addEventListener('pointermove', onPointerMove, { passive: false });
+      window.addEventListener('pointerup', onPointerUp);
+      window.addEventListener('pointercancel', onPointerCancel);
+    }
+
+    dragElement.addEventListener('pointerdown', onPointerStart);
+    row.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('input, button')) return;
+      onPointerStart(e);
+    });
+  }
+
+  function reorderInlinePoints(fromIndex, toIndex) {
+    if (fromIndex === toIndex) return;
+    if (fromIndex < 0 || fromIndex >= inlineRouteState.points.length) return;
+    if (toIndex < 0 || toIndex >= inlineRouteState.points.length) return;
+
+    const currentInputs = routePlannerStops.querySelectorAll('.route-point-row input.route-field');
+    currentInputs.forEach((inp, idx) => {
+      if (inlineRouteState.points[idx] && !inlineRouteState.points[idx].place && inp.value) {
+        inlineRouteState.points[idx]._pendingQuery = inp.value;
+      }
+    });
+
+    const [point] = inlineRouteState.points.splice(fromIndex, 1);
+    inlineRouteState.points.splice(toIndex, 0, point);
     inlineRouteState.points.forEach((entry, pointIndex) => {
       entry.type = pointIndex === 0 ? 'start' : pointIndex === inlineRouteState.points.length - 1 ? 'destination' : 'stop';
     });
     renderInlineRouteMarkers();
     scheduleInlineRouteCalculation();
+  }
+
+  function moveInlinePoint(index, offset) {
+    reorderInlinePoints(index, index + offset);
   }
 
   function renderInlineRouteMarkers() {
@@ -903,82 +1109,99 @@
       <div id="route-avoid-section" class="route-clean-section" style="display:none;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
           <span class="route-clean-section-title" style="color:#f87171; margin:0;">Punkty unikania</span>
-          <select id="sel-route-avoid-mode" class="route-clean-select">
-            <option value="high_cost">Wysoki koszt</option>
-            <option value="exclude">Wyklucz drogę</option>
-          </select>
         </div>
         <div id="route-avoid-list" style="display:flex; flex-direction:column; gap:4px;"></div>
       </div>
 
-      <div class="route-clean-section">
-        <label class="route-clean-toggle-row" style="padding:0; border:none; background:none;">
-          <span style="color:#38bdf8; font-weight:600;">Generator trasy rekreacyjnej</span>
-          <input type="checkbox" id="chk-route-auto-mode" style="accent-color:#38bdf8;" />
-        </label>
-        <div id="route-auto-params" style="display:none; flex-direction:column; gap:8px; margin-top:8px; padding-top:8px; border-top:1px solid rgba(148,163,184,0.12);">
+      <details id="route-prefs-details" class="route-advanced-box route-clean-details" open>
+        <summary class="route-clean-summary">
+          Wagi unikania przeszkód i dróg (0–9)
+        </summary>
+        <div class="route-clean-sliders-list">
+          <div class="route-compact-slider-row" data-avoid-id="rng-av-traversed">
+            <button type="button" class="route-drag-handle route-avoid-drag-handle" title="Przeciągnij, aby zmienić priorytet (lub użyj strzałek góra/dół)" aria-label="Zmień priorytet"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="8" cy="5" r="2"/><circle cx="16" cy="5" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="8" cy="19" r="2"/><circle cx="16" cy="19" r="2"/></svg></button>
+            <input type="checkbox" id="chk-av-traversed" class="route-avoid-checkbox" title="Włącz lub wyłącz unikanie: Przebyte już drogi" />
+            <label for="chk-av-traversed" class="route-compact-slider-label">Przebyte już drogi</label>
+          </div>
+          <div class="route-compact-slider-row" data-avoid-id="rng-av-highways">
+            <button type="button" class="route-drag-handle route-avoid-drag-handle" title="Przeciągnij, aby zmienić priorytet (lub użyj strzałek góra/dół)" aria-label="Zmień priorytet"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="8" cy="5" r="2"/><circle cx="16" cy="5" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="8" cy="19" r="2"/><circle cx="16" cy="19" r="2"/></svg></button>
+            <input type="checkbox" id="chk-av-highways" class="route-avoid-checkbox" title="Włącz lub wyłącz unikanie: Autostrady i ekspresówki" />
+            <label for="chk-av-highways" class="route-compact-slider-label">Autostrady i ekspresówki</label>
+          </div>
+          <div class="route-compact-slider-row" data-avoid-id="rng-av-slow">
+            <button type="button" class="route-drag-handle route-avoid-drag-handle" title="Przeciągnij, aby zmienić priorytet (lub użyj strzałek góra/dół)" aria-label="Zmień priorytet"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="8" cy="5" r="2"/><circle cx="16" cy="5" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="8" cy="19" r="2"/><circle cx="16" cy="19" r="2"/></svg></button>
+            <input type="checkbox" id="chk-av-slow" class="route-avoid-checkbox" title="Włącz lub wyłącz unikanie dróg poniżej wybranej prędkości" />
+            <div class="route-compact-slider-label route-slider-label-speed" title="Unikaj dróg z dopuszczalną prędkością poniżej wybranej wartości">
+              <span>Drogi &lt;</span>
+              <input type="number" id="inp-av-min-speed" class="route-inline-speed-input" min="10" max="140" step="5" value="50" title="Wpisz lub przewiń kółkiem próg prędkości (km/h)" />
+              <span>km/h</span>
+            </div>
+          </div>
+          <div class="route-compact-slider-row" data-avoid-id="rng-av-fast">
+            <button type="button" class="route-drag-handle route-avoid-drag-handle" title="Przeciągnij, aby zmienić priorytet (lub użyj strzałek góra/dół)" aria-label="Zmień priorytet"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="8" cy="5" r="2"/><circle cx="16" cy="5" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="8" cy="19" r="2"/><circle cx="16" cy="19" r="2"/></svg></button>
+            <input type="checkbox" id="chk-av-fast" class="route-avoid-checkbox" title="Włącz lub wyłącz unikanie dróg powyżej wybranej prędkości" />
+            <div class="route-compact-slider-label route-slider-label-speed" title="Unikaj dróg z dopuszczalną prędkością powyżej wybranej wartości">
+              <span>Drogi &gt;</span>
+              <input type="number" id="inp-av-max-speed" class="route-inline-speed-input" min="10" max="140" step="5" value="90" title="Wpisz lub przewiń kółkiem próg prędkości (km/h)" />
+              <span>km/h</span>
+            </div>
+          </div>
+          <div class="route-compact-slider-row" data-avoid-id="rng-av-bumps">
+            <button type="button" class="route-drag-handle route-avoid-drag-handle" title="Przeciągnij, aby zmienić priorytet (lub użyj strzałek góra/dół)" aria-label="Zmień priorytet"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="8" cy="5" r="2"/><circle cx="16" cy="5" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="8" cy="19" r="2"/><circle cx="16" cy="19" r="2"/></svg></button>
+            <input type="checkbox" id="chk-av-bumps" class="route-avoid-checkbox" title="Włącz lub wyłącz unikanie: Progi zwalniające" />
+            <label for="chk-av-bumps" class="route-compact-slider-label">Progi zwalniające</label>
+          </div>
+          <div class="route-compact-slider-row" data-avoid-id="rng-av-signals">
+            <button type="button" class="route-drag-handle route-avoid-drag-handle" title="Przeciągnij, aby zmienić priorytet (lub użyj strzałek góra/dół)" aria-label="Zmień priorytet"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="8" cy="5" r="2"/><circle cx="16" cy="5" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="8" cy="19" r="2"/><circle cx="16" cy="19" r="2"/></svg></button>
+            <input type="checkbox" id="chk-av-signals" class="route-avoid-checkbox" title="Włącz lub wyłącz unikanie: Sygnalizacja świetlna" />
+            <label for="chk-av-signals" class="route-compact-slider-label">Sygnalizacja świetlna</label>
+          </div>
+          <div class="route-compact-slider-row" data-avoid-id="rng-av-inter">
+            <button type="button" class="route-drag-handle route-avoid-drag-handle" title="Przeciągnij, aby zmienić priorytet (lub użyj strzałek góra/dół)" aria-label="Zmień priorytet"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="8" cy="5" r="2"/><circle cx="16" cy="5" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="8" cy="19" r="2"/><circle cx="16" cy="19" r="2"/></svg></button>
+            <input type="checkbox" id="chk-av-inter" class="route-avoid-checkbox" title="Włącz lub wyłącz unikanie: Skrzyżowania" />
+            <label for="chk-av-inter" class="route-compact-slider-label">Skrzyżowania</label>
+          </div>
+          <div class="route-compact-slider-row" data-avoid-id="rng-av-cross">
+            <button type="button" class="route-drag-handle route-avoid-drag-handle" title="Przeciągnij, aby zmienić priorytet (lub użyj strzałek góra/dół)" aria-label="Zmień priorytet"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="8" cy="5" r="2"/><circle cx="16" cy="5" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="8" cy="19" r="2"/><circle cx="16" cy="19" r="2"/></svg></button>
+            <input type="checkbox" id="chk-av-cross" class="route-avoid-checkbox" title="Włącz lub wyłącz unikanie: Przejścia dla pieszych" />
+            <label for="chk-av-cross" class="route-compact-slider-label">Przejścia dla pieszych</label>
+          </div>
+          <div class="route-compact-slider-row" data-avoid-id="rng-av-round">
+            <button type="button" class="route-drag-handle route-avoid-drag-handle" title="Przeciągnij, aby zmienić priorytet (lub użyj strzałek góra/dół)" aria-label="Zmień priorytet"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="8" cy="5" r="2"/><circle cx="16" cy="5" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="8" cy="19" r="2"/><circle cx="16" cy="19" r="2"/></svg></button>
+            <input type="checkbox" id="chk-av-round" class="route-avoid-checkbox" title="Włącz lub wyłącz unikanie: Ronda" />
+            <label for="chk-av-round" class="route-compact-slider-label">Ronda</label>
+          </div>
+        </div>
+      </details>
+
+      <div class="route-clean-section" id="route-recreation-generator-section" style="margin-top:2px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <span style="color:#38bdf8; font-weight:600; font-size:12px;">Generator trasy rekreacyjnej</span>
+          <input type="checkbox" id="chk-route-auto-mode" checked style="display:none;" />
+        </div>
+        <div id="route-auto-params" style="display:flex; flex-direction:column; gap:8px;">
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
             <label class="route-clean-metric-field">
               <span>Długość km</span>
-              <input type="number" id="inp-route-target-km" min="1" max="500" step="1" value="25" class="route-clean-num-input" />
+              <input type="number" id="inp-route-target-km" min="1" max="500" step="1" value="25" placeholder="np. 25" class="route-clean-num-input" />
             </label>
             <label class="route-clean-metric-field">
               <span>Czas min</span>
-              <input type="number" id="inp-route-target-min" min="1" max="600" step="5" value="35" class="route-clean-num-input" />
+              <input type="number" id="inp-route-target-min" min="1" max="600" step="1" value="35" placeholder="np. 35" class="route-clean-num-input" />
             </label>
           </div>
           <label class="route-clean-subtoggle">
             <input type="checkbox" id="chk-route-auto-loop" checked style="accent-color:#38bdf8;" />
             <span>Pętla powrotna do startu</span>
           </label>
-          <button type="button" id="btn-route-generate-auto" class="route-clean-primary-btn">
-            Wyznacz trasę rekreacyjną
+          <button type="button" id="btn-route-generate-auto" class="route-clean-primary-btn" style="margin-top:4px; display:flex; align-items:center; justify-content:center; gap:6px;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="5 3 19 12 5 21 5 3"></polygon>
+            </svg>
+            <span>Generuj</span>
           </button>
         </div>
       </div>
-
-      <details id="route-prefs-details" class="route-advanced-box route-clean-details" open>
-        <summary class="route-clean-summary">
-          Wagi unikania przeszkód i dróg (0–7)
-        </summary>
-        <div class="route-clean-sliders-list">
-          <div class="route-compact-slider-row">
-            <span class="route-compact-slider-label">Przebyte już drogi</span>
-            <input type="range" id="rng-av-traversed" class="route-aversion-range" min="0" max="7" step="1" value="0" />
-            <strong id="val-av-traversed" class="route-compact-slider-val">0</strong>
-          </div>
-          <div class="route-compact-slider-row">
-            <span class="route-compact-slider-label">Autostrady i ekspresówki</span>
-            <input type="range" id="rng-av-highways" class="route-aversion-range" min="0" max="7" step="1" value="0" />
-            <strong id="val-av-highways" class="route-compact-slider-val">0</strong>
-          </div>
-          <div class="route-compact-slider-row">
-            <span class="route-compact-slider-label">Progi zwalniające</span>
-            <input type="range" id="rng-av-bumps" class="route-aversion-range" min="0" max="7" step="1" value="0" />
-            <strong id="val-av-bumps" class="route-compact-slider-val">0</strong>
-          </div>
-          <div class="route-compact-slider-row">
-            <span class="route-compact-slider-label">Sygnalizacja świetlna</span>
-            <input type="range" id="rng-av-signals" class="route-aversion-range" min="0" max="7" step="1" value="0" />
-            <strong id="val-av-signals" class="route-compact-slider-val">0</strong>
-          </div>
-          <div class="route-compact-slider-row">
-            <span class="route-compact-slider-label">Skrzyżowania</span>
-            <input type="range" id="rng-av-inter" class="route-aversion-range" min="0" max="7" step="1" value="0" />
-            <strong id="val-av-inter" class="route-compact-slider-val">0</strong>
-          </div>
-          <div class="route-compact-slider-row">
-            <span class="route-compact-slider-label">Przejścia dla pieszych</span>
-            <input type="range" id="rng-av-cross" class="route-aversion-range" min="0" max="7" step="1" value="0" />
-            <strong id="val-av-cross" class="route-compact-slider-val">0</strong>
-          </div>
-          <div class="route-compact-slider-row">
-            <span class="route-compact-slider-label">Ronda</span>
-            <input type="range" id="rng-av-round" class="route-aversion-range" min="0" max="7" step="1" value="0" />
-            <strong id="val-av-round" class="route-compact-slider-val">0</strong>
-          </div>
-        </div>
-      </details>
     `;
 
     const listSec = routePlannerPanel.querySelector('.route-list-section');
@@ -1028,12 +1251,6 @@
       addAvoidPoint(e.lngLat.lng, e.lngLat.lat, 300);
     });
 
-    const selAvoidMode = box.querySelector('#sel-route-avoid-mode');
-    selAvoidMode.addEventListener('change', () => {
-      routeAvoidMode = selAvoidMode.value;
-      scheduleInlineRouteCalculation();
-    });
-
     const chkAutoMode = box.querySelector('#chk-route-auto-mode');
     const autoParams = box.querySelector('#route-auto-params');
     const inpKm = box.querySelector('#inp-route-target-km');
@@ -1041,54 +1258,69 @@
     const chkLoop = box.querySelector('#chk-route-auto-loop');
     const btnGenAuto = box.querySelector('#btn-route-generate-auto');
 
-    chkAutoMode.addEventListener('change', () => {
-      autoRouteConfig.enabled = chkAutoMode.checked;
-      autoParams.style.display = chkAutoMode.checked ? 'flex' : 'none';
-    });
+    if (chkAutoMode) {
+      chkAutoMode.addEventListener('change', () => {
+        autoRouteConfig.enabled = chkAutoMode.checked;
+        if (autoParams) autoParams.style.display = chkAutoMode.checked ? 'flex' : 'none';
+      });
+    }
+
     inpKm.addEventListener('input', () => {
       autoRouteConfig.target_km = parseFloat(inpKm.value) || 0;
-      if (autoRouteConfig.target_km > 0) {
-        inpMin.value = String(Math.round((autoRouteConfig.target_km / 42) * 60));
-        autoRouteConfig.target_minutes = parseFloat(inpMin.value) || 0;
-      }
     });
+
     inpMin.addEventListener('input', () => {
       autoRouteConfig.target_minutes = parseFloat(inpMin.value) || 0;
-      if (autoRouteConfig.target_minutes > 0) {
-        inpKm.value = String(Math.round(autoRouteConfig.target_minutes * 0.7 * 10) / 10);
-        autoRouteConfig.target_km = parseFloat(inpKm.value) || 0;
-      }
     });
+
     chkLoop.addEventListener('change', () => {
       autoRouteConfig.return_to_start = chkLoop.checked;
     });
-    btnGenAuto.addEventListener('click', () => {
+
+    btnGenAuto.addEventListener('click', async () => {
+      const km = parseFloat(inpKm.value) || 0;
+      const min = parseFloat(inpMin.value) || 0;
+      if (km <= 0 && min <= 0) {
+        routePlannerStats.innerText = 'Podaj długość (km) lub czas (min) trasy rekreacyjnej.';
+        return;
+      }
       autoRouteConfig.enabled = true;
-      autoRouteConfig.target_km = parseFloat(inpKm.value) || 25;
-      autoRouteConfig.target_minutes = parseFloat(inpMin.value) || 35;
+      autoRouteConfig.target_km = km;
+      autoRouteConfig.target_minutes = min;
       autoRouteConfig.return_to_start = chkLoop.checked;
-      chkAutoMode.checked = true;
-      autoParams.style.display = 'flex';
-      const validPts = inlineRouteState.points.filter(p => p && p.place);
-      if (validPts.length === 0) {
-        const c = map.getCenter();
-        setStartPointFromCoords(c.lng, c.lat, `${c.lat.toFixed(4)}, ${c.lng.toFixed(4)}`);
-      } else {
-        // Zostawiamy punkt startowy (i ewentualny punkt docelowy gdy pętla jest wyłączona), aby wygenerować nowe 10 punktów
-        if (autoRouteConfig.return_to_start) {
-          inlineRouteState.points = [validPts[0]];
-        } else if (validPts.length >= 2 && validPts.length !== 10) {
-          inlineRouteState.points = [validPts[0], validPts[validPts.length - 1]];
+      if (chkAutoMode) chkAutoMode.checked = true;
+
+      const originalHtml = btnGenAuto.innerHTML;
+      btnGenAuto.disabled = true;
+      btnGenAuto.innerText = 'Generowanie...';
+
+      try {
+        const validPts = inlineRouteState.points.filter(p => p && p.place);
+        if (validPts.length === 0) {
+          const c = map.getCenter();
+          setStartPointFromCoords(c.lng, c.lat, `${c.lat.toFixed(4)}, ${c.lng.toFixed(4)}`);
         } else {
-          inlineRouteState.points = [validPts[0]];
+          // Zostawiamy punkt startowy (i ewentualny punkt docelowy gdy petla jest wylaczona), aby wygenerowac nowe 10 punktow
+          if (autoRouteConfig.return_to_start) {
+            inlineRouteState.points = [validPts[0]];
+          } else if (validPts.length >= 2 && validPts.length !== 10) {
+            inlineRouteState.points = [validPts[0], validPts[validPts.length - 1]];
+          } else {
+            inlineRouteState.points = [validPts[0]];
+          }
         }
-        calculateInlineRoute(true);
+        await calculateInlineRoute(true);
+      } finally {
+        btnGenAuto.disabled = false;
+        btnGenAuto.innerHTML = originalHtml;
       }
     });
 
     const aversionSlidersConfig = [
       { rngId: 'rng-av-traversed', valId: 'val-av-traversed', prefKey: 'aversion_traversed', boolKey: 'avoid_traversed' },
       { rngId: 'rng-av-highways', valId: 'val-av-highways', prefKey: 'aversion_highways', boolKey: 'avoid_highways' },
+      { rngId: 'rng-av-slow', valId: 'val-av-slow', prefKey: 'aversion_below_speed', boolKey: 'avoid_below_speed' },
+      { rngId: 'rng-av-fast', valId: 'val-av-fast', prefKey: 'aversion_above_speed', boolKey: 'avoid_above_speed' },
       { rngId: 'rng-av-bumps', valId: 'val-av-bumps', prefKey: 'aversion_speed_bumps' },
       { rngId: 'rng-av-signals', valId: 'val-av-signals', prefKey: 'aversion_traffic_signals' },
       { rngId: 'rng-av-inter', valId: 'val-av-inter', prefKey: 'aversion_intersections' },
@@ -1096,68 +1328,477 @@
       { rngId: 'rng-av-round', valId: 'val-av-round', prefKey: 'aversion_roundabouts' }
     ];
 
-    const maxAversionObjects = aversionSlidersConfig.length; // 7
+    const bindInlineSpeedInput = (inputEl, prefKmhKey, aversionKey, avoidKey, defaultVal) => {
+      if (!inputEl) return;
+      inputEl.value = String(routePreferences[prefKmhKey] || defaultVal);
 
-    const getTakenAversionValues = (excludeRng) => {
-      const taken = new Set();
-      aversionSlidersConfig.forEach(item => {
-        const r = box.querySelector('#' + item.rngId);
-        if (r && r !== excludeRng) {
-          const v = parseInt(r.value, 10) || 0;
-          if (v > 0) taken.add(v);
+      inputEl.addEventListener('click', (e) => e.stopPropagation());
+      inputEl.addEventListener('keydown', (e) => e.stopPropagation());
+
+      inputEl.addEventListener('input', () => {
+        const raw = inputEl.value.trim();
+        if (!raw) return;
+        const num = parseInt(raw, 10);
+        if (!isNaN(num) && num >= 10 && num <= 140) {
+          routePreferences[prefKmhKey] = num;
+          if (routePreferences[aversionKey] > 0 || routePreferences[avoidKey]) {
+            scheduleInlineRouteCalculation();
+          }
         }
       });
-      return taken;
+
+      const commitValue = () => {
+        let val = parseInt(inputEl.value, 10);
+        if (isNaN(val) || val < 10) val = 10;
+        if (val > 140) val = 140;
+        inputEl.value = String(val);
+        routePreferences[prefKmhKey] = val;
+        if (routePreferences[aversionKey] > 0 || routePreferences[avoidKey]) {
+          scheduleInlineRouteCalculation();
+        }
+      };
+
+      inputEl.addEventListener('change', commitValue);
+      inputEl.addEventListener('blur', commitValue);
+
+      inputEl.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        let val = parseInt(inputEl.value, 10) || defaultVal;
+        val += (e.deltaY < 0 ? 5 : -5);
+        if (val < 10) val = 10;
+        if (val > 140) val = 140;
+        inputEl.value = String(val);
+        routePreferences[prefKmhKey] = val;
+        if (routePreferences[aversionKey] > 0 || routePreferences[avoidKey]) {
+          scheduleInlineRouteCalculation();
+        }
+      }, { passive: false });
     };
 
-    const resolveAllowedAversionValue = (requestedVal, currentVal, takenSet, maxVal) => {
-      if (requestedVal === 0) return 0;
-      if (!takenSet.has(requestedVal)) return requestedVal;
+    const inpMinSpeed = box.querySelector('#inp-av-min-speed');
+    bindInlineSpeedInput(inpMinSpeed, 'avoid_below_speed_kmh', 'aversion_below_speed', 'avoid_below_speed', 50);
 
-      if (requestedVal > currentVal) {
-        for (let v = requestedVal + 1; v <= maxVal; v++) {
-          if (!takenSet.has(v)) return v;
+    const inpMaxSpeed = box.querySelector('#inp-av-max-speed');
+    bindInlineSpeedInput(inpMaxSpeed, 'avoid_above_speed_kmh', 'aversion_above_speed', 'avoid_above_speed', 90);
+
+    // Maksymalny zakres wagi priorytetu max="9"
+    const maxAversionObjects = 9;
+
+    function updateAvoidancePreferencesFromUI(shouldRecalculate = true) {
+      const listContainer = box.querySelector('.route-clean-sliders-list');
+      if (!listContainer) return;
+      const rows = Array.from(listContainer.querySelectorAll('.route-compact-slider-row'));
+      let currentRankWeight = maxAversionObjects; // 9
+
+      rows.forEach(row => {
+        const avoidId = row.dataset.avoidId;
+        const chk = row.querySelector('.route-avoid-checkbox');
+        const isChecked = chk ? chk.checked : false;
+        const cfgItem = aversionSlidersConfig.find(c => c.rngId === avoidId || c.chkId === avoidId);
+        if (!cfgItem) return;
+
+        row.classList.toggle('is-active', isChecked);
+
+        if (isChecked) {
+          routePreferences[cfgItem.prefKey] = currentRankWeight;
+          if (cfgItem.boolKey) {
+            routePreferences[cfgItem.boolKey] = true;
+          }
+          currentRankWeight = Math.max(1, currentRankWeight - 1);
+        } else {
+          routePreferences[cfgItem.prefKey] = 0;
+          if (cfgItem.boolKey) {
+            routePreferences[cfgItem.boolKey] = false;
+          }
         }
-        for (let v = requestedVal - 1; v >= 1; v--) {
-          if (!takenSet.has(v)) return v;
-        }
-      } else {
-        for (let v = requestedVal - 1; v >= 1; v--) {
-          if (!takenSet.has(v)) return v;
-        }
-        for (let v = requestedVal + 1; v <= maxVal; v++) {
-          if (!takenSet.has(v)) return v;
-        }
-      }
-      return !takenSet.has(currentVal) ? currentVal : 0;
-    };
+      });
 
-    aversionSlidersConfig.forEach(item => {
-      const rng = box.querySelector('#' + item.rngId);
-      const val = box.querySelector('#' + item.valId);
-      if (!rng || !val) return;
-
-      rng.max = String(maxAversionObjects);
-      let lastVal = parseInt(rng.value, 10) || 0;
-
-      rng.addEventListener('input', () => {
-        const requested = parseInt(rng.value, 10) || 0;
-        const taken = getTakenAversionValues(rng);
-        const finalVal = resolveAllowedAversionValue(requested, lastVal, taken, maxAversionObjects);
-
-        rng.value = String(finalVal);
-        lastVal = finalVal;
-        val.innerText = String(finalVal);
-        val.style.color = finalVal > 0 ? '#38bdf8' : '';
-
-        routePreferences[item.prefKey] = finalVal;
-        if (item.boolKey) {
-          routePreferences[item.boolKey] = finalVal > 0;
-        }
+      saveUserAvoidanceSettings();
+      if (shouldRecalculate) {
         scheduleInlineRouteCalculation();
-      });
+      }
+    }
+
+    setupAvoidanceSlidersList(box, updateAvoidancePreferencesFromUI);
+  }
+
+  function getUserAvoidanceSettingsKey() {
+    const user = (typeof window.getAuthUser === 'function') ? window.getAuthUser() : null;
+    const profileId = (typeof window.getActiveProfileId === 'function') ? window.getActiveProfileId() : '';
+    const userId = user?.user_id || user?.id || user?.username || '';
+    if (userId || profileId) {
+      return `nnaper_route_avoidance_settings_${userId || 'anon'}${profileId ? '_' + profileId : ''}`;
+    }
+    return 'nnaper_route_avoidance_settings';
+  }
+
+  function getCustomAvoidanceSettings() {
+    try {
+      const scopedKey = getUserAvoidanceSettingsKey();
+      const raw = localStorage.getItem(scopedKey) || localStorage.getItem('nnaper_route_avoidance_settings');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') return parsed;
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  function saveCustomAvoidanceSettings(settings) {
+    if (!settings || typeof settings !== 'object') return;
+    try {
+      const scopedKey = getUserAvoidanceSettingsKey();
+      const json = JSON.stringify(settings);
+      localStorage.setItem(scopedKey, json);
+      localStorage.setItem('nnaper_route_avoidance_settings', json);
+      if (Array.isArray(settings.order)) {
+        localStorage.setItem('nnaper_route_avoidance_order', JSON.stringify(settings.order));
+      }
+    } catch (e) {}
+  }
+
+  function getCustomAvoidanceOrder() {
+    const s = getCustomAvoidanceSettings();
+    if (s && Array.isArray(s.order) && s.order.length > 0) return s.order;
+    try {
+      const raw = localStorage.getItem('nnaper_route_avoidance_order');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  function saveCustomAvoidanceOrder(order) {
+    if (!Array.isArray(order)) return;
+    const s = getCustomAvoidanceSettings() || {};
+    s.order = order;
+    saveCustomAvoidanceSettings(s);
+  }
+
+  function saveUserAvoidanceSettings() {
+    const list = document.querySelector('.route-clean-sliders-list');
+    if (!list) return;
+    const rows = Array.from(list.querySelectorAll('.route-compact-slider-row'));
+    const order = rows.map(r => r.dataset.avoidId).filter(Boolean);
+    const checked = {};
+    rows.forEach(r => {
+      const id = r.dataset.avoidId;
+      const chk = r.querySelector('.route-avoid-checkbox');
+      if (id && chk) {
+        checked[id] = chk.checked;
+      }
+    });
+    const inpMin = list.querySelector('#inp-av-min-speed');
+    const inpMax = list.querySelector('#inp-av-max-speed');
+    saveCustomAvoidanceSettings({
+      order,
+      checked,
+      avoid_below_speed_kmh: inpMin ? parseInt(inpMin.value, 10) || 50 : 50,
+      avoid_above_speed_kmh: inpMax ? parseInt(inpMax.value, 10) || 90 : 90
     });
   }
+
+  function syncAvoidanceSlidersOrder(listContainer) {
+    if (!listContainer) listContainer = document.querySelector('.route-clean-sliders-list');
+    if (!listContainer) return;
+    const savedOrder = getCustomAvoidanceOrder();
+    if (!savedOrder || !savedOrder.length) return;
+    const rows = Array.from(listContainer.querySelectorAll('.route-compact-slider-row'));
+    const rowMap = new Map();
+    rows.forEach(r => {
+      if (r.dataset.avoidId) rowMap.set(r.dataset.avoidId, r);
+    });
+    savedOrder.forEach(id => {
+      const r = rowMap.get(id);
+      if (r) {
+        listContainer.appendChild(r);
+        rowMap.delete(id);
+      }
+    });
+    rowMap.forEach(r => {
+      listContainer.appendChild(r);
+    });
+  }
+
+  function syncAvoidanceSlidersChecked(listContainer) {
+    if (!listContainer) listContainer = document.querySelector('.route-clean-sliders-list');
+    if (!listContainer) return;
+    const settings = getCustomAvoidanceSettings();
+    if (!settings) return;
+
+    if (settings.checked && typeof settings.checked === 'object') {
+      const rows = Array.from(listContainer.querySelectorAll('.route-compact-slider-row'));
+      rows.forEach(r => {
+        const id = r.dataset.avoidId;
+        const chk = r.querySelector('.route-avoid-checkbox');
+        if (chk && id && settings.checked[id] !== undefined) {
+          chk.checked = !!settings.checked[id];
+          r.classList.toggle('is-active', chk.checked);
+        }
+      });
+    }
+
+    if (settings.avoid_below_speed_kmh) {
+      const inpMin = listContainer.querySelector('#inp-av-min-speed');
+      if (inpMin) inpMin.value = String(settings.avoid_below_speed_kmh);
+      routePreferences.avoid_below_speed_kmh = settings.avoid_below_speed_kmh;
+    }
+    if (settings.avoid_above_speed_kmh) {
+      const inpMax = listContainer.querySelector('#inp-av-max-speed');
+      if (inpMax) inpMax.value = String(settings.avoid_above_speed_kmh);
+      routePreferences.avoid_above_speed_kmh = settings.avoid_above_speed_kmh;
+    }
+  }
+
+  function setupAvoidanceSlidersList(box, onUpdate) {
+    const listContainer = box.querySelector('.route-clean-sliders-list');
+    if (!listContainer) return;
+    syncAvoidanceSlidersOrder(listContainer);
+    syncAvoidanceSlidersChecked(listContainer);
+
+    const rows = Array.from(listContainer.querySelectorAll('.route-compact-slider-row'));
+    rows.forEach(row => {
+      const handle = row.querySelector('.route-avoid-drag-handle');
+      if (handle) {
+        setupAvoidanceSliderDrag(handle, row, listContainer, onUpdate);
+      }
+      const chk = row.querySelector('.route-avoid-checkbox');
+      if (chk) {
+        chk.addEventListener('change', () => {
+          if (typeof onUpdate === 'function') {
+            onUpdate(true);
+          }
+        });
+      }
+    });
+
+    if (typeof onUpdate === 'function') {
+      onUpdate(false);
+    }
+  }
+
+  function setupAvoidanceSliderDrag(dragElement, row, listContainer, onUpdate) {
+    dragElement.addEventListener('keydown', (e) => {
+      const rows = Array.from(listContainer.querySelectorAll('.route-compact-slider-row'));
+      const index = rows.indexOf(row);
+      if (index === -1) return;
+
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (index > 0) {
+          reorderAvoidanceSliders(index, index - 1, listContainer);
+          if (typeof onUpdate === 'function') onUpdate(true);
+          setTimeout(() => {
+            const nextHandle = row.querySelector('.route-avoid-drag-handle');
+            if (nextHandle) nextHandle.focus();
+          }, 0);
+        }
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (index < rows.length - 1) {
+          reorderAvoidanceSliders(index, index + 1, listContainer);
+          if (typeof onUpdate === 'function') onUpdate(true);
+          setTimeout(() => {
+            const nextHandle = row.querySelector('.route-avoid-drag-handle');
+            if (nextHandle) nextHandle.focus();
+          }, 0);
+        }
+      }
+    });
+
+    function onPointerStart(e) {
+      if (e.button !== 0) return;
+
+      const rows = Array.from(listContainer.querySelectorAll('.route-compact-slider-row'));
+      const fromIndex = rows.indexOf(row);
+      if (fromIndex === -1 || rows.length <= 1) return;
+
+      const rowRect = row.getBoundingClientRect();
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const offsetY = e.clientY - rowRect.top;
+      let currentDropSlot = fromIndex;
+      let isCanceled = false;
+      let isDraggingActive = false;
+      let ghost = null;
+      let dropIndicator = null;
+
+      function initDragVisuals() {
+        if (isDraggingActive) return;
+        isDraggingActive = true;
+
+        try {
+          if (dragElement.setPointerCapture) dragElement.setPointerCapture(e.pointerId);
+        } catch (_) {}
+
+        ghost = row.cloneNode(true);
+        ghost.classList.add('route-point-ghost', 'route-compact-slider-row-ghost');
+        const origChk = row.querySelector('input[type="checkbox"]');
+        const ghostChk = ghost.querySelector('input[type="checkbox"]');
+        if (origChk && ghostChk) ghostChk.checked = origChk.checked;
+        const origNum = row.querySelector('input[type="number"]');
+        const ghostNum = ghost.querySelector('input[type="number"]');
+        if (origNum && ghostNum) ghostNum.value = origNum.value;
+
+        ghost.style.position = 'fixed';
+        ghost.style.left = `${rowRect.left}px`;
+        ghost.style.top = `${rowRect.top}px`;
+        ghost.style.width = `${rowRect.width}px`;
+        ghost.style.height = `${rowRect.height}px`;
+        ghost.style.zIndex = '10000';
+        ghost.style.pointerEvents = 'none';
+        document.body.appendChild(ghost);
+
+        row.classList.add('route-point-row-dragging');
+        dragElement.classList.add('is-dragging');
+        document.body.classList.add('route-dragging-active');
+
+        dropIndicator = listContainer.querySelector('.route-avoid-drop-indicator');
+        if (!dropIndicator) {
+          dropIndicator = document.createElement('div');
+          dropIndicator.className = 'route-drop-indicator route-avoid-drop-indicator';
+          listContainer.appendChild(dropIndicator);
+        }
+        dropIndicator.style.display = 'block';
+        updateDropIndicator();
+      }
+
+      function updateDropIndicator() {
+        if (!dropIndicator) return;
+        const currentRows = Array.from(listContainer.querySelectorAll('.route-compact-slider-row'));
+        if (!currentRows.length) return;
+        const contRect = listContainer.getBoundingClientRect();
+        if (currentDropSlot < currentRows.length) {
+          const targetRect = currentRows[currentDropSlot].getBoundingClientRect();
+          const topOffset = (targetRect.top - contRect.top) - 2;
+          dropIndicator.style.top = `${topOffset}px`;
+        } else {
+          const targetRect = currentRows[currentRows.length - 1].getBoundingClientRect();
+          const topOffset = (targetRect.bottom - contRect.top) + 2;
+          dropIndicator.style.top = `${topOffset}px`;
+        }
+      }
+
+      function onPointerMove(moveEvent) {
+        if (moveEvent.pointerId !== e.pointerId) return;
+        if (!isDraggingActive) {
+          const dist = Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY);
+          if (dist < 4) return;
+          initDragVisuals();
+        }
+
+        moveEvent.preventDefault();
+        if (ghost) {
+          ghost.style.top = `${moveEvent.clientY - offsetY}px`;
+          ghost.style.left = `${rowRect.left}px`;
+        }
+
+        const scrollContainer = listContainer.closest('.route-planner-scroll-body') || listContainer.closest('#route-planner-panel') || listContainer.parentElement;
+        if (scrollContainer) {
+          const sRect = scrollContainer.getBoundingClientRect();
+          if (moveEvent.clientY < sRect.top + 35) {
+            scrollContainer.scrollTop -= 8;
+          } else if (moveEvent.clientY > sRect.bottom - 35) {
+            scrollContainer.scrollTop += 8;
+          }
+        }
+
+        const currentRows = Array.from(listContainer.querySelectorAll('.route-compact-slider-row'));
+        let targetSlot = 0;
+        for (let i = 0; i < currentRows.length; i++) {
+          const rRect = currentRows[i].getBoundingClientRect();
+          const midY = rRect.top + rRect.height / 2;
+          if (moveEvent.clientY > midY) {
+            targetSlot = i + 1;
+          }
+        }
+        currentDropSlot = targetSlot;
+        updateDropIndicator();
+      }
+
+      function onKeyDown(keyEvent) {
+        if (keyEvent.key === 'Escape') {
+          isCanceled = true;
+          cleanup();
+        }
+      }
+
+      function cleanup() {
+        window.removeEventListener('keydown', onKeyDown);
+        window.removeEventListener('pointermove', onPointerMove);
+        window.removeEventListener('pointerup', onPointerUp);
+        window.removeEventListener('pointercancel', onPointerCancel);
+        try {
+          if (dragElement.hasPointerCapture(e.pointerId)) {
+            dragElement.releasePointerCapture(e.pointerId);
+          }
+        } catch (_) {}
+
+        if (ghost && ghost.parentNode) ghost.parentNode.removeChild(ghost);
+        if (dropIndicator) dropIndicator.style.display = 'none';
+        row.classList.remove('route-point-row-dragging');
+        dragElement.classList.remove('is-dragging');
+        document.body.classList.remove('route-dragging-active');
+      }
+
+      function onPointerUp(upEvent) {
+        if (upEvent.pointerId !== e.pointerId) return;
+        cleanup();
+        if (isCanceled || !isDraggingActive) return;
+
+        let newIndex = currentDropSlot > fromIndex ? currentDropSlot - 1 : currentDropSlot;
+        const currentRows = Array.from(listContainer.querySelectorAll('.route-compact-slider-row'));
+        if (newIndex >= currentRows.length) newIndex = currentRows.length - 1;
+        if (newIndex < 0) newIndex = 0;
+        if (newIndex !== fromIndex) {
+          reorderAvoidanceSliders(fromIndex, newIndex, listContainer);
+          if (typeof onUpdate === 'function') onUpdate(true);
+        }
+      }
+
+      function onPointerCancel(cancelEvent) {
+        if (cancelEvent.pointerId !== e.pointerId) return;
+        isCanceled = true;
+        cleanup();
+      }
+
+      window.addEventListener('keydown', onKeyDown);
+      window.addEventListener('pointermove', onPointerMove, { passive: false });
+      window.addEventListener('pointerup', onPointerUp);
+      window.addEventListener('pointercancel', onPointerCancel);
+    }
+
+    dragElement.addEventListener('pointerdown', onPointerStart);
+  }
+
+  function reorderAvoidanceSliders(fromIndex, toIndex, listContainer) {
+    if (!listContainer) listContainer = document.querySelector('.route-clean-sliders-list');
+    if (!listContainer) return;
+    const rows = Array.from(listContainer.querySelectorAll('.route-compact-slider-row'));
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= rows.length || toIndex >= rows.length) return;
+
+    const movingRow = rows[fromIndex];
+    if (toIndex >= rows.length - 1) {
+      listContainer.appendChild(movingRow);
+    } else if (toIndex > fromIndex) {
+      listContainer.insertBefore(movingRow, rows[toIndex + 1]);
+    } else {
+      listContainer.insertBefore(movingRow, rows[toIndex]);
+    }
+
+    saveUserAvoidanceSettings();
+  }
+
+  window.addEventListener('nnaper_profile_changed', () => {
+    const list = document.querySelector('.route-clean-sliders-list');
+    if (list) {
+      syncAvoidanceSlidersOrder(list);
+      syncAvoidanceSlidersChecked(list);
+    }
+  });
 
   function setStartPointFromCoords(lon, lat, label) {
     const place = {
@@ -1196,20 +1837,47 @@
       const row = document.createElement('div');
       row.style.cssText = 'display:flex; align-items:center; justify-content:space-between; gap:4px; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); border-radius:4px; padding:3px 6px; font-size:11px;';
       row.innerHTML = `
-        <span>Punkt #${idx + 1} (${ap.lat.toFixed(4)}, ${ap.lon.toFixed(4)})</span>
+        <button type="button" class="btn-route-avoid-jump" title="Pokaż punkt na mapie" style="background:rgba(239,68,68,0.18); border:1px solid rgba(239,68,68,0.35); color:#fca5a5; cursor:pointer; font-size:11px; font-weight:600; padding:2px 7px; border-radius:4px; display:inline-flex; align-items:center; gap:5px; transition:all 0.15s ease;">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><circle cx="12" cy="12" r="10"></circle><line x1="22" y1="12" x2="18" y2="12"></line><line x1="6" y1="12" x2="2" y2="12"></line><line x1="12" y1="6" x2="12" y2="2"></line><line x1="12" y1="22" x2="12" y2="18"></line></svg>
+          <span>Punkt #${idx + 1}</span>
+        </button>
         <div style="display:flex; align-items:center; gap:4px;">
           <input type="number" min="50" max="5000" step="50" value="${ap.radius_m || 300}" title="Promień unikania (m)" style="width:52px; font-size:10.5px; background:#0f172a; color:#fca5a5; border:1px solid #475569; border-radius:3px; padding:1px 3px; text-align:center;" />
           <span style="font-size:10px;color:#94a3b8;">m</span>
-          <button type="button" style="background:none;border:none;color:#f87171;cursor:pointer;font-weight:bold;padding:0 3px;" title="Usuń punkt unikania">&times;</button>
+          <button type="button" class="btn-route-avoid-del" style="background:none;border:none;color:#f87171;cursor:pointer;font-weight:bold;padding:0 3px;" title="Usuń punkt unikania">&times;</button>
         </div>
       `;
+      const jumpBtn = row.querySelector('.btn-route-avoid-jump');
+      jumpBtn.addEventListener('mouseenter', () => {
+        jumpBtn.style.background = 'rgba(239, 68, 68, 0.35)';
+        jumpBtn.style.color = '#ffffff';
+      });
+      jumpBtn.addEventListener('mouseleave', () => {
+        jumpBtn.style.background = 'rgba(239, 68, 68, 0.18)';
+        jumpBtn.style.color = '#fca5a5';
+      });
+      jumpBtn.addEventListener('click', () => {
+        if (typeof map.flyTo === 'function') {
+          map.flyTo({
+            center: [ap.lon, ap.lat],
+            zoom: Math.max(typeof map.getZoom === 'function' ? map.getZoom() : 14, 15),
+            duration: 700
+          });
+        } else if (typeof map.easeTo === 'function') {
+          map.easeTo({
+            center: [ap.lon, ap.lat],
+            zoom: 15,
+            duration: 700
+          });
+        }
+      });
       const radInp = row.querySelector('input');
       radInp.addEventListener('change', () => {
         ap.radius_m = Math.max(50, parseFloat(radInp.value) || 300);
         renderAvoidZonesOnMap();
         scheduleInlineRouteCalculation();
       });
-      const delBtn = row.querySelector('button');
+      const delBtn = row.querySelector('.btn-route-avoid-del');
       delBtn.addEventListener('click', () => {
         routeAvoidPoints.splice(idx, 1);
         renderAvoidZonesOnMap();
@@ -1409,7 +2077,15 @@
       const p0 = effectivePoints[0];
       const sLon = Number(p0.lon);
       const sLat = Number(p0.lat);
-      const targetKm = Math.max(2, autoRouteConfig.target_km || (autoRouteConfig.target_minutes || 25) * 0.7);
+      let targetKm = 25;
+      if (autoRouteConfig.target_km > 0 && autoRouteConfig.target_minutes > 0) {
+        targetKm = (autoRouteConfig.target_km + autoRouteConfig.target_minutes * 0.72) / 2.0;
+      } else if (autoRouteConfig.target_km > 0) {
+        targetKm = autoRouteConfig.target_km;
+      } else if (autoRouteConfig.target_minutes > 0) {
+        targetKm = autoRouteConfig.target_minutes * 0.72;
+      }
+      targetKm = Math.max(2, targetKm);
       const loopRadiusKm = Math.max(0.5, targetKm / (2 * Math.PI * 1.35));
       const cosLat = Math.max(0.2, Math.cos((sLat * Math.PI) / 180));
       const bearing = 3.92;
@@ -2005,4 +2681,7 @@ ${trkptsXml}
   window.closeInlineRoutePlanner = closeInlineRoutePlanner;
   window.toggleRoutePlanner = toggleRoutePlanner;
   window.getPlannedRouteData = getPlannedRouteData;
+  window.getCustomAvoidanceOrder = getCustomAvoidanceOrder;
+  window.saveCustomAvoidanceOrder = saveCustomAvoidanceOrder;
+  window.reorderAvoidanceSliders = reorderAvoidanceSliders;
 })();

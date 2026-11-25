@@ -3717,10 +3717,6 @@ ${placemarks}
       if (progressFill) progressFill.style.width = '35%';
 
       if (!rawPoints) {
-        const isSnapped = localStorage.getItem('nnaper_snap_roads') === 'true';
-        if (isSnapped) {
-          queryParams.set('snapped', 'true');
-        }
         const queryUrl = `${apiBaseUrl}/api/export-data?${queryParams.toString()}`;
         const res = await fetch(queryUrl);
         if (!res.ok) {

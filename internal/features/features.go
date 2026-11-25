@@ -2,6 +2,7 @@ package features
 
 import (
 	"bytes"
+	"container/list"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -11,22 +12,91 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"nnaper/internal/auth"
 )
 
+type lruEntry struct {
+	key   string
+	value []byte
+}
+
+type LRUCache struct {
+	capacity int
+	items    map[string]*list.Element
+	evict    *list.List
+	mu       sync.RWMutex
+}
+
+func NewLRUCache(capacity int) *LRUCache {
+	if capacity <= 0 {
+		capacity = 4096
+	}
+	return &LRUCache{
+		capacity: capacity,
+		items:    make(map[string]*list.Element),
+		evict:    list.New(),
+	}
+}
+
+func (c *LRUCache) Get(key string) ([]byte, bool) {
+	c.mu.RLock()
+	elem, ok := c.items[key]
+	if !ok {
+		c.mu.RUnlock()
+		return nil, false
+	}
+	val := elem.Value.(*lruEntry).value
+	c.mu.RUnlock()
+
+	c.mu.Lock()
+	if elem, ok := c.items[key]; ok {
+		c.evict.MoveToFront(elem)
+	}
+	c.mu.Unlock()
+
+	return val, true
+}
+
+func (c *LRUCache) Set(key string, value []byte) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if elem, ok := c.items[key]; ok {
+		c.evict.MoveToFront(elem)
+		elem.Value.(*lruEntry).value = value
+		return
+	}
+
+	elem := c.evict.PushFront(&lruEntry{key: key, value: value})
+	c.items[key] = elem
+
+	if c.evict.Len() > c.capacity {
+		oldest := c.evict.Back()
+		if oldest != nil {
+			c.evict.Remove(oldest)
+			delete(c.items, oldest.Value.(*lruEntry).key)
+		}
+	}
+}
+
 type Service struct {
-	pool *pgxpool.Pool
+	pool  *pgxpool.Pool
+	cache *LRUCache
 }
 
 func NewService(pool *pgxpool.Pool) *Service {
-	return &Service{pool: pool}
+	return &Service{
+		pool:  pool,
+		cache: NewLRUCache(4096),
+	}
 }
 
 // ============================================================================
-// 1. HEATMAPA (Kafelki rastrowe PNG oraz Siatka Pikseli Viewportu)
+// 1. HEATMAPA (Kafelki wektorowe MVT WebGL, Kafelki rastrowe PNG oraz Siatka Grid)
 // ============================================================================
 
 // tileBounds4326 oblicza granice geograficzne (minLon, minLat, maxLon, maxLat) dla kafelka (z, x, y).
@@ -45,14 +115,13 @@ func tileBounds4326(z, x, y int) (minLon, minLat, maxLon, maxLat float64) {
 // - 0 punktów na piksel -> przezroczysty (0, 0, 0, 0)
 // - 1 punkt na piksel -> zielony (#22c55e)
 // - max punktów na piksel -> czerwony (#ef4444)
-// Wartości pośrednie są interpolowane po gradiencie zielony -> żółty -> pomarańczowy -> czerwony.
+// Wartości pośrednie są interpolowane po skali logarytmicznej: zielony -> żółty -> pomarańczowy -> czerwony.
 func heatmapColorForCount(count, maxCount int64) color.NRGBA {
 	if count <= 0 {
 		return color.NRGBA{R: 0, G: 0, B: 0, A: 0}
 	}
 	if maxCount <= 1 || count == 1 {
 		if maxCount == 1 && count == 1 {
-			// Gdy max wynosi 1, punkt 1 jest zielony
 			return color.NRGBA{R: 34, G: 197, B: 94, A: 215}
 		}
 		return color.NRGBA{R: 34, G: 197, B: 94, A: 205}
@@ -61,8 +130,8 @@ func heatmapColorForCount(count, maxCount int64) color.NRGBA {
 		return color.NRGBA{R: 239, G: 68, B: 68, A: 240}
 	}
 
-	// Skala znormalizowana t w [0, 1] pomiędzy 1 a maxCount (z użyciem łagodnego logarytmu/liniowej wagi dla czytelności)
-	t := float64(count-1) / float64(maxCount-1)
+	// Skala logarytmiczna t w [0, 1] pomiędzy 1 a maxCount dla naturalnego, nieprzekłamanego rozkładu
+	t := math.Log(float64(count)) / math.Log(float64(maxCount))
 	if t < 0 {
 		t = 0
 	}
@@ -87,8 +156,242 @@ func heatmapColorForCount(count, maxCount int64) color.NRGBA {
 	return color.NRGBA{R: r, G: g, B: b, A: alpha}
 }
 
+// heatmapColorForDensity zwraca wygładzony kolor RGBA dla ciągłych wartości zagęszczenia (float64)
+// Oparty o naturalną, spójną skalę termiczną:
+// 1 przejazd -> subtelny, chłodny szafir / szmaragd (nie zlewający się z cyjanem śladu)
+// 2-4 przejazdy -> soczysta zieleń
+// 6-10 przejazdów -> ciepły bursztyn / żółć
+// 12-18 przejazdów -> pomarańcz
+// 20+ przejazdów -> nasycona, głęboka czerwień (główne arterie i codzienne trasy)
+func heatmapColorForDensity(val, maxVal float64) color.NRGBA {
+	if val <= 0.04 {
+		return color.NRGBA{R: 0, G: 0, B: 0, A: 0}
+	}
+	if maxVal <= 1.0 {
+		return color.NRGBA{R: 16, G: 185, B: 129, A: 160}
+	}
+	if val >= maxVal {
+		return color.NRGBA{R: 239, G: 68, B: 68, A: 240}
+	}
+
+	t := math.Log(1.0+val) / math.Log(1.0+maxVal)
+	if t < 0 {
+		t = 0
+	}
+	if t > 1 {
+		t = 1
+	}
+
+	var r, g, b uint8
+	if t < 0.22 {
+		// 0.00 - 0.22: Subtelny chłodny błękit/szmaragd (30, 144, 255 -> 16, 185, 129)
+		u := t / 0.22
+		r = uint8(30.0 + u*(16.0-30.0))
+		g = uint8(144.0 + u*(185.0-144.0))
+		b = uint8(255.0 + u*(129.0-255.0))
+	} else if t < 0.55 {
+		// 0.22 - 0.55: Soczysta zieleń (16, 185, 129) -> Złocisty bursztyn (234, 179, 8)
+		u := (t - 0.22) / 0.33
+		r = uint8(16.0 + u*(234.0-16.0))
+		g = uint8(185.0 + u*(179.0-185.0))
+		b = uint8(129.0 + u*(8.0-129.0))
+	} else if t < 0.82 {
+		// 0.55 - 0.82: Bursztyn (234, 179, 8) -> Gorący pomarańcz (249, 115, 22)
+		u := (t - 0.55) / 0.27
+		r = uint8(234.0 + u*(249.0-234.0))
+		g = uint8(179.0 + u*(115.0-179.0))
+		b = uint8(8.0 + u*(22.0-8.0))
+	} else {
+		// 0.82 - 1.00: Pomarańcz (249, 115, 22) -> Intensywna czerwień (239, 68, 68)
+		u := (t - 0.82) / 0.18
+		r = uint8(249.0 + u*(239.0-249.0))
+		g = uint8(115.0 + u*(68.0-115.0))
+		b = uint8(22.0 + u*(68.0-22.0))
+	}
+
+	alpha := uint8(math.Min(240.0, 90.0+t*150.0))
+	return color.NRGBA{R: r, G: g, B: b, A: alpha}
+}
+
+// buildHeatmapQueryConditions buduje warunki WHERE dla zapytań heatmapy (profile_id, days, filter_stops)
+func (s *Service) buildHeatmapQueryConditions(r *http.Request, userID string, startArg int) (whereSQL string, args []interface{}) {
+	var whereClauses []string
+	q := r.URL.Query()
+	profileID := strings.TrimSpace(q.Get("profile_id"))
+	days := strings.TrimSpace(q.Get("days"))
+	filterStops := q.Get("filter_stops") != "false" && q.Get("mode") != "dwell" // Domyślnie filtrujemy postoje (brak przekłamań)
+
+	nextArg := startArg
+	if profileID != "" && profileID != "all" && profileID != "__all__" && len(profileID) == 36 {
+		whereClauses = append(whereClauses, fmt.Sprintf("e.profile_id = $%d::uuid AND e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = $%d::uuid)", nextArg, nextArg+1))
+		args = append(args, profileID, userID)
+		nextArg += 2
+	} else {
+		whereClauses = append(whereClauses, fmt.Sprintf("e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = $%d::uuid)", nextArg))
+		args = append(args, userID)
+		nextArg++
+	}
+
+	// Filtracja postojów: postoje generują setki punktów w jednym miejscu fałszując natężenie
+	if filterStops {
+		whereClauses = append(whereClauses, "(e.speed_kmh IS NULL OR e.speed_kmh >= 2.0)")
+	}
+
+	// Dla heatmapy: pobieramy całą historię użytkownika, chyba że jawnie podano konkretne daty.
+	// Nigdy nie odrzucamy danych z powodu wyłączonej warstwy śladów ("__none__"), aby heatmapa była w 100% niezależna!
+	if days != "" && days != "all" && days != "0" && days != "all-history" && days != "__all__" && days != "__none__" && days != "none" && days != "empty" && days != "false" {
+		var dayList []string
+		for _, d := range strings.Split(days, ",") {
+			d = strings.TrimSpace(d)
+			if d != "" && d != "none" && d != "__none__" {
+				dayList = append(dayList, d)
+			}
+		}
+		if len(dayList) > 0 {
+			var validDates []string
+			var yearList []string
+			var monthList []string
+			hasNullDate := false
+			for _, d := range dayList {
+				if d == "None" || d == "null" {
+					hasNullDate = true
+				} else if len(d) == 4 {
+					yearList = append(yearList, d)
+				} else if len(d) == 7 {
+					monthList = append(monthList, d)
+				} else if len(d) == 10 {
+					validDates = append(validDates, d)
+				}
+			}
+			var dateConds []string
+			if len(validDates) > 0 {
+				dateConds = append(dateConds, fmt.Sprintf("(e.timestamp::date = ANY($%d::date[]))", nextArg))
+				args = append(args, validDates)
+				nextArg++
+			}
+			for _, y := range yearList {
+				dateConds = append(dateConds, fmt.Sprintf("(e.timestamp >= $%d::date AND e.timestamp < ($%d::date + INTERVAL '1 year'))", nextArg, nextArg))
+				args = append(args, y+"-01-01")
+				nextArg++
+			}
+			for _, m := range monthList {
+				dateConds = append(dateConds, fmt.Sprintf("(e.timestamp >= $%d::date AND e.timestamp < ($%d::date + INTERVAL '1 month'))", nextArg, nextArg))
+				args = append(args, m+"-01")
+				nextArg++
+			}
+			if hasNullDate {
+				dateConds = append(dateConds, "(e.timestamp IS NULL)")
+			}
+			if len(dateConds) > 0 {
+				whereClauses = append(whereClauses, fmt.Sprintf("(%s)", strings.Join(dateConds, " OR ")))
+			}
+		}
+	}
+
+	whereSQL = strings.Join(whereClauses, " AND ")
+	return
+}
+
+// HandleGetHeatmapVectorTile serwuje kafelki wektorowe MVT dla natywnej warstwy WebGL Heatmap w MapLibre GL.
+// Punkty zawierają precyzyjne wagi 'weight' oraz 'count', zapewniając sprzętowy rendering 60 FPS w natywnej rozdzielczości 4K/Retina.
+func (s *Service) HandleGetHeatmapVectorTile(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	token := r.URL.Query().Get("token")
+	authHeader := r.Header.Get("Authorization")
+	userID := auth.GetAuthUserID(ctx, s.pool, token, authHeader)
+
+	if userID == "" {
+		w.Header().Set("Content-Type", "application/vnd.mapbox-vector-tile")
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	z, errZ := strconv.Atoi(chi.URLParam(r, "z"))
+	x, errX := strconv.Atoi(chi.URLParam(r, "x"))
+	y, errY := strconv.Atoi(chi.URLParam(r, "y"))
+	if errZ != nil || errX != nil || errY != nil || z < 0 || x < 0 || y < 0 {
+		http.Error(w, "invalid tile coords", http.StatusBadRequest)
+		return
+	}
+
+	snapped := r.URL.Query().Get("snapped") == "true"
+	activeGeom := "e.geom"
+	if snapped {
+		activeGeom = "COALESCE(e.geom_snapped, e.geom)"
+	}
+
+	profileID := strings.TrimSpace(r.URL.Query().Get("profile_id"))
+	days := strings.TrimSpace(r.URL.Query().Get("days"))
+	filterStops := r.URL.Query().Get("filter_stops") != "false" && r.URL.Query().Get("mode") != "dwell"
+	cacheKey := fmt.Sprintf("heat_mvt:%s:%s:%d:%d:%d:%s:%t", userID, profileID, z, x, y, days, filterStops)
+
+	if cached, ok := s.cache.Get(cacheKey); ok {
+		w.Header().Set("Content-Type", "application/vnd.mapbox-vector-tile")
+		w.Header().Set("Cache-Control", "private, max-age=600")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(cached)
+		return
+	}
+
+	whereSQL, queryArgs := s.buildHeatmapQueryConditions(r, userID, 4)
+	args := append([]interface{}{z, x, y}, queryArgs...)
+
+	var sqlQuery string
+	gridDiv := 64.0
+	if z >= 14 {
+		gridDiv = 128.0
+	}
+
+	sqlQuery = fmt.Sprintf(`
+		WITH bounds AS (
+			SELECT ST_TileEnvelope($1, $2, $3) AS geom
+		),
+		grid AS (
+			SELECT (ST_XMax(bounds.geom) - ST_XMin(bounds.geom)) / %f AS sz
+			FROM bounds
+		),
+		agg AS (
+			SELECT
+				ST_Centroid(ST_Collect(ST_Transform(%s, 3857))) AS geom_pt,
+				COUNT(*)::int AS cnt,
+				COUNT(DISTINCT date_trunc('hour', COALESCE(e.timestamp, '2000-01-01'::timestamptz)))::int AS weight
+			FROM epochs e, bounds, grid
+			WHERE %s
+			  AND %s && ST_Transform(bounds.geom, 4326)
+			GROUP BY ST_SnapToGrid(ST_Transform(%s, 3857), grid.sz)
+		),
+		tile_features AS (
+			SELECT
+				cnt AS count,
+				weight,
+				ST_AsMVTGeom(geom_pt, bounds.geom, 4096, 256, TRUE) AS geom
+			FROM agg, bounds
+			WHERE geom_pt IS NOT NULL
+		)
+		SELECT COALESCE(ST_AsMVT(tile_features, 'heatmap', 4096, 'geom'), ''::bytea)
+		FROM tile_features
+		WHERE geom IS NOT NULL;
+	`, gridDiv, activeGeom, whereSQL, activeGeom, activeGeom)
+
+	var tileBytes []byte
+	err := s.pool.QueryRow(ctx, sqlQuery, args...).Scan(&tileBytes)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/vnd.mapbox-vector-tile")
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	s.cache.Set(cacheKey, tileBytes)
+	w.Header().Set("Content-Type", "application/vnd.mapbox-vector-tile")
+	w.Header().Set("Cache-Control", "private, max-age=600")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(tileBytes)
+}
+
 // HandleGetHeatmapTile generuje kafelek rastrowy PNG (256x256) dla podanego (z, x, y).
-// Dla każdego piksela (lub bloku pikseli) zlicza punkty znajdujące się między jego lewym dolnym a prawym górnym rogiem.
+// Zawiera wygładzanie jądrowe (KDE) i znormalizowaną skalę barwną, eliminując pikselozę i fałszywe hotspoty.
 func (s *Service) HandleGetHeatmapTile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	token := r.URL.Query().Get("token")
@@ -104,16 +407,7 @@ func (s *Service) HandleGetHeatmapTile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	const tileSize = 256
-	// Rozdzielczość siatki pikseli wewnątrz kafelka (np. 64x64 lub 128x128 bloków na kafelek 256x256 dla czytelności i wydajności)
-	gridRes := 64
-	if z >= 15 {
-		gridRes = 128
-	}
-	if pxStr := r.URL.Query().Get("res"); pxStr != "" {
-		if v, err := strconv.Atoi(pxStr); err == nil && (v == 32 || v == 64 || v == 128 || v == 256) {
-			gridRes = v
-		}
-	}
+	const gridRes = 128
 
 	img := image.NewNRGBA(image.Rect(0, 0, tileSize, tileSize))
 	if userID == "" {
@@ -121,35 +415,39 @@ func (s *Service) HandleGetHeatmapTile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	minLon, minLat, maxLon, maxLat := tileBounds4326(z, x, y)
 	profileID := strings.TrimSpace(r.URL.Query().Get("profile_id"))
-	snapped := r.URL.Query().Get("snapped") == "true"
+	days := strings.TrimSpace(r.URL.Query().Get("days"))
+	filterStops := r.URL.Query().Get("filter_stops") != "false" && r.URL.Query().Get("mode") != "dwell"
+	cacheKey := fmt.Sprintf("heat_png:%s:%s:%d:%d:%d:%s:%t", userID, profileID, z, x, y, days, filterStops)
 
+	if cached, ok := s.cache.Get(cacheKey); ok {
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Cache-Control", "private, max-age=600")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(cached)
+		return
+	}
+
+	minLon, minLat, maxLon, maxLat := tileBounds4326(z, x, y)
+	snapped := r.URL.Query().Get("snapped") == "true"
 	activeGeom := "e.geom"
 	if snapped {
 		activeGeom = "COALESCE(e.geom_snapped, e.geom)"
 	}
 
-	var whereProfile string
-	args := []interface{}{minLon, maxLon, minLat, maxLat, gridRes}
-	if profileID != "" && profileID != "all" && profileID != "__all__" && len(profileID) == 36 {
-		whereProfile = "e.profile_id = $6::uuid AND e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = $7::uuid)"
-		args = append(args, profileID, userID)
-	} else {
-		whereProfile = "e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = $6::uuid)"
-		args = append(args, userID)
-	}
+	whereSQL, queryArgs := s.buildHeatmapQueryConditions(r, userID, 6)
+	args := append([]interface{}{minLon, maxLon, minLat, maxLat, gridRes}, queryArgs...)
 
 	query := fmt.Sprintf(`
 		SELECT
 			width_bucket(ST_X(%s), $1, $2, $5) AS bx,
 			width_bucket(ST_Y(%s), $3, $4, $5) AS by,
-			count(*) AS cnt
+			COUNT(DISTINCT date_trunc('hour', COALESCE(e.timestamp, '2000-01-01'::timestamptz)))::int AS cnt
 		FROM epochs e
 		WHERE %s
 		  AND %s && ST_MakeEnvelope($1, $3, $2, $4, 4326)
 		GROUP BY bx, by;
-	`, activeGeom, activeGeom, whereProfile, activeGeom)
+	`, activeGeom, activeGeom, whereSQL, activeGeom)
 
 	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -158,53 +456,138 @@ func (s *Service) HandleGetHeatmapTile(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	type cellCount struct {
-		bx, by int
-		cnt    int64
-	}
-	var cells []cellCount
+	var grid [gridRes][gridRes]float64
 	var maxCnt int64
 	for rows.Next() {
-		var c cellCount
-		if err := rows.Scan(&c.bx, &c.by, &c.cnt); err == nil {
-			if c.bx >= 1 && c.bx <= gridRes && c.by >= 1 && c.by <= gridRes && c.cnt > 0 {
-				cells = append(cells, c)
-				if c.cnt > maxCnt {
-					maxCnt = c.cnt
+		var bx, by int
+		var cnt int64
+		if err := rows.Scan(&bx, &by, &cnt); err == nil {
+			if bx >= 1 && bx <= gridRes && by >= 1 && by <= gridRes && cnt > 0 {
+				grid[by-1][bx-1] = float64(cnt)
+				if cnt > maxCnt {
+					maxCnt = cnt
 				}
 			}
 		}
 	}
 
-	// Jeśli przekazano global_max z frontendu, użyjmy go dla spójnej skali między kafelkami
+	// Stała, stabilna skala absolutna dla spójności i wyeliminowania skakania barw między kafelkami:
+	// 1 przejazd: subtelny chłodny błękit/szmaragd
+	// 2-4 przejazdy: soczysta zieleń
+	// 6-10 przejazdów: ciepły bursztyn/żółć
+	// 12-18 przejazdów: pomarańcz
+	// 20+ przejazdów: nasycona czerwień (główne trasy i autostrady)
+	effectiveMax := 20.0
 	if gMaxStr := r.URL.Query().Get("max_count"); gMaxStr != "" {
-		if gm, err := strconv.ParseInt(gMaxStr, 10, 64); err == nil && gm > maxCnt {
-			maxCnt = gm
+		if gm, err := strconv.ParseFloat(gMaxStr, 64); err == nil && gm > 0 {
+			effectiveMax = gm
 		}
 	}
 
-	scale := tileSize / gridRes
-	if scale < 1 {
-		scale = 1
+	// Filtr splotowy wygładzania jądrowego (Gaussian 3x3) eliminujący schodkową pikselozę
+	var smoothed [gridRes][gridRes]float64
+	for gy := 0; gy < gridRes; gy++ {
+		for gx := 0; gx < gridRes; gx++ {
+			c := grid[gy][gx]
+			if c == 0 {
+				// Sprawdzamy sąsiadów
+				var sum float64
+				var weightSum float64
+				for dy := -1; dy <= 1; dy++ {
+					ny := gy + dy
+					if ny < 0 || ny >= gridRes {
+						continue
+					}
+					for dx := -1; dx <= 1; dx++ {
+						nx := gx + dx
+						if nx < 0 || nx >= gridRes {
+							continue
+						}
+						w := 1.0
+						if dx == 0 || dy == 0 {
+							w = 2.0
+						}
+						sum += grid[ny][nx] * w
+						weightSum += w
+					}
+				}
+				if sum > 0 {
+					smoothed[gy][gx] = sum / weightSum
+				}
+			} else {
+				// Waga centralna 4.0, krzyż 2.0, przekątne 1.0
+				var sum float64
+				var weightSum float64
+				for dy := -1; dy <= 1; dy++ {
+					ny := gy + dy
+					if ny < 0 || ny >= gridRes {
+						continue
+					}
+					for dx := -1; dx <= 1; dx++ {
+						nx := gx + dx
+						if nx < 0 || nx >= gridRes {
+							continue
+						}
+						w := 1.0
+						if dx == 0 && dy == 0 {
+							w = 4.0
+						} else if dx == 0 || dy == 0 {
+							w = 2.0
+						}
+						sum += grid[ny][nx] * w
+						weightSum += w
+					}
+				}
+				smoothed[gy][gx] = sum / weightSum
+			}
+		}
 	}
 
-	for _, c := range cells {
-		col := heatmapColorForCount(c.cnt, maxCnt)
-		px0 := (c.bx - 1) * scale
-		// Oś Y obrazu rośnie w dół (północ na górze, południe na dole)
-		py0 := (gridRes - c.by) * scale
-		for dy := 0; dy < scale; dy++ {
-			for dx := 0; dx < scale; dx++ {
-				px := px0 + dx
-				py := py0 + dy
-				if px >= 0 && px < tileSize && py >= 0 && py < tileSize {
+	// Renderowanie rastra 256x256 z interpolacją dwuliniową
+	ratio := float64(gridRes) / float64(tileSize)
+	for py := 0; py < tileSize; py++ {
+		gyFloat := float64(tileSize-1-py) * ratio
+		gy0 := int(gyFloat)
+		gy1 := gy0 + 1
+		if gy1 >= gridRes {
+			gy1 = gridRes - 1
+		}
+		fy := gyFloat - float64(gy0)
+
+		for px := 0; px < tileSize; px++ {
+			gxFloat := float64(px) * ratio
+			gx0 := int(gxFloat)
+			gx1 := gx0 + 1
+			if gx1 >= gridRes {
+				gx1 = gridRes - 1
+			}
+			fx := gxFloat - float64(gx0)
+
+			// Interpolacja dwuliniowa wartości zagęszczenia
+			val00 := smoothed[gy0][gx0]
+			val10 := smoothed[gy0][gx1]
+			val01 := smoothed[gy1][gx0]
+			val11 := smoothed[gy1][gx1]
+			val := (1-fx)*(1-fy)*val00 + fx*(1-fy)*val10 + (1-fx)*fy*val01 + fx*fy*val11
+
+			if val > 0.02 {
+				col := heatmapColorForDensity(val, effectiveMax)
+				if col.A > 0 {
 					img.SetNRGBA(px, py, col)
 				}
 			}
 		}
 	}
 
-	writePNG(w, img)
+	var buf bytes.Buffer
+	_ = png.Encode(&buf, img)
+	bytesData := buf.Bytes()
+	s.cache.Set(cacheKey, bytesData)
+
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "private, max-age=600")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(bytesData)
 }
 
 func writePNG(w http.ResponseWriter, img image.Image) {
@@ -252,22 +635,14 @@ func (s *Service) HandleGetHeatmapGrid(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	profileID := strings.TrimSpace(q.Get("profile_id"))
 	snapped := q.Get("snapped") == "true"
 	activeGeom := "e.geom"
 	if snapped {
 		activeGeom = "COALESCE(e.geom_snapped, e.geom)"
 	}
 
-	var whereProfile string
-	args := []interface{}{minLon, maxLon, minLat, maxLat, cols, rowsCount}
-	if profileID != "" && profileID != "all" && profileID != "__all__" && len(profileID) == 36 {
-		whereProfile = "e.profile_id = $7::uuid AND e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = $8::uuid)"
-		args = append(args, profileID, userID)
-	} else {
-		whereProfile = "e.profile_id IN (SELECT profile_id FROM profiles WHERE user_id = $7::uuid)"
-		args = append(args, userID)
-	}
+	whereSQL, queryArgs := s.buildHeatmapQueryConditions(r, userID, 7)
+	args := append([]interface{}{minLon, maxLon, minLat, maxLat, cols, rowsCount}, queryArgs...)
 
 	query := fmt.Sprintf(`
 		SELECT
@@ -278,7 +653,7 @@ func (s *Service) HandleGetHeatmapGrid(w http.ResponseWriter, r *http.Request) {
 		WHERE %s
 		  AND %s && ST_MakeEnvelope($1, $3, $2, $4, 4326)
 		GROUP BY bx, by;
-	`, activeGeom, activeGeom, whereProfile, activeGeom)
+	`, activeGeom, activeGeom, whereSQL, activeGeom)
 
 	dbRows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -418,6 +793,171 @@ func ComputeDeterministicSquareTriangle(lat, lon float64) (key string, coords []
 	return key, coords, areaM2
 }
 
+// BlockTriangle reprezentuje trójkątną działkę przypisaną do otaczającej ulicy.
+type BlockTriangle struct {
+	Index       int          `json:"index"`
+	RoadSegment [][2]float64 `json:"road_segment"` // Odcinek otaczającej ulicy: [pA, pB]
+	Triangle    [][2]float64 `json:"triangle"`     // Zamknięty wielokąt trójkąta: [pA, pB, Apex, pA]
+	AreaM2      float64      `json:"area_m2"`
+}
+
+// TriangulateBlockParcel dzieli dowolny kwartał otoczony ulicami (w tym wielokąty 4-, 8-boczne
+// oraz działki wklęsłe / w kształcie litery U) na trójkąty przypisane do poszczególnych ulic.
+// Każda otaczająca ulica otrzymuje dokładnie 1 trójkąt parceli skierowany do wnętrza działki.
+// Dla działek w kształcie litery U stosowany jest wierzchołek wewnętrzny wyznaczony wzdłuż normalnej
+// do wnętrza ramienia kwartału, co gwarantuje, że trójkąt nigdy nie wychodzi poza obrys działki
+// ani nie przecina wcięcia litery U.
+func TriangulateBlockParcel(ring [][2]float64) []BlockTriangle {
+	if len(ring) < 3 {
+		return nil
+	}
+	// Usunięcie domykającego punktu, jeśli występuje
+	pts := make([][2]float64, 0, len(ring))
+	for i, p := range ring {
+		if i == len(ring)-1 && len(ring) > 3 && math.Abs(p[0]-ring[0][0]) < 1e-9 && math.Abs(p[1]-ring[0][1]) < 1e-9 {
+			continue
+		}
+		pts = append(pts, p)
+	}
+	n := len(pts)
+	if n < 3 {
+		return nil
+	}
+
+	// Wyznaczenie pola ze znakiem (Shoelace) i ewentualne odwrócenie do orientacji CCW (przeciwnie do ruchu wskazówek zegara)
+	var signedArea float64
+	for i := 0; i < n; i++ {
+		j := (i + 1) % n
+		signedArea += (pts[i][0] * pts[j][1]) - (pts[j][0] * pts[i][1])
+	}
+	if signedArea < 0 {
+		// Odwracamy do CCW
+		for i, j := 0, n-1; i < j; i, j = i+1, j-1 {
+			pts[i], pts[j] = pts[j], pts[i]
+		}
+	}
+
+	// Środek ciężkości (centroid)
+	var cx, cy float64
+	for _, p := range pts {
+		cx += p[0]
+		cy += p[1]
+	}
+	cx /= float64(n)
+	cy /= float64(n)
+	centroid := [2]float64{cx, cy}
+
+	centroidInside := isPointInPolygon(centroid, pts)
+
+	var result []BlockTriangle
+	for i := 0; i < n; i++ {
+		j := (i + 1) % n
+		pA := pts[i]
+		pB := pts[j]
+
+		edgeVecX := pB[0] - pA[0]
+		edgeVecY := pB[1] - pA[1]
+		edgeLen := math.Hypot(edgeVecX, edgeVecY)
+		if edgeLen < 1e-9 {
+			continue
+		}
+
+		// Dla orientacji CCW wektor normalny skierowany do wnętrza wielokąta: (-dy, dx)
+		nx := -edgeVecY / edgeLen
+		ny := edgeVecX / edgeLen
+
+		midX := (pA[0] + pB[0]) * 0.5
+		midY := (pA[1] + pB[1]) * 0.5
+		mid := [2]float64{midX, midY}
+
+		// Sprawdzamy czy centroid jest widoczny i czy trójkąt do centroidu leży wewnątrz
+		useCentroid := centroidInside
+		if useCentroid {
+			testMidToC := [2]float64{(midX + cx) * 0.5, (midY + cy) * 0.5}
+			if !isPointInPolygon(testMidToC, pts) {
+				useCentroid = false
+			}
+		}
+
+		var apex [2]float64
+		if useCentroid {
+			apex = centroid
+		} else {
+			// Obsługa działek wklęsłych / w kształcie litery U:
+			// Wystrzeliwujemy promień z mid w kierunku normalnej wewnętrznej (nx, ny)
+			// i znajdujemy pierwsze przecięcie z przeciwległą krawędzią wielokąta
+			minDist := 1e9
+			for k := 0; k < n; k++ {
+				if k == i {
+					continue
+				}
+				l := (k + 1) % n
+				qA := pts[k]
+				qB := pts[l]
+				if hit, dist := raySegmentIntersection(mid, [2]float64{nx, ny}, qA, qB); hit && dist > 1e-6 && dist < minDist {
+					minDist = dist
+				}
+			}
+			if minDist > 1e8 {
+				minDist = edgeLen * 0.5
+			}
+			// Wierzchołek w połowie odległości do przeciwległej ściany ramienia litery U
+			h := minDist * 0.5
+			apex = [2]float64{midX + nx*h, midY + ny*h}
+		}
+
+		triCoords := [][2]float64{pA, pB, apex, pA}
+		areaM2, _, _ := ComputeDrawingMetrics("polygon", [][2]float64{pA, pB, apex})
+
+		result = append(result, BlockTriangle{
+			Index:       i + 1,
+			RoadSegment: [][2]float64{pA, pB},
+			Triangle:    triCoords,
+			AreaM2:      areaM2,
+		})
+	}
+
+	return result
+}
+
+func isPointInPolygon(pt [2]float64, poly [][2]float64) bool {
+	n := len(poly)
+	inside := false
+	for i := 0; i < n; i++ {
+		j := (i + 1) % n
+		xi, yi := poly[i][0], poly[i][1]
+		xj, yj := poly[j][0], poly[j][1]
+		intersect := ((yi > pt[1]) != (yj > pt[1])) &&
+			(pt[0] < (xj-xi)*(pt[1]-yi)/(yj-yi)+xi)
+		if intersect {
+			inside = !inside
+		}
+	}
+	return inside
+}
+
+func raySegmentIntersection(rayOrigin, rayDir, segA, segB [2]float64) (bool, float64) {
+	v1x := rayOrigin[0] - segA[0]
+	v1y := rayOrigin[1] - segA[1]
+	v2x := segB[0] - segA[0]
+	v2y := segB[1] - segA[1]
+	v3x := -rayDir[1]
+	v3y := rayDir[0]
+
+	dot := v2x*v3x + v2y*v3y
+	if math.Abs(dot) < 1e-9 {
+		return false, 0
+	}
+
+	t1 := (v2x*v1y - v2y*v1x) / dot
+	t2 := (v1x*v3x + v1y*v3y) / dot
+
+	if t1 >= 0 && t2 >= 0 && t2 <= 1 {
+		return true, t1
+	}
+	return false, 0
+}
+
 // HandleGetFogOfWar zwraca stan odkrywania mapy (zasłaniające trójkąty mgły na nieodkrytych działkach,
 // znikające po przejechaniu przyległej drogi) wraz ze statystykami odkrytego obszaru.
 func (s *Service) HandleGetFogOfWar(w http.ResponseWriter, r *http.Request) {
@@ -455,23 +995,55 @@ func (s *Service) HandleGetFogOfWar(w http.ResponseWriter, r *http.Request) {
 			p3, e3 := strconv.ParseFloat(strings.TrimSpace(parts[3]), 64)
 			if e0 == nil && e1 == nil && e2 == nil && e3 == nil {
 				minLon, minLat, maxLon, maxLat = p0, p1, p2, p3
-				hasBbox = true
+				// Jeśli bbox jest zbyt duży (np. całe województwo przy dużym oddaleniu mapy),
+				// nie wysyłamy tysięcy mikroskopijnych działek, które dławią WebGL w przeglądarce.
+				if (maxLon-minLon) <= 0.35 && (maxLat-minLat) <= 0.25 {
+					hasBbox = true
+				}
 			}
 		}
 	}
 
-	var features []map[string]interface{}
+	var fogMaskObj interface{}
+	var discoveredFeatures []map[string]interface{}
+
 	if hasBbox {
-		// Pobieramy nieodwiedzone trójkątne działki w widocznym oknie mapy (zasłaniające mgłą nieodkryty teren)
+		// 1. Wyznaczamy maskę białej chmury (cały kadr z wyciętymi otworami na odkryte działki)
 		qArgs := append([]interface{}{minLon, minLat, maxLon, maxLat}, args...)
 		shiftedWhere := strings.ReplaceAll(whereProfile, "$1", "$5")
 		shiftedWhere = strings.ReplaceAll(shiftedWhere, "$2", "$6")
 
-		unvisitedQuery := fmt.Sprintf(`
+		maskQuery := fmt.Sprintf(`
+			WITH disc AS (
+			  SELECT fp.parcel_geom
+			  FROM fog_parcels fp
+			  WHERE fp.parcel_geom && ST_MakeEnvelope($1, $2, $3, $4, 4326)
+			    AND EXISTS (
+			      SELECT 1 FROM epochs e
+			      WHERE %s
+			        AND e.geom && fp.road_geom
+			        AND ST_DWithin(fp.road_geom, e.geom, 0.00045)
+			    )
+			),
+			env AS (
+			  SELECT ST_MakeEnvelope($1, $2, $3, $4, 4326) AS b
+			)
+			SELECT ST_AsGeoJSON(ST_Difference(env.b, COALESCE(ST_Union(disc.parcel_geom), ST_SetSRID('GEOMETRYCOLLECTION EMPTY'::geometry, 4326))))::text
+			FROM env LEFT JOIN disc ON true
+			GROUP BY env.b;
+		`, shiftedWhere)
+
+		var maskGeoJSONStr string
+		if err := s.pool.QueryRow(ctx, maskQuery, qArgs...).Scan(&maskGeoJSONStr); err == nil && maskGeoJSONStr != "" {
+			_ = json.Unmarshal([]byte(maskGeoJSONStr), &fogMaskObj)
+		}
+
+		// 2. Pobieramy odkryte działki (do wyrysowania przezroczystych obszarów z wyraźnymi granicami działek)
+		discQuery := fmt.Sprintf(`
 			SELECT fp.parcel_id, ST_AsGeoJSON(fp.parcel_geom)::text, fp.area_m2
 			FROM fog_parcels fp
 			WHERE fp.parcel_geom && ST_MakeEnvelope($1, $2, $3, $4, 4326)
-			  AND NOT EXISTS (
+			  AND EXISTS (
 			    SELECT 1 FROM epochs e
 			    WHERE %s
 			      AND e.geom && fp.road_geom
@@ -480,7 +1052,7 @@ func (s *Service) HandleGetFogOfWar(w http.ResponseWriter, r *http.Request) {
 			LIMIT 3500;
 		`, shiftedWhere)
 
-		pRows, err := s.pool.Query(ctx, unvisitedQuery, qArgs...)
+		pRows, err := s.pool.Query(ctx, discQuery, qArgs...)
 		if err == nil {
 			defer pRows.Close()
 			for pRows.Next() {
@@ -490,7 +1062,7 @@ func (s *Service) HandleGetFogOfWar(w http.ResponseWriter, r *http.Request) {
 				if err := pRows.Scan(&pid, &geoStr, &area); err == nil {
 					var geomObj map[string]interface{}
 					if json.Unmarshal([]byte(geoStr), &geomObj) == nil {
-						features = append(features, map[string]interface{}{
+						discoveredFeatures = append(discoveredFeatures, map[string]interface{}{
 							"type":     "Feature",
 							"geometry": geomObj,
 							"properties": map[string]interface{}{
@@ -518,15 +1090,17 @@ func (s *Service) HandleGetFogOfWar(w http.ResponseWriter, r *http.Request) {
 	`, whereProfile)
 	_ = s.pool.QueryRow(ctx, statQuery, args...).Scan(&discCount, &discAreaKM2)
 
-	if features == nil {
-		features = []map[string]interface{}{}
+	if discoveredFeatures == nil {
+		discoveredFeatures = []map[string]interface{}{}
 	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"discovered_count":    discCount,
 		"discovered_area_km2": discAreaKM2,
-		"parcels":             features,
+		"fog_mask":            fogMaskObj,
+		"discovered_parcels":  discoveredFeatures,
+		"parcels":             discoveredFeatures,
 	})
 }
 

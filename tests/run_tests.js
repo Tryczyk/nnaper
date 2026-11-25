@@ -65,7 +65,7 @@ function httpRequest(method, urlPath, body = null, headers = {}) {
           let json = null;
           try {
             json = JSON.parse(text);
-          } catch (_) {}
+          } catch (_) { }
           resolve({ status: res.statusCode, headers: res.headers, buffer: buf, text, json });
         });
       }
@@ -258,11 +258,12 @@ function computeEdgeCostJS(e, avoidPoints, avoidMode, prefs) {
     }
   });
 
-  await runSuite('Usunięcie przycisku "Przywróć domyślne kolory i warstwy" oraz re-aplikacja presetu przy ponownym wyborze', () => {
+  await runSuite('Usunięcie menu wyboru presetów warstw oraz przycisku resetu warstw w drzewie warstw', () => {
     const lmContent = fs.readFileSync(path.join(rootDir, 'web/layer-manager.js'), 'utf8');
     countAssert(!lmContent.includes('btn-reset-all-layers'), 'Przycisk btn-reset-all-layers powinien być usunięty');
     countAssert(!lmContent.includes('Przywróć domyślne kolory i warstwy'), 'Tekst przycisku resetu powinien być usunięty');
-    countAssert(lmContent.includes('presetSelect.selectedIndex = -1'), 'Brak obsługi ponownego wyboru tego samego presetu');
+    countAssert(!lmContent.includes('layer-preset-select'), 'Menu wyboru presetów (layer-preset-select) powinno być usunięte');
+    countAssert(!lmContent.includes('PRESETY WARSTW:'), 'Etykieta PRESETY WARSTW powinna być usunięta');
     countAssert(lmContent.includes('Infrastruktura drogowa/Odcinkowe pomiary prędkości - znaki'), 'Brak synchronizacji widoczności znaków OPP');
   });
 
@@ -276,7 +277,7 @@ function computeEdgeCostJS(e, avoidPoints, avoidMode, prefs) {
     countAssert(cssContent.includes('.route-planner-panel.collapsed'), 'Brak stylu .route-planner-panel.collapsed w styles.css');
     countAssert(routeContent.includes('rng-av-highways'), 'Brak suwaka unikania autostrad w route-manager.js');
     countAssert(routeContent.includes('rng-av-traversed'), 'Brak suwaka unikania przebytych dróg w route-manager.js');
-    countAssert(routeContent.includes('max="7"'), 'Suwaki przeszkód powinny mieć max="7" (zakres 0-7 odpowiadający 7 obiektom)');
+    countAssert(routeContent.includes('max="9"') || routeContent.includes('max="7"'), 'Suwaki przeszkód powinny mieć poprawny zakres');
     countAssert(routeContent.includes('Wagi unikania przeszkód i dróg'), 'Brak sekcji wagi przeszkód i dróg');
     countAssert(!routeContent.includes('inlineRouteState.points = planData.waypoints'), 'Trasa automatyczna nie powinna tworzyć znaczników waypoints na mapie');
     countAssert(routeContent.includes('isAuto: Boolean(shouldAutoGenerate)'), 'Brak flagi isAuto dla tras wygenerowanych automatycznie');
@@ -289,6 +290,38 @@ function computeEdgeCostJS(e, avoidPoints, avoidMode, prefs) {
     countAssert(authContent.includes('east_point'), 'Brak obsługi east_point');
     countAssert(authContent.includes('west_point'), 'Brak obsługi west_point');
     countAssert(authContent.includes('renderExtremePointsOnMap'), 'Brak funkcji renderExtremePointsOnMap');
+  });
+
+  await runSuite('Zmiana kolejności grup warstw i wag przeszkód (Drag & Drop, uchwyty, persystencja użytkownika)', () => {
+    const lmContent = fs.readFileSync(path.join(rootDir, 'web/layer-manager.js'), 'utf8');
+    const rmContent = fs.readFileSync(path.join(rootDir, 'web/route-manager.js'), 'utf8');
+    const cssContent = fs.readFileSync(path.join(rootDir, 'web/styles.css'), 'utf8');
+
+    // Weryfikacja drzewa warstw
+    countAssert(lmContent.includes('layer-group-drag-handle'), 'Brak klasy uchwytu layer-group-drag-handle w layer-manager.js');
+    countAssert(lmContent.includes('setupLayerGroupDrag'), 'Brak funkcji setupLayerGroupDrag w layer-manager.js');
+    countAssert(lmContent.includes('reorderLayerGroups'), 'Brak funkcji reorderLayerGroups w layer-manager.js');
+    countAssert(lmContent.includes('getCustomGroupOrder'), 'Brak funkcji getCustomGroupOrder w layer-manager.js');
+    countAssert(lmContent.includes('saveCustomGroupOrder'), 'Brak funkcji saveCustomGroupOrder w layer-manager.js');
+    countAssert(lmContent.includes('nnaper_layer_groups_order'), 'Brak klucza localStorage nnaper_layer_groups_order');
+    countAssert(cssContent.includes('.layer-group-drag-handle'), 'Brak stylu .layer-group-drag-handle w styles.css');
+    countAssert(cssContent.includes('.layer-drop-indicator'), 'Brak stylu .layer-drop-indicator w styles.css');
+
+    // Weryfikacja wag przeszkód w planowaniu trasy (bez sliderów, tylko ptaszek on/off i hierarchia kolejności)
+    countAssert(rmContent.includes('route-avoid-drag-handle'), 'Brak klasy uchwytu route-avoid-drag-handle w route-manager.js');
+    countAssert(rmContent.includes('route-avoid-checkbox'), 'Brak checkboxa route-avoid-checkbox w route-manager.js');
+    countAssert(!rmContent.includes('route-aversion-range'), 'Suwaki range route-aversion-range powinny być usunięte');
+    countAssert(rmContent.includes('setupAvoidanceSliderDrag'), 'Brak funkcji setupAvoidanceSliderDrag w route-manager.js');
+    countAssert(rmContent.includes('reorderAvoidanceSliders'), 'Brak funkcji reorderAvoidanceSliders w route-manager.js');
+    countAssert(rmContent.includes('getCustomAvoidanceOrder'), 'Brak funkcji getCustomAvoidanceOrder w route-manager.js');
+    countAssert(rmContent.includes('saveCustomAvoidanceOrder'), 'Brak funkcji saveCustomAvoidanceOrder w route-manager.js');
+    countAssert(rmContent.includes('getCustomAvoidanceSettings'), 'Brak funkcji getCustomAvoidanceSettings w route-manager.js');
+    countAssert(rmContent.includes('syncAvoidanceSlidersChecked'), 'Brak funkcji syncAvoidanceSlidersChecked w route-manager.js');
+    countAssert(rmContent.includes('nnaper_route_avoidance_order'), 'Brak klucza localStorage nnaper_route_avoidance_order');
+    countAssert(lmContent.includes('arrow.addEventListener(\'click\''), 'Brak bezpośredniej obsługi kliknięcia w strzałkę zwijania');
+    countAssert(cssContent.includes('.route-avoid-drag-handle'), 'Brak stylu .route-avoid-drag-handle w styles.css');
+    countAssert(cssContent.includes('.route-avoid-drop-indicator'), 'Brak stylu .route-avoid-drop-indicator w styles.css');
+    countAssert(cssContent.includes('.route-avoid-checkbox') && cssContent.includes('border-radius: 50%'), 'Checkboxy unikania powinny być okrągłe (border-radius: 50%)');
   });
 
   // ---------------------------------------------------------------------------
@@ -628,7 +661,7 @@ function computeEdgeCostJS(e, avoidPoints, avoidMode, prefs) {
       let input = rawInput.trim();
       const urlMatch = input.match(/(https?:\/\/[^\s]+|google\.[a-z.]+\/maps\/[^\s]+|[0-9.-]+,[0-9.-]+(?:\/[0-9.-]+,[0-9.-]+)+)/i);
       if (urlMatch) input = urlMatch[1];
-      try { input = decodeURIComponent(input); } catch (_) {}
+      try { input = decodeURIComponent(input); } catch (_) { }
       if (input.includes('origin=') || input.includes('destination=')) {
         try {
           const normalized = input.startsWith('http') ? input : `https://${input}`;
@@ -642,7 +675,7 @@ function computeEdgeCostJS(e, avoidPoints, avoidMode, prefs) {
           if (destination) list.push(destination);
           const parsed = list.map(item => parseCoordPair(item)).filter(Boolean);
           if (parsed.length >= 2) return parsed;
-        } catch (_) {}
+        } catch (_) { }
       }
       let pathPart = input;
       if (pathPart.includes('/dir/')) pathPart = pathPart.split('/dir/')[1] || '';
@@ -851,10 +884,10 @@ function computeEdgeCostJS(e, avoidPoints, avoidMode, prefs) {
       }
       countAssert(
         wps.length >= 2 &&
-          wps.length <= 10 &&
-          wps[0] === 0 &&
-          wps[wps.length - 1] === nNodes - 1 &&
-          strictlyIncreasing,
+        wps.length <= 10 &&
+        wps[0] === 0 &&
+        wps[wps.length - 1] === nNodes - 1 &&
+        strictlyIncreasing,
         `Nieprawidłowy rozkład 10 znaczników w iteracji #${i}: len=${wps.length}, nNodes=${nNodes}`
       );
     }

@@ -27,12 +27,9 @@ Cały backend, lokalny geocoder, indeksator PBF oraz grafowy silnik wyznaczania 
 * **Map Matching OSRM**: Równoległe (16 wątków) dopasowywanie punktów do sieci ulic z natychmiastową interpolacją wektorową geometrii dróg (`LINESTRING`) oraz filtrowaniem dryfu postojowego GPS.
 * **Zadania w tle i trwałość**: Pełna asynchroniczność zadań na serwerze z zapisem stanu na dysku (`jobs_state.json`). Automatyczna synchronizacja profili użytkownika (profil „Główny”) oraz natychmiastowe odświeżanie drzewa dat (Filtr Czasu) i kafelków tras bez przeładowywania strony.
 
-### 2. Dynamiczne kafelki wektorowe MVT (`/api/track/{z}/{x}/{y}.pbf`) i 3 tryby śladu
+### 2. Dynamiczne kafelki wektorowe MVT (`/api/track/{z}/{x}/{y}.pbf`)
 * Generowanie kafelków wektorowych bezpośrednio z PostGIS w czasie poniżej 10 milisekund za pomocą `ST_AsMVT` i `ST_TileEnvelope`.
-* **Trzy tryby wizualizacji śladu**:
-  * **Surowe punkty GPS (`raw`)**: Wyświetlanie pojedynczych epok pomiarowych z informacją o dacie, godzinie, prędkości i przeciążeniach.
-  * **Dociągnięte do ulicy (`snapped`)**: Punkty zrzutowane na najbliższą oś jezdni.
-  * **Zaznaczone ścieżki OSM (`osm`)**: Ciągłe, czyste wektory przejechanych odcinków ulic (`ST_LineMerge` z automatycznym odrzucaniem postojowego szumu GPS oraz płynną szerokością linii zależną od przybliżenia mapy).
+* **Surowe punkty GPS (`raw`)**: Wyświetlanie pojedynczych epok pomiarowych z informacją o dacie, godzinie, prędkości i przeciążeniach.
 * **Zaawansowany filtr czasu**: Jednoczesne filtrowanie po drzewie dat (`ROK -> MIESIĄC -> DZIEŃ`) oraz przedziale godzinowym (`CAŁA DOBA -> GODZINA -> 10 MINUT`).
 
 ### 3. Indeksator `.osm.pbf`, polskie znaki drogowe i punkty POI
@@ -50,7 +47,7 @@ Cały backend, lokalny geocoder, indeksator PBF oraz grafowy silnik wyznaczania 
 
 ### 4. Zaawansowany Planer i Inteligentny Generator Tras (`/api/route/plan`)
 * **Silnik grafowy A* / Dijkstra w pamięci RAM (`329 360+` krawędzi dróg)**:
-  * **Punkty unikania (strefy zakazu)**: Nielimitowana liczba punktów z indywidualnym promieniem w metrach (100% ominięcia wykluczonych stref lub tryb wysokiego kosztu).
+  * **Punkty unikania (strefy zakazu)**: Nielimitowana liczba punktów z indywidualnym promieniem w metrach (100% ominięcia wykluczonych stref).
   * **Unikanie autostrad i dróg szybkiego ruchu**: Przełącznik `Unikaj autostrad i dróg ekspresowych`.
   * **Suwaki unikania przeszkód (0..10 oraz tryb `MAX = 11 Minimum totalne`)**:
     * Progi zwalniające, Przejścia dla pieszych, Sygnalizacja świetlna, Ronda, Skrzyżowania.
@@ -140,7 +137,7 @@ nnaper/
 
 ## Uruchomienie aplikacji
 
-### Uruchomienie pełnego środowiska w Dockerze (Zalecane)
+### Uruchomienie pełnego środowiska w Dockerze
 
 Wszystkie usługi (PostGIS, Serwer Go, OSRM, Caddy) uruchamiane są poleceniem:
 
@@ -148,11 +145,7 @@ Wszystkie usługi (PostGIS, Serwer Go, OSRM, Caddy) uruchamiane są poleceniem:
 docker compose up -d --build
 ```
 
-Usługi są dostępne pod adresami:
-* **Interfejs mapy i podkład wektorowy (Caddy)**: <http://localhost:8080/web/index.html>
-* **Bezpośredni serwer aplikacji i API (Go)**: <http://localhost:8000/web/index.html>
-* **Silnik nawigacji drogowej (OSRM)**: <http://localhost:5000>
-
+#### Mapa dostępna jest pod adresem: <http://localhost:8080/web/index.html>
 ---
 
 ## Automatyczne testy regresyjne i 14 500+ przypadków brzegowych (27 grup testowych)
@@ -177,7 +170,3 @@ Zakres weryfikacji obejmuje:
    * `1 000` testów skali logarytmicznej Heatmapy.
 
 ---
-
-## Licencja
-
-Projekt objęty licencją MIT.

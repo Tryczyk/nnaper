@@ -19,19 +19,20 @@
   <div id="menu" class="collapsed">
     <button id="btn-toggle-menu" class="menu-toggle-handle" title="Rozwiń wybierak warstw"
       aria-label="Rozwiń wybierak warstw">
-      <svg class="toggle-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      <svg class="toggle-icon menu-chevron-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
         stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
         <polyline points="15 18 9 12 15 6"></polyline>
+      </svg>
+      <svg class="toggle-icon menu-close-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+        stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="18" y1="6" x2="6" y2="18"></line>
+        <line x1="6" y1="6" x2="18" y2="18"></line>
       </svg>
     </button>
     <div class="menu-header">
       <div style="display: flex; align-items: center; gap: 8px;">
         <img src="../assets/icon.svg" alt="NNAPER" style="width: 24px; height: 24px; object-fit: contain;" />
         <h3 style="margin: 0;">Sterowanie Warstwami</h3>
-      </div>
-      <div class="panel-actions">
-        <button class="action-btn" id="btn-back-location" title="Wróć do poprzedniego widoku">←</button>
-        <button class="action-btn" id="btn-close-location" title="Zamknij lokalizację">&times;</button>
       </div>
     </div>
 
@@ -72,7 +73,8 @@
               Wróć do listy warstw</button>
             <span class="style-studio-title">Stylizacja Mapy</span>
           </div>
-          <button type="button" id="btn-exit-style-studio" class="action-btn" title="Zamknij panel stylizacji i wróć do mapy" aria-label="Zamknij stylizację">&times;</button>
+          <button type="button" id="btn-exit-style-studio" class="action-btn"
+            title="Zamknij panel stylizacji i wróć do mapy" aria-label="Zamknij stylizację">&times;</button>
         </div>
 
         <div class="style-studio-body">
@@ -104,7 +106,7 @@
                 <span>Widoczna</span>
               </label>
             </div>
-            <div id="studio-layer-display-name" class="studio-layer-name">Przyroda / Lasy</div>
+            <div id="studio-layer-display-name" class="studio-layer-name">Drogi / Autostrady i ekspresówki</div>
           </div>
 
           <!-- Kontrolki właściwości warstwy -->
@@ -472,22 +474,17 @@
   </div>
 
   <div id="route-planner-panel" class="route-planner-panel" aria-hidden="true">
-    <button id="btn-toggle-route-planner" class="menu-toggle-handle route-planner-toggle-handle" type="button"
-      title="Zwiń panel planowania trasy" aria-label="Zwiń panel planowania trasy">
-      <svg class="toggle-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+    <button id="btn-toggle-route-planner" class="menu-toggle-handle route-planner-close-handle" type="button"
+      title="Zamknij planowanie trasy" aria-label="Zamknij planowanie trasy">
+      <svg class="toggle-icon route-close-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
         stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-        <polyline points="15 18 9 12 15 6"></polyline>
+        <line x1="18" y1="6" x2="6" y2="18"></line>
+        <line x1="6" y1="6" x2="18" y2="18"></line>
       </svg>
     </button>
     <div class="route-planner-scroll-body">
       <div class="route-planner-header">
         <h3>Planowanie trasy</h3>
-        <div style="display: flex; gap: 4px;">
-          <button class="route-action-btn route-planner-back-original" id="btn-route-back-to-original"
-            title="Wróć do pierwotnej lokalizacji" aria-label="Wróć do pierwotnej lokalizacji">←</button>
-          <button class="route-action-btn route-planner-close" id="btn-route-close" title="Zamknij planowanie trasy"
-            aria-label="Zamknij planowanie trasy">&times;</button>
-        </div>
       </div>
       <div id="inline-route-context-menu" class="inline-route-context-menu">
         <button id="inline-context-stop">Dodaj punkt trasy</button>
@@ -815,383 +812,406 @@
           zaimportować trasy na swoje konto.
         </div>
 
-        <!-- Wybór profilu docelowego dla wgrywanych śladów -->
-        <div class="parser-profile-box" id="parser-profile-box">
-          <div class="parser-profile-head">
-            <span class="parser-profile-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-                stroke="#38bdf8" stroke-width="2">
-                <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
-                <line x1="7" y1="7" x2="7.01" y2="7"></line>
-              </svg></span>
-            <div class="parser-profile-title-wrap">
-              <strong class="parser-profile-title">Profil docelowy dla importowanych
-                śladów:</strong>
-              <div class="parser-profile-sub">Wybierz, do którego profilu przypisać
-                wgrywane pliki (np. Samochodowy, Rowerowy, Lotniczy, Do biegu):</div>
-            </div>
-          </div>
-          <div class="parser-profile-actions">
-            <select id="parser-target-profile-select" class="parser-profile-select" title="Wybierz profil docelowy">
-              <option value="">Wczytywanie profili...</option>
-            </select>
-            <button type="button" id="btn-parser-new-profile" class="parser-btn-new-profile"
-              title="Dodaj nowy profil dla tych tras">
-              Nowy profil
-            </button>
-          </div>
-        </div>
-
-        <!-- Strefa Drag & Drop -->
-        <div id="parser-dropzone" class="parser-dropzone">
-          <div class="dropzone-icon"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#38bdf8"
-              stroke-width="1.8">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-              <polyline points="17 8 12 3 7 8"></polyline>
-              <line x1="12" y1="3" x2="12" y2="15"></line>
-            </svg></div>
-          <div class="dropzone-title">Przeciągnij i upuść pliki lub foldery tutaj</div>
-          <div class="dropzone-desc">
-            Obsługiwane formaty: <code>.txt</code>, <code>.log</code>, <code>.nmea</code>
-            (pełna telemetria NMEA + czujniki G + satelity), <code>.gpx</code>,
-            <code>.csv</code> (współrzędne tras)
-          </div>
-          <div class="dropzone-actions">
-            <button type="button" id="btn-choose-files" class="parser-action-btn">
-              Wybierz pliki
-            </button>
-            <button type="button" id="btn-choose-folder" class="parser-action-btn">
-              Wybierz cały folder
-            </button>
-            <input type="file" id="parser-file-input" multiple accept=".txt,.log,.nmea,.gpx,.csv,text/*"
-              style="display: none;" />
-            <input type="file" id="parser-folder-input" webkitdirectory directory multiple style="display: none;" />
-          </div>
-        </div>
-
-        <!-- Filtry telemetryczne NMEA / GPS (konfigurowalne z zalecanymi wartościami) -->
-        <details id="parser-filters-details" class="parser-filters-details" open>
-          <summary class="parser-filters-summary">
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"
-                stroke-linecap="round" stroke-linejoin="round">
-                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
-              </svg>
-              <strong>Wybór filtrów jakości parsowania NMEA / GPS</strong>
-            </div>
-            <span style="font-size: 11px; color: #38bdf8; font-weight: normal;">Dostosuj parametry odrzucania błędnych
-              punktów</span>
-          </summary>
-          <div class="parser-filters-body">
-            <div
-              style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px; padding: 8px 12px; background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 6px;">
-              <label for="flt-preset-select"
-                style="font-weight: 600; color: #38bdf8; font-size: 12px; white-space: nowrap;">Szybki profil
-                wybieraków:</label>
-              <select id="flt-preset-select" class="parser-filter-input" style="flex: 1; font-weight: 600;">
-                <option value="recommended" selected>Samochodowy (Zalecany: min 4 sat., HDOP ≤ 5.0, v ≤ 250 km/h)</option>
-                <option value="bicycle">Rowerowy / Pieszy (Czuły GPS: min 4 sat., HDOP ≤ 4.0, v ≤ 50 km/h)</option>
-                <option value="aviation">Lotniczy / Dron (Szybki i wysoki: min 5 sat., HDOP ≤ 3.5, v ≤ 900 km/h)</option>
-                <option value="strict">Ścisły / Geodezyjny (Precyzyjny: min 6 sat., HDOP ≤ 2.5, v ≤ 180 km/h)</option>
-                <option value="none">Brak filtrów (Wszystkie wybieraki OFF – surowe punkty)</option>
-                <option value="custom">Własny (ręczna konfiguracja parametrów poniżej)</option>
-              </select>
-            </div>
-            <div class="parser-filters-grid">
-              <!-- Karta 1: Jakość Fix (GGA Quality) -->
-              <div class="parser-filter-card active" id="card-flt-fix-quality">
-                <div class="parser-filter-header">
-                  <label class="parser-filter-title" for="flt-enable-fix-quality">
-                    <span>Jakość Fix (GGA)</span>
-                  </label>
-                  <label class="parser-toggle-label" title="Włącz lub wyłącz filtrowanie po typie Fixa">
-                    <input type="checkbox" id="flt-enable-fix-quality" checked />
-                    <span class="parser-toggle-slider"></span>
-                  </label>
-                </div>
-                <select id="flt-min-fix-quality" class="parser-filter-input">
-                  <option value="1" selected>Fix ≥ 1: GPS SPS (Zalecane)</option>
-                  <option value="0">Fix ≥ 0: Dowolny (w tym brak fixa)</option>
-                  <option value="2">Fix ≥ 2: DGPS (poprawki)</option>
-                  <option value="4">Fix = 4: RTK (wysoka precyzja)</option>
-                </select>
-              </div>
-
-              <!-- Karta 2: Minimalna liczba satelitów -->
-              <div class="parser-filter-card active" id="card-flt-satellites">
-                <div class="parser-filter-header">
-                  <label class="parser-filter-title" for="flt-enable-satellites">
-                    <span>Min. liczba satelitów</span>
-                  </label>
-                  <label class="parser-toggle-label" title="Włącz lub wyłącz odrzucanie punktów ze zbyt małą liczbą satelitów">
-                    <input type="checkbox" id="flt-enable-satellites" checked />
-                    <span class="parser-toggle-slider"></span>
-                  </label>
-                </div>
-                <input type="number" id="flt-min-satellites" class="parser-filter-input" min="0" max="32" step="1"
-                  value="4" title="Minimalna liczba widocznych satelitów" />
-              </div>
-
-              <!-- Karta 3: Maksymalny błąd poziomy HDOP -->
-              <div class="parser-filter-card active" id="card-flt-hdop">
-                <div class="parser-filter-header">
-                  <label class="parser-filter-title" for="flt-enable-hdop">
-                    <span>Maks. błąd poziomy HDOP</span>
-                  </label>
-                  <label class="parser-toggle-label" title="Włącz lub wyłącz filtrowanie po błędzie poziomym HDOP">
-                    <input type="checkbox" id="flt-enable-hdop" checked />
-                    <span class="parser-toggle-slider"></span>
-                  </label>
-                </div>
-                <input type="number" id="flt-max-hdop" class="parser-filter-input" min="0.1" max="50" step="0.5"
-                  value="5.0" title="Maksymalny błąd precyzji poziomej HDOP" />
-              </div>
-
-              <!-- Karta 4: Maksymalny błąd przestrzenny PDOP -->
-              <div class="parser-filter-card active" id="card-flt-pdop">
-                <div class="parser-filter-header">
-                  <label class="parser-filter-title" for="flt-enable-pdop">
-                    <span>Maks. błąd przestrzenny PDOP</span>
-                  </label>
-                  <label class="parser-toggle-label" title="Włącz lub wyłącz filtrowanie po błędzie przestrzennym PDOP">
-                    <input type="checkbox" id="flt-enable-pdop" checked />
-                    <span class="parser-toggle-slider"></span>
-                  </label>
-                </div>
-                <input type="number" id="flt-max-pdop" class="parser-filter-input" min="0.1" max="50" step="0.5"
-                  value="6.0" title="Maksymalny błąd precyzji przestrzennej PDOP" />
-              </div>
-
-              <!-- Karta 5: Maksymalna dopuszczalna prędkość -->
-              <div class="parser-filter-card active" id="card-flt-speed">
-                <div class="parser-filter-header">
-                  <label class="parser-filter-title" for="flt-enable-max-speed">
-                    <span>Maks. prędkość (km/h)</span>
-                  </label>
-                  <label class="parser-toggle-label" title="Włącz lub wyłącz odcinanie teleportacji i nierealistycznych prędkości">
-                    <input type="checkbox" id="flt-enable-max-speed" checked />
-                    <span class="parser-toggle-slider"></span>
-                  </label>
-                </div>
-                <input type="number" id="flt-max-speed" class="parser-filter-input" min="5" max="1500" step="5"
-                  value="250" title="Maksymalna prędkość pojazdu w km/h" />
-              </div>
-
-              <!-- Karta 6: Zakres dopuszczalnej wysokości n.p.m. -->
-              <div class="parser-filter-card active" id="card-flt-altitude">
-                <div class="parser-filter-header">
-                  <label class="parser-filter-title" for="flt-enable-altitude">
-                    <span>Wysokość n.p.m. (metry)</span>
-                  </label>
-                  <label class="parser-toggle-label" title="Włącz lub wyłącz odrzucanie punktów poza zakresem wysokości">
-                    <input type="checkbox" id="flt-enable-altitude" checked />
-                    <span class="parser-toggle-slider"></span>
-                  </label>
-                </div>
-                <div class="parser-filter-range">
-                  <input type="number" id="flt-min-altitude" class="parser-filter-input" min="-500" max="9000" step="10"
-                    value="-50" placeholder="Min" title="Minimalna dopuszczalna wysokość w metrach" />
-                  <span class="parser-range-sep">—</span>
-                  <input type="number" id="flt-max-altitude" class="parser-filter-input" min="0" max="9000" step="50"
-                    value="5000" placeholder="Maks" title="Maksymalna dopuszczalna wysokość w metrach" />
+        <div class="parser-modal-columns">
+          <!-- Kolumna lewa: Informacja o formacie i kolumnach CSV -->
+          <div class="parser-col-csv">
+            <div id="parser-csv-info-card" class="parser-csv-info-card">
+              <div class="csv-info-header">
+                <div class="csv-info-title">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                    <polyline points="10 9 9 9 8 9"></polyline>
+                  </svg>
+                  <strong>Format i kolumny CSV</strong>
                 </div>
               </div>
-
-              <!-- Karta 7: Weryfikacja statusu RMC -->
-              <div class="parser-filter-card active" id="card-flt-rmc">
-                <div class="parser-filter-header">
-                  <label class="parser-filter-title" for="flt-require-rmc-valid">
-                    <span>Weryfikacja RMC (Active 'A')</span>
-                  </label>
-                  <label class="parser-toggle-label" title="Odrzucaj punkty ze statusem Void ('V')">
-                    <input type="checkbox" id="flt-require-rmc-valid" checked />
-                    <span class="parser-toggle-slider"></span>
-                  </label>
+              <div class="csv-info-body">
+                <p class="csv-info-lead">
+                  Pierwszy wiersz pliku CSV musi zawierać nazwy kolumn. Rozdzielnikiem może
+                  być przecinek (<code>,</code>) lub średnik (<code>;</code>):
+                </p>
+                <div class="csv-cols-table">
+                  <div class="csv-col-row">
+                    <div class="csv-col-name"><strong>Szerokość (Lat)</strong> <span class="tag-req">wymagana</span>
+                    </div>
+                    <div class="csv-col-desc">Kolumna: <code>lat</code>,
+                      <code>latitude</code>, <code>szerokosc</code> lub <code>y</code>
+                    </div>
+                  </div>
+                  <div class="csv-col-row">
+                    <div class="csv-col-name"><strong>Długość (Lon)</strong> <span class="tag-req">wymagana</span></div>
+                    <div class="csv-col-desc">Kolumna: <code>lon</code>,
+                      <code>lng</code>, <code>longitude</code>, <code>dlugosc</code> lub
+                      <code>x</code>
+                    </div>
+                  </div>
+                  <div class="csv-col-row">
+                    <div class="csv-col-name"><strong>Czas / Data</strong> <span class="tag-opt">opcjonalna</span></div>
+                    <div class="csv-col-desc">Kolumna: <code>time</code>,
+                      <code>timestamp</code>, <code>datetime</code>, <code>czas</code> lub
+                      <code>data</code>
+                    </div>
+                  </div>
+                  <div class="csv-col-row">
+                    <div class="csv-col-name"><strong>Wysokość (Alt)</strong> <span class="tag-opt">opcjonalna</span>
+                    </div>
+                    <div class="csv-col-desc">Kolumna: <code>alt</code>,
+                      <code>altitude</code>, <code>ele</code>, <code>elevation</code>, <code>wysokosc</code> lub
+                      <code>h</code> (metry n.p.m.)
+                    </div>
+                  </div>
+                  <div class="csv-col-row">
+                    <div class="csv-col-name"><strong>Przeciążenia X, Y, Z</strong> <span
+                        class="tag-opt">opcjonalna</span>
+                    </div>
+                    <div class="csv-col-desc">Kolumny: <code>g_x</code> (lub <code>gx</code>,
+                      <code>accel_x</code>), <code>g_y</code> (lub <code>gy</code>),
+                      <code>g_z</code> (lub <code>gz</code>)
+                    </div>
+                  </div>
                 </div>
-                <div style="font-size: 11px; color: #94a3b8; line-height: 1.3; padding: 4px 0 2px;">
-                  Ignoruje pakiety z niepewną pozycją oznaczane przez odbiornik GPS jako Void.
-                </div>
-              </div>
-            </div>
-            <div style="display: flex; justify-content: flex-end; margin-top: 8px;">
-              <button type="button" id="btn-flt-reset-defaults" class="parser-btn-reset-filters">
-                Przywróć zalecane wartości
-              </button>
-            </div>
-          </div>
-        </details>
-
-        <!-- Karta ze specyfikacją i formatowaniem CSV na stałe -->
-        <div id="parser-csv-info-card" class="parser-csv-info-card">
-          <div class="csv-info-header">
-            <div class="csv-info-title">
-              <strong>Wymagany format i kolumny plików CSV</strong>
-            </div>
-          </div>
-          <div class="csv-info-body">
-            <p class="csv-info-lead">
-              Pierwszy wiersz pliku CSV musi zawierać nazwy kolumn. Rozdzielnikiem może
-              być przecinek (<code>,</code>) lub średnik (<code>;</code>):
-            </p>
-            <div class="csv-cols-table">
-              <div class="csv-col-row">
-                <div class="csv-col-name"><strong>Szerokość (Lat)</strong> <span class="tag-req">wymagana</span></div>
-                <div class="csv-col-desc">Kolumna o nazwie: <code>lat</code>,
-                  <code>latitude</code>, <code>szerokosc</code> lub <code>y</code>
-                </div>
-              </div>
-              <div class="csv-col-row">
-                <div class="csv-col-name"><strong>Długość (Lon)</strong> <span class="tag-req">wymagana</span></div>
-                <div class="csv-col-desc">Kolumna o nazwie: <code>lon</code>,
-                  <code>lng</code>, <code>longitude</code>, <code>dlugosc</code> lub
-                  <code>x</code>
-                </div>
-              </div>
-              <div class="csv-col-row">
-                <div class="csv-col-name"><strong>Czas / Data</strong> <span class="tag-opt">opcjonalna</span></div>
-                <div class="csv-col-desc">Kolumna o nazwie: <code>time</code>,
-                  <code>timestamp</code>, <code>datetime</code>, <code>czas</code> lub
-                  <code>data</code> (np. <code>2026-05-10 14:32:00</code>)
-                </div>
-              </div>
-              <div class="csv-col-row">
-                <div class="csv-col-name"><strong>Wysokość (Alt / Elevation)</strong> <span
-                    class="tag-opt">opcjonalna</span></div>
-                <div class="csv-col-desc">Kolumna o nazwie: <code>alt</code>,
-                  <code>altitude</code>, <code>ele</code>, <code>elevation</code>, <code>wysokosc</code> lub
-                  <code>h</code> (w metrach n.p.m.)
-                </div>
-              </div>
-              <div class="csv-col-row">
-                <div class="csv-col-name"><strong>Przeciążenia X, Y, Z</strong> <span class="tag-opt">opcjonalna</span>
-                </div>
-                <div class="csv-col-desc">Kolumny: <code>g_x</code> (lub <code>gx</code>,
-                  <code>accel_x</code>), <code>g_y</code> (lub <code>gy</code>),
-                  <code>g_z</code> (lub <code>gz</code>)
-                </div>
-              </div>
-            </div>
-            <div class="csv-example-container">
-              <div class="csv-example-head">Przykład poprawnego pliku CSV:</div>
-              <pre class="csv-example-code">timestamp,latitude,longitude,altitude,g_x,g_y,g_z
+                <div class="csv-example-container">
+                  <div class="csv-example-head">Przykład pliku CSV:</div>
+                  <pre class="csv-example-code">timestamp,latitude,longitude,altitude,g_x,g_y,g_z
 2026-05-10 14:32:00,52.2297,21.0122,125.4,0.02,0.08,-0.99
 2026-05-10 14:32:01,52.2299,21.0126,126.1,0.05,0.12,-0.98</pre>
-              <div class="csv-example-tip">
-                <strong>Wskazówka:</strong> Wartości dziesiętne mogą używać zarówno
-                kropki (np. <code>52.2297</code>), jak i przecinka (np.
-                <code>52,2297</code>).
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Okno potwierdzenia ponownego parsowania duplikatów -->
-        <div id="parser-duplicates-prompt" class="parser-duplicates-prompt" style="display: none;">
-          <div class="dup-prompt-header">
-            <span class="dup-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f59e0b"
-                stroke-width="2">
-                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z">
-                </path>
-                <line x1="12" y1="9" x2="12" y2="13"></line>
-                <line x1="12" y1="17" x2="12.01" y2="17"></line>
-              </svg></span>
-            <div>
-              <div class="dup-title">Wykryto pliki przetworzone już wcześniej</div>
-              <div class="dup-subtitle">Poniższe pliki zostały już pomyślnie zaimportowane
-                na Twoje konto w przeszłości:</div>
-            </div>
-          </div>
-          <div id="parser-duplicates-list" class="dup-list"></div>
-          <div class="dup-question">Czy na pewno chcesz ponownie parsować te pliki?</div>
-          <div class="dup-actions">
-            <button type="button" id="btn-dup-skip" class="dup-btn-primary">
-              Pomiń już sparsowane (zalecane)
-            </button>
-            <button type="button" id="btn-dup-reparse" class="dup-btn-secondary">
-              Parsuj wszystkie ponownie
-            </button>
-            <button type="button" id="btn-dup-cancel" class="dup-btn-tertiary">
-              Anuluj
-            </button>
-          </div>
-        </div>
-
-
-
-        <!-- Kolejka wybranych plików -->
-        <div id="parser-queue-section" style="display: none;">
-          <div class="queue-header">
-            <span id="queue-count-badge" class="queue-count-badge">0 plików (0 KB)</span>
-            <button type="button" id="btn-clear-queue" class="btn-clear-queue">Wyczyść
-              listę</button>
-          </div>
-          <div id="parser-file-list" class="parser-file-list"></div>
-        </div>
-
-        <!-- Sekcja postępu głównego (widoczna w trakcie i po parsowaniu) -->
-        <div id="parser-progress-section" class="parser-progress-section" style="display: none;">
-          <div class="progress-info-row">
-            <span id="parser-current-stage" class="parser-current-stage">Przygotowywanie...</span>
-            <span id="parser-overall-percent" class="parser-overall-percent">0%</span>
-          </div>
-
-          <div class="export-progress-bar parser-progress-bar" title="Całkowity postęp kolejki plików">
-            <div id="parser-overall-fill" class="export-progress-fill parser-progress-fill" style="width: 0%;"></div>
-          </div>
-
-          <!-- Pasek postępu bieżącego pliku / transferu -->
-          <div class="active-file-progress-box">
-            <div class="active-file-row">
-              <span id="parser-active-file-name" class="active-file-name">Bieżący
-                plik...</span>
-              <span id="parser-active-file-pct" class="active-file-pct">0%</span>
-            </div>
-            <div class="export-progress-bar parser-active-bar">
-              <div id="parser-active-fill" class="parser-active-fill" style="width: 0%;">
+                  <div class="csv-example-tip">
+                    <strong>Wskazówka:</strong> Wartości dziesiętne mogą używać zarówno
+                    kropki (np. <code>52.2297</code>), jak i przecinka (np.
+                    <code>52,2297</code>).
+                  </div>
+                </div>
               </div>
             </div>
           </div>
 
-          <div class="parser-metrics-grid">
-            <div class="metric-pill">
-              <span class="metric-label">Pliki:</span>
-              <strong id="metric-files-progress">0 / 0</strong>
+          <!-- Kolumna środkowa: Menu wgrywania (Profil, Dropzone, Duplikaty, Kolejka, Postęp, Sukces) -->
+          <div class="parser-col-center">
+            <!-- Wybór profilu docelowego dla wgrywanych śladów -->
+            <div class="parser-profile-box" id="parser-profile-box">
+              <div class="parser-profile-head">
+                <span class="parser-profile-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                    stroke="#38bdf8" stroke-width="2">
+                    <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
+                    <line x1="7" y1="7" x2="7.01" y2="7"></line>
+                  </svg></span>
+                <div class="parser-profile-title-wrap">
+                  <strong class="parser-profile-title">Profil docelowy dla importowanych
+                    śladów:</strong>
+                  <div class="parser-profile-sub">Wybierz profil (np. Samochodowy, Rowerowy, Lotniczy):</div>
+                </div>
+              </div>
+              <div class="parser-profile-actions">
+                <select id="parser-target-profile-select" class="parser-profile-select" title="Wybierz profil docelowy">
+                  <option value="">Wczytywanie profili...</option>
+                </select>
+                <button type="button" id="btn-parser-new-profile" class="parser-btn-new-profile"
+                  title="Dodaj nowy profil dla tych tras">
+                  Nowy profil
+                </button>
+              </div>
             </div>
-            <div class="metric-pill">
-              <span class="metric-label">Upłynęło:</span>
-              <strong id="metric-elapsed-time">00:00</strong>
+
+            <!-- Strefa Drag & Drop -->
+            <div id="parser-dropzone" class="parser-dropzone">
+              <div class="dropzone-icon"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#38bdf8"
+                  stroke-width="1.8">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="17 8 12 3 7 8"></polyline>
+                  <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg></div>
+              <div class="dropzone-title">Przeciągnij i upuść pliki lub foldery tutaj</div>
+              <div class="dropzone-desc">
+                Obsługiwane formaty: <code>.txt</code>, <code>.log</code>, <code>.nmea</code>
+                (pełna telemetria NMEA + czujniki G + satelity), <code>.gpx</code>,
+                <code>.csv</code> (współrzędne tras)
+              </div>
+              <div class="dropzone-actions">
+                <button type="button" id="btn-choose-files" class="parser-action-btn">
+                  Wybierz pliki
+                </button>
+                <button type="button" id="btn-choose-folder" class="parser-action-btn">
+                  Wybierz cały folder
+                </button>
+                <input type="file" id="parser-file-input" multiple accept=".txt,.log,.nmea,.gpx,.csv,text/*"
+                  style="display: none;" />
+                <input type="file" id="parser-folder-input" webkitdirectory directory multiple style="display: none;" />
+              </div>
             </div>
-            <div class="metric-pill metric-pill-highlight">
-              <span class="metric-label">Pozostało (ETA):</span>
-              <strong id="metric-eta-time">--:--</strong>
+
+            <!-- Okno potwierdzenia ponownego parsowania duplikatów -->
+            <div id="parser-duplicates-prompt" class="parser-duplicates-prompt" style="display: none;">
+              <div class="dup-prompt-header">
+                <span class="dup-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f59e0b"
+                    stroke-width="2">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z">
+                    </path>
+                    <line x1="12" y1="9" x2="12" y2="13"></line>
+                    <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                  </svg></span>
+                <div>
+                  <div class="dup-title">Wykryto pliki przetworzone już wcześniej</div>
+                  <div class="dup-subtitle">Poniższe pliki zostały już pomyślnie zaimportowane
+                    na Twoje konto w przeszłości:</div>
+                </div>
+              </div>
+              <div id="parser-duplicates-list" class="dup-list"></div>
+              <div class="dup-question">Czy na pewno chcesz ponownie parsować te pliki?</div>
+              <div class="dup-actions">
+                <button type="button" id="btn-dup-skip" class="dup-btn-primary">
+                  Pomiń już sparsowane (zalecane)
+                </button>
+                <button type="button" id="btn-dup-reparse" class="dup-btn-secondary">
+                  Parsuj wszystkie ponownie
+                </button>
+                <button type="button" id="btn-dup-cancel" class="dup-btn-tertiary">
+                  Anuluj
+                </button>
+              </div>
             </div>
-            <div class="metric-pill">
-              <span class="metric-label">Prędkość:</span>
-              <strong id="metric-speed">-- MB/s</strong>
+
+            <!-- Kolejka wybranych plików -->
+            <div id="parser-queue-section" style="display: none;">
+              <div class="queue-header">
+                <span id="queue-count-badge" class="queue-count-badge">0 plików (0 KB)</span>
+                <button type="button" id="btn-clear-queue" class="btn-clear-queue">Wyczyść
+                  listę</button>
+              </div>
+              <div id="parser-file-list" class="parser-file-list"></div>
             </div>
-            <div class="metric-pill">
-              <span class="metric-label">Epoki GPS:</span>
-              <strong id="metric-epochs-count">0</strong>
+
+            <!-- Sekcja postępu głównego (widoczna w trakcie i po parsowaniu) -->
+            <div id="parser-progress-section" class="parser-progress-section" style="display: none;">
+              <div class="progress-info-row">
+                <span id="parser-current-stage" class="parser-current-stage">Przygotowywanie...</span>
+                <span id="parser-overall-percent" class="parser-overall-percent">0%</span>
+              </div>
+
+              <div class="export-progress-bar parser-progress-bar" title="Całkowity postęp kolejki plików">
+                <div id="parser-overall-fill" class="export-progress-fill parser-progress-fill" style="width: 0%;">
+                </div>
+              </div>
+
+              <!-- Pasek postępu bieżącego pliku / transferu -->
+              <div class="active-file-progress-box">
+                <div class="active-file-row">
+                  <span id="parser-active-file-name" class="active-file-name">Bieżący
+                    plik...</span>
+                  <span id="parser-active-file-pct" class="active-file-pct">0%</span>
+                </div>
+                <div class="export-progress-bar parser-active-bar">
+                  <div id="parser-active-fill" class="parser-active-fill" style="width: 0%;">
+                  </div>
+                </div>
+              </div>
+
+              <div class="parser-metrics-grid">
+                <div class="metric-pill">
+                  <span class="metric-label">Pliki:</span>
+                  <strong id="metric-files-progress">0 / 0</strong>
+                </div>
+                <div class="metric-pill">
+                  <span class="metric-label">Upłynęło:</span>
+                  <strong id="metric-elapsed-time">00:00</strong>
+                </div>
+                <div class="metric-pill metric-pill-highlight">
+                  <span class="metric-label">Pozostało (ETA):</span>
+                  <strong id="metric-eta-time">--:--</strong>
+                </div>
+                <div class="metric-pill">
+                  <span class="metric-label">Prędkość:</span>
+                  <strong id="metric-speed">-- MB/s</strong>
+                </div>
+                <div class="metric-pill">
+                  <span class="metric-label">Epoki GPS:</span>
+                  <strong id="metric-epochs-count">0</strong>
+                </div>
+                <div class="metric-pill">
+                  <span class="metric-label" id="metric-data-label">Dane:</span>
+                  <strong id="metric-data-progress">0.0 / 0.0 MB</strong>
+                </div>
+              </div>
             </div>
-            <div class="metric-pill">
-              <span class="metric-label" id="metric-data-label">Dane:</span>
-              <strong id="metric-data-progress">0.0 / 0.0 MB</strong>
+
+            <!-- Sukces / Podsumowanie -->
+            <div id="parser-success-box" class="parser-success-box" style="display: none;">
+              <div class="success-icon"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#22c55e"
+                  stroke-width="2.5">
+                  <polyline points="20 6 9 17 4 12"></polyline>
+                </svg></div>
+              <div class="success-title">Parsowanie zakończone sukcesem!</div>
+              <div id="parser-success-details" class="success-details">
+                Wszystkie pliki zostały przetworzone. Nowe ślady GPS zostały pomyślnie dodane
+                do bazy danych.
+              </div>
+            </div>
+          </div>
+
+          <!-- Kolumna prawa: Filtry telemetryczne NMEA / GPS (po prawo od menu) -->
+          <div class="parser-col-filters">
+            <div id="parser-filters-details" class="parser-filters-details">
+              <div class="parser-filters-header-bar">
+                <div class="parser-filters-title-wrap">
+                  <div class="parser-filters-title">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"
+                      stroke-linecap="round" stroke-linejoin="round">
+                      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+                    </svg>
+                    <strong>Wybór filtrów jakości parsowania NMEA / GPS</strong>
+                  </div>
+                  <div class="parser-filters-sub">Dostosuj parametry odrzucania błędnych punktów</div>
+                </div>
+              </div>
+              <div class="parser-filters-body">
+                <div
+                  style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; padding: 8px 12px; background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 6px;">
+                  <label for="flt-preset-select" style="font-weight: 600; color: #38bdf8; font-size: 12px;">Szybki
+                    profil wybieraków:</label>
+                  <select id="flt-preset-select" class="parser-filter-input" style="width: 100%; font-weight: 600;">
+                    <option value="recommended" selected>Samochodowy (Zalecany: min 4 sat., HDOP ≤ 5.0, v ≤ 250 km/h)
+                    </option>
+                    <option value="bicycle">Rowerowy / Pieszy (Czuły GPS: min 4 sat., HDOP ≤ 4.0, v ≤ 50 km/h)</option>
+                    <option value="aviation">Lotniczy / Dron (Szybki i wysoki: min 5 sat., HDOP ≤ 3.5, v ≤ 900 km/h)
+                    </option>
+                    <option value="strict">Ścisły / Geodezyjny (Precyzyjny: min 6 sat., HDOP ≤ 2.5, v ≤ 180 km/h)
+                    </option>
+                    <option value="none">Brak filtrów (Wszystkie wybieraki OFF – surowe punkty)</option>
+                    <option value="custom">Własny (ręczna konfiguracja parametrów poniżej)</option>
+                  </select>
+                </div>
+                <div class="parser-filters-grid">
+                  <!-- Karta 1: Jakość Fix (GGA Quality) -->
+                  <div class="parser-filter-card active" id="card-flt-fix-quality">
+                    <div class="parser-filter-header">
+                      <label class="parser-filter-title" for="flt-enable-fix-quality">
+                        <span>Jakość Fix (GGA)</span>
+                      </label>
+                      <label class="parser-toggle-label" title="Włącz lub wyłącz filtrowanie po typie Fixa">
+                        <input type="checkbox" id="flt-enable-fix-quality" checked />
+                        <span class="parser-toggle-slider"></span>
+                      </label>
+                    </div>
+                    <select id="flt-min-fix-quality" class="parser-filter-input">
+                      <option value="1" selected>Fix ≥ 1: GPS SPS (Zalecane)</option>
+                      <option value="0">Fix ≥ 0: Dowolny (w tym brak fixa)</option>
+                      <option value="2">Fix ≥ 2: DGPS (poprawki)</option>
+                      <option value="4">Fix = 4: RTK (wysoka precyzja)</option>
+                    </select>
+                  </div>
+
+                  <!-- Karta 2: Minimalna liczba satelitów -->
+                  <div class="parser-filter-card active" id="card-flt-satellites">
+                    <div class="parser-filter-header">
+                      <label class="parser-filter-title" for="flt-enable-satellites">
+                        <span>Min. liczba satelitów</span>
+                      </label>
+                      <label class="parser-toggle-label"
+                        title="Włącz lub wyłącz odrzucanie punktów ze zbyt małą liczbą satelitów">
+                        <input type="checkbox" id="flt-enable-satellites" checked />
+                        <span class="parser-toggle-slider"></span>
+                      </label>
+                    </div>
+                    <input type="number" id="flt-min-satellites" class="parser-filter-input" min="0" max="32" step="1"
+                      value="4" title="Minimalna liczba widocznych satelitów" />
+                  </div>
+
+                  <!-- Karta 3: Maksymalny błąd poziomy HDOP -->
+                  <div class="parser-filter-card active" id="card-flt-hdop">
+                    <div class="parser-filter-header">
+                      <label class="parser-filter-title" for="flt-enable-hdop">
+                        <span>Maks. błąd poziomy HDOP</span>
+                      </label>
+                      <label class="parser-toggle-label" title="Włącz lub wyłącz filtrowanie po błędzie poziomym HDOP">
+                        <input type="checkbox" id="flt-enable-hdop" checked />
+                        <span class="parser-toggle-slider"></span>
+                      </label>
+                    </div>
+                    <input type="number" id="flt-max-hdop" class="parser-filter-input" min="0.1" max="50" step="0.5"
+                      value="5.0" title="Maksymalny błąd precyzji poziomej HDOP" />
+                  </div>
+
+                  <!-- Karta 4: Maksymalny błąd przestrzenny PDOP -->
+                  <div class="parser-filter-card active" id="card-flt-pdop">
+                    <div class="parser-filter-header">
+                      <label class="parser-filter-title" for="flt-enable-pdop">
+                        <span>Maks. błąd przestrzenny PDOP</span>
+                      </label>
+                      <label class="parser-toggle-label"
+                        title="Włącz lub wyłącz filtrowanie po błędzie przestrzennym PDOP">
+                        <input type="checkbox" id="flt-enable-pdop" checked />
+                        <span class="parser-toggle-slider"></span>
+                      </label>
+                    </div>
+                    <input type="number" id="flt-max-pdop" class="parser-filter-input" min="0.1" max="50" step="0.5"
+                      value="6.0" title="Maksymalny błąd precyzji przestrzennej PDOP" />
+                  </div>
+
+                  <!-- Karta 5: Maksymalna dopuszczalna prędkość -->
+                  <div class="parser-filter-card active" id="card-flt-speed">
+                    <div class="parser-filter-header">
+                      <label class="parser-filter-title" for="flt-enable-max-speed">
+                        <span>Maks. prędkość (km/h)</span>
+                      </label>
+                      <label class="parser-toggle-label"
+                        title="Włącz lub wyłącz odcinanie teleportacji i nierealistycznych prędkości">
+                        <input type="checkbox" id="flt-enable-max-speed" checked />
+                        <span class="parser-toggle-slider"></span>
+                      </label>
+                    </div>
+                    <input type="number" id="flt-max-speed" class="parser-filter-input" min="5" max="1500" step="5"
+                      value="250" title="Maksymalna prędkość pojazdu w km/h" />
+                  </div>
+
+                  <!-- Karta 6: Zakres dopuszczalnej wysokości n.p.m. -->
+                  <div class="parser-filter-card active" id="card-flt-altitude">
+                    <div class="parser-filter-header">
+                      <label class="parser-filter-title" for="flt-enable-altitude">
+                        <span>Wysokość n.p.m. (metry)</span>
+                      </label>
+                      <label class="parser-toggle-label"
+                        title="Włącz lub wyłącz odrzucanie punktów poza zakresem wysokości">
+                        <input type="checkbox" id="flt-enable-altitude" checked />
+                        <span class="parser-toggle-slider"></span>
+                      </label>
+                    </div>
+                    <div class="parser-filter-range">
+                      <input type="number" id="flt-min-altitude" class="parser-filter-input" min="-500" max="9000"
+                        step="10" value="-50" placeholder="Min" title="Minimalna dopuszczalna wysokość w metrach" />
+                      <span class="parser-range-sep">—</span>
+                      <input type="number" id="flt-max-altitude" class="parser-filter-input" min="0" max="9000"
+                        step="50" value="5000" placeholder="Maks" title="Maksymalna dopuszczalna wysokość w metrach" />
+                    </div>
+                  </div>
+
+                  <!-- Karta 7: Weryfikacja statusu RMC -->
+                  <div class="parser-filter-card active" id="card-flt-rmc">
+                    <div class="parser-filter-header">
+                      <label class="parser-filter-title" for="flt-require-rmc-valid">
+                        <span>Weryfikacja RMC (Active 'A')</span>
+                      </label>
+                      <label class="parser-toggle-label" title="Odrzucaj punkty ze statusem Void ('V')">
+                        <input type="checkbox" id="flt-require-rmc-valid" checked />
+                        <span class="parser-toggle-slider"></span>
+                      </label>
+                    </div>
+                    <div style="font-size: 11px; color: #94a3b8; line-height: 1.3; padding: 4px 0 2px;">
+                      Ignoruje pakiety z niepewną pozycją oznaczane przez odbiornik GPS jako Void.
+                    </div>
+                  </div>
+                </div>
+                <div style="display: flex; justify-content: flex-end; margin-top: 8px;">
+                  <button type="button" id="btn-flt-reset-defaults" class="parser-btn-reset-filters">
+                    Przywróć zalecane wartości
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
-
-        <!-- Sukces / Podsumowanie -->
-        <div id="parser-success-box" class="parser-success-box" style="display: none;">
-          <div class="success-icon"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#22c55e"
-              stroke-width="2.5">
-              <polyline points="20 6 9 17 4 12"></polyline>
-            </svg></div>
-          <div class="success-title">Parsowanie zakończone sukcesem!</div>
-          <div id="parser-success-details" class="success-details">
-            Wszystkie pliki zostały przetworzone. Nowe ślady GPS zostały pomyślnie dodane
-            do bazy danych.
-          </div>
-        </div>
-
       </div>
 
       <div class="export-footer">

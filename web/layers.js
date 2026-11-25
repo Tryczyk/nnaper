@@ -60,69 +60,15 @@ const MAP_STYLE = {
       id: 'Podkłady/Satelita (Świat - ESRI)',
       source: 'world-satellite-source',
       type: 'raster',
-      layout: { visibility: 'none' },
+      layout: { visibility: 'visible' },
       paint: { 'raster-opacity': 1.0 }
     },
     {
       id: 'Podkłady/Ortofotomapa (Polska - GUGiK)',
       source: 'geoportal-orto-source',
       type: 'raster',
-      layout: { visibility: 'none' },
+      layout: { visibility: 'visible' },
       paint: { 'raster-opacity': 1.0 }
-    },
-    {
-      id: 'Przyroda/Lasy',
-      source: 'pomorskie-tiles',
-      'source-layer': 'landcover',
-      filter: ['==', 'class', 'wood'],
-      type: 'fill',
-      paint: { 'fill-color': '#064e3b', 'fill-opacity': 0.6 }
-    },
-    {
-      id: 'Przyroda/Parki',
-      source: 'pomorskie-tiles',
-      'source-layer': 'park',
-      type: 'fill',
-      paint: { 'fill-color': '#15803d', 'fill-opacity': 0.4 }
-    },
-    {
-      id: 'Przyroda/Trawy',
-      source: 'pomorskie-tiles',
-      'source-layer': 'landcover',
-      filter: ['in', 'class', 'grass', 'scrub'],
-      type: 'fill',
-      paint: { 'fill-color': '#166534', 'fill-opacity': 0.3 }
-    },
-    {
-      id: 'Przyroda/Wydmy i plaże',
-      source: 'pomorskie-tiles',
-      'source-layer': 'landcover',
-      filter: ['==', 'class', 'sand'],
-      type: 'fill',
-      paint: { 'fill-color': '#eab308', 'fill-opacity': 0.3 }
-    },
-    {
-      id: 'Przyroda/Tereny zabudowane',
-      source: 'pomorskie-tiles',
-      'source-layer': 'landuse',
-      filter: ['in', 'class', 'residential', 'commercial', 'industrial'],
-      type: 'fill',
-      paint: { 'fill-color': '#111827', 'fill-opacity': 0.7 }
-    },
-    {
-      id: 'Woda/Morza i jeziora',
-      source: 'pomorskie-tiles',
-      'source-layer': 'water',
-      type: 'fill',
-      paint: { 'fill-color': '#0284c7', 'fill-opacity': 0.85 }
-    },
-    {
-      id: 'Woda/Rzeki i potoki',
-      source: 'pomorskie-tiles',
-      'source-layer': 'waterway',
-      type: 'line',
-      layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint: { 'line-color': '#38bdf8', 'line-width': 1.6 }
     },
     {
       id: 'Drogi/Autostrady i ekspresówki',
@@ -321,14 +267,18 @@ const MAP_STYLE = {
       source: 'osm-infrastructure-source',
       'source-layer': 'osm-infrastructure',
       filter: ['==', 'category', 'speed_bump'],
-      type: 'circle',
+      type: 'symbol',
       minzoom: 13,
+      layout: {
+        'icon-image': 'icon-infra-speed-bump',
+        'icon-size': ['interpolate', ['linear'], ['zoom'], 13, 0.55, 15, 0.8, 17, 1.0, 18, 1.15],
+        'icon-allow-overlap': false,
+        'icon-padding': 1,
+        'icon-pitch-alignment': 'viewport'
+      },
       paint: {
-        'circle-color': '#f59e0b',
-        'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, 3.5, 15, 5.0, 17, 6.5],
-        'circle-stroke-width': 1.5,
-        'circle-stroke-color': '#ffffff',
-        'circle-opacity': 0.95
+        'icon-opacity': 0.98,
+        'text-color': '#f59e0b'
       }
     },
     {
@@ -415,7 +365,10 @@ window.MAP_STYLE = MAP_STYLE;
     <circle cx="30" cy="45.5" r="2.2" fill="#a4f5b8" opacity="0.75"/>
   </svg>`;
 
-  const SVG_A11A_SPEED_BUMP = '/assets/icons/signs/speed-bump.svg';
+  // Znak A-11a / ikona progu zwalniającego z assets/icons/signs/speed-bump.svg
+  const SVG_A11A_SPEED_BUMP = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="64" height="64">
+    <path d="M 14 64 L 30 64 C 38 64, 41 46, 50 46 C 59 46, 62 64, 70 64 L 86 64 A 6 6 0 0 1 86 76 L 14 76 A 6 6 0 0 1 14 64 Z" fill="#F97316" stroke="#ffffff" stroke-width="10" stroke-linejoin="round" paint-order="stroke fill" />
+  </svg>`;
 
   const SVG_D6_CROSSING = `<svg id="D-6" xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
     <rect x="3" y="3" width="58" height="58" rx="14" ry="14" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.5"/>
