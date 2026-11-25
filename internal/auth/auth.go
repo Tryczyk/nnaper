@@ -118,6 +118,18 @@ func AuthMiddleware(pool *pgxpool.Pool, required bool) func(http.Handler) http.H
 	}
 }
 
+func RequireAuth(pool *pgxpool.Pool) func(http.Handler) http.Handler {
+	return AuthMiddleware(pool, true)
+}
+
+func CleanupExpiredSessions(ctx context.Context, pool *pgxpool.Pool) (int64, error) {
+	tag, err := pool.Exec(ctx, `DELETE FROM user_sessions WHERE expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP`)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
 func GetUserFromToken(ctx context.Context, pool *pgxpool.Pool, token string) (*User, error) {
 	if token == "" {
 		return nil, nil
@@ -312,6 +324,16 @@ func RegisterHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			return
 		}
 
+		http.SetCookie(w, &http.Cookie{
+			Name:     "token",
+			Value:    token,
+			Path:     "/",
+			Expires:  time.Now().Add(30 * 24 * time.Hour),
+			MaxAge:   30 * 24 * 3600,
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+		})
+
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"status": "ok",
@@ -370,6 +392,16 @@ func LoginHandler(pool *pgxpool.Pool) http.HandlerFunc {
 			http.Error(w, `{"detail":"Błąd zapisu sesji"}`, http.StatusInternalServerError)
 			return
 		}
+
+		http.SetCookie(w, &http.Cookie{
+			Name:     "token",
+			Value:    token,
+			Path:     "/",
+			Expires:  time.Now().Add(30 * 24 * time.Hour),
+			MaxAge:   30 * 24 * 3600,
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+		})
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -462,6 +494,15 @@ func LogoutHandler(pool *pgxpool.Pool) http.HandlerFunc {
 		if token != "" {
 			_, _ = pool.Exec(r.Context(), `DELETE FROM user_sessions WHERE token = $1`, token)
 		}
+		http.SetCookie(w, &http.Cookie{
+			Name:     "token",
+			Value:    "",
+			Path:     "/",
+			Expires:  time.Unix(0, 0),
+			MaxAge:   -1,
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+		})
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	}
