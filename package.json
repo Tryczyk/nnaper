@@ -1,0 +1,30 @@
+{
+  "name": "nnaper",
+  "version": "1.0.0",
+  "description": "<p align=\"center\">\r   <img src=\"assets/header.svg\" alt=\"NNAPER Header\" width=\"100%\" />\r </p>",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node tests/run_tests.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Tryczyk/nnaper.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Tryczyk/nnaper/issues"
+  },
+  "homepage": "https://github.com/Tryczyk/nnaper#readme",
+  "devDependencies": {
+    "vite": "^8.3.8"
+  }
+}

@@ -35,6 +35,8 @@ osm_data/
 .env
 web/runtime-config.local.js
 .agents/
+node_modules/
+dist/
 
 # Systemowe pliki tymczasowe
 .DS_Store
