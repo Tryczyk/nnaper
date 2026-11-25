@@ -584,7 +584,12 @@ func DeleteProfileHandler(pool *pgxpool.Pool, onDeleted func()) http.HandlerFunc
 		}
 
 		res, err := pool.Exec(ctx, query, args...)
-		if err != nil || res.RowsAffected() == 0 {
+		if err != nil {
+			log.Printf("[DELETE PROFILE ERROR] %v", err)
+			http.Error(w, `{"detail":"Błąd bazy danych podczas usuwania profilu."}`, http.StatusInternalServerError)
+			return
+		}
+		if res.RowsAffected() == 0 {
 			var exists bool
 			_ = pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM profiles WHERE profile_id = $1::uuid)`, profileID).Scan(&exists)
 			if !exists {

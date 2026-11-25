@@ -199,7 +199,6 @@ function computeEdgeCostJS(e, avoidPoints, avoidMode, prefs) {
   // ---------------------------------------------------------------------------
   const jsFiles = [
     'web/runtime-config.js',
-    'web/runtime-config.local.js',
     'web/layers.js',
     'web/layer-manager.js',
     'web/auth-manager.js',
@@ -210,6 +209,9 @@ function computeEdgeCostJS(e, avoidPoints, avoidMode, prefs) {
     'web/parser-manager.js',
     'web/features-manager.js'
   ];
+  if (fs.existsSync(path.join(rootDir, 'web/runtime-config.local.js'))) {
+    jsFiles.push('web/runtime-config.local.js');
+  }
 
   for (const relPath of jsFiles) {
     await runSuite(`Składnia JS i brak emoji: ${relPath}`, () => {

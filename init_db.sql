@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS profiles (
 );
 
 CREATE INDEX IF NOT EXISTS idx_profiles_user_id ON profiles (user_id);
+ALTER TABLE profiles ALTER COLUMN user_id DROP NOT NULL;
 
 -- ============================================================================
 -- 2. EPOKI TELEMETRYCZNE
