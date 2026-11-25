@@ -7,8 +7,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
@@ -67,6 +65,22 @@ func main() {
 	// Uruchomienie harmonogramu automatycznych aktualizacji przyrostowych PBF (anacron / catch-up / nocne)
 	osmUpdater.StartScheduler(ctx)
 
+	// Okresowe czyszczenie wygasłych sesji użytkowników (co 1h)
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if deleted, err := auth.CleanupExpiredSessions(ctx, database.Pool); err == nil && deleted > 0 {
+					log.Printf("[NNAPER AUTH] Usunięto %d wygasłych sesji użytkowników.", deleted)
+				}
+			}
+		}
+	}()
+
 	// Konfiguracja routera Chi
 	r := chi.NewRouter()
 
@@ -89,50 +103,26 @@ func main() {
 	r.Route("/api", func(api chi.Router) {
 		api.Use(auth.AuthMiddleware(database.Pool, false))
 
+		// Rejestracja endpointów publicznych i z opcjonalną autoryzacją
 		api.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"status":"ok"}`))
 		})
-
-		// Autoryzacja i profile
 		api.Post("/auth/register", authService.HandleRegister)
 		api.Post("/auth/login", authService.HandleLogin)
-		api.Get("/auth/me", authService.HandleMe)
-		api.Post("/auth/avatar", authService.HandleAvatar)
-		api.Delete("/auth/avatar", authService.HandleAvatar)
-		api.Post("/auth/logout", authService.HandleLogout)
-		api.Get("/auth/profiles", authService.HandleListProfiles)
-		api.Post("/auth/profiles", authService.HandleCreateProfile)
-		api.Delete("/auth/profiles/{profile_id}", authService.HandleDeleteProfile)
-		api.Delete("/auth/account", authService.HandleDeleteAccount)
-		api.Get("/auth/settings", authService.HandleUpdateSettings)
-		api.Put("/auth/settings", authService.HandleUpdateSettings)
-		api.Post("/auth/settings", authService.HandleUpdateSettings)
 
-		// Statystyki konta i presety warstw
-		api.Get("/stats", authService.HandleGetStats)
+		// Presety, drzewo dat i kafelki (dostępne publicznie lub personalizowane tokenem)
 		api.Get("/presets", authService.HandleListPresets)
-		api.Post("/presets", authService.HandleSavePreset)
-		api.Delete("/presets/{preset_id}", authService.HandleDeletePreset)
-
-		// Drzewo dat i godzin
 		api.Get("/dates-tree", datesService.HandleDatesTree)
 		api.Get("/time-tree", datesService.HandleTimeTree)
-
-		// Pamięć podręczna kafelków
-		api.Get("/cache/clear", tilesService.HandleClearCache)
-		api.Post("/cache/clear", tilesService.HandleClearCache)
-
-		// Dynamiczne kafelki wektorowe MVT (ślady GPS, infrastruktura drogowa, punkty POI)
 		api.Get("/track/{z}/{x}/{y}.pbf", tilesService.HandleGetTrackTile)
 		api.Get("/infrastructure/{z}/{x}/{y}.pbf", osmService.HandleGetInfrastructureTile)
 		api.Get("/poi/{z}/{x}/{y}.pbf", osmService.HandleGetPOITile)
 		api.Get("/poi/details", osmService.HandleGetPOIDetails)
 
-		// Status i ręczne wywołanie aktualizacji przyrostowych .osm.pbf
+		// Status aktualizacji OSM
 		api.Get("/osm/update/status", osmUpdater.HandleGetStatus)
-		api.Post("/osm/update/trigger", osmUpdater.HandleTriggerUpdate)
 
 		// Lokalny serwis geokodowania i wyszukiwania adresów (100% offline, kompatybilny z Photon)
 		api.Get("/geocode/api", osmService.HandleGeocodeSearch)
@@ -140,77 +130,82 @@ func main() {
 		api.Get("/geocode/search", osmService.HandleGeocodeSearch)
 		api.Get("/geocode/reverse", osmService.HandleGeocodeReverse)
 
-		// Punkty telemetryczne (epoki) — edycja manualna, batchowa, zaznaczanie ramką i timelapse
-		api.Get("/epoch/{epoch_id}", epochsService.HandleGetEpoch)
-		api.Put("/epoch/{epoch_id}", epochsService.HandleUpdateEpoch)
-		api.Delete("/epoch/{epoch_id}", epochsService.HandleDeleteEpoch)
-		api.Post("/epoch", epochsService.HandleCreateEpoch)
-		api.Delete("/epochs/day", epochsService.HandleDeleteEpochsDay)
-		api.Post("/epochs/delete-batch", epochsService.HandleDeleteEpochsBatch)
-		api.Post("/epochs/box-select", epochsService.HandleBoxSelectEpochs)
-		api.Post("/epochs/translate-batch", epochsService.HandleTranslateEpochsBatch)
-		api.Get("/playback-day", epochsService.HandlePlaybackDay)
-		api.Get("/timelapse", epochsService.HandleTimelapseSummary)
-
-		// Heatmapa, Odkrywanie mapy (Mgła wojny) oraz Rysowanie po mapie
+		// Heatmapa, Odkrywanie mapy (Mgła wojny) oraz Routing
 		api.Get("/heatmap/tiles/{z}/{x}/{y}.png", featuresService.HandleGetHeatmapTile)
 		api.Get("/heatmap/grid", featuresService.HandleGetHeatmapGrid)
 		api.Get("/fog-of-war", featuresService.HandleGetFogOfWar)
-		api.Get("/drawings", featuresService.HandleListDrawings)
-		api.Post("/drawings", featuresService.HandleSaveDrawing)
-		api.Put("/drawings/{drawing_id}", featuresService.HandleUpdateDrawing)
-		api.Delete("/drawings/{drawing_id}", featuresService.HandleDeleteDrawing)
-
-		// Zaawansowane wyznaczanie tras (punkty unikania, suwaki niechęci, unikanie przebytych dróg, generator tras)
 		api.Post("/route/plan", routingService.HandlePlanRoute)
 
-		// Eksport danych
-		api.Get("/export-data", exportService.HandleExportData)
-		api.Get("/export/download", exportService.HandleExportDownload)
+		// Trasy chronione — wymagające aktywnej sesji / tokena (RequireAuth)
+		api.Group(func(protected chi.Router) {
+			protected.Use(auth.RequireAuth(database.Pool))
 
-		// Import i parsowanie zadań w tle
-		api.Post("/parser/upload", jobsManager.HandleUpload)
-		api.Get("/parser/jobs", jobsManager.HandleGetJobs)
-		api.Post("/parser/job/{job_id}/abort", jobsManager.HandleAbortJob)
-	})
+			// Profil i ustawienia konta
+			protected.Get("/auth/me", authService.HandleMe)
+			protected.Post("/auth/avatar", authService.HandleAvatar)
+			protected.Delete("/auth/avatar", authService.HandleAvatar)
+			protected.Post("/auth/logout", authService.HandleLogout)
+			protected.Get("/auth/profiles", authService.HandleListProfiles)
+			protected.Post("/auth/profiles", authService.HandleCreateProfile)
+			protected.Delete("/auth/profiles/{profile_id}", authService.HandleDeleteProfile)
+			protected.Delete("/auth/account", authService.HandleDeleteAccount)
+			protected.Get("/auth/settings", authService.HandleUpdateSettings)
+			protected.Put("/auth/settings", authService.HandleUpdateSettings)
+			protected.Post("/auth/settings", authService.HandleUpdateSettings)
 
-	// Obsługa statycznych plików UI (frontend / web)
-	workDir, _ := os.Getwd()
-	webDir := filepath.Join(workDir, "web")
-	if _, err := os.Stat(webDir); os.IsNotExist(err) {
-		webDir = filepath.Join(workDir, "maps")
-	}
-	assetsDir := filepath.Join(workDir, "assets")
-	osmDataDir := filepath.Join(workDir, "osm_data")
+			// Statystyki konta i zarządzanie presetami
+			protected.Get("/stats", authService.HandleGetStats)
+			protected.Post("/presets", authService.HandleSavePreset)
+			protected.Delete("/presets/{preset_id}", authService.HandleDeletePreset)
 
-	fileServer(r, "/web", http.Dir(webDir), false)
-	fileServer(r, "/maps", http.Dir(webDir), false) // alias dla wstecznej kompatybilności
-	fileServer(r, "/assets", http.Dir(assetsDir), false)
-	fileServer(r, "/osm_data", http.Dir(osmDataDir), true)
+			// Pamięć podręczna kafelków
+			protected.Get("/cache/clear", tilesService.HandleClearCache)
+			protected.Post("/cache/clear", tilesService.HandleClearCache)
 
-	// Przekierowanie głównego adresu na mapę
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/web/", http.StatusMovedPermanently)
-	})
-	r.Get("/map.html", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/web/", http.StatusMovedPermanently)
-	})
-	r.Get("/maps/map.html", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/web/", http.StatusMovedPermanently)
+			// Ręczne wywołanie aktualizacji przyrostowych .osm.pbf
+			protected.Post("/osm/update/trigger", osmUpdater.HandleTriggerUpdate)
+
+			// Punkty telemetryczne (epoki) — edycja manualna, batchowa, zaznaczanie ramką i timelapse
+			protected.Get("/epoch/{epoch_id}", epochsService.HandleGetEpoch)
+			protected.Put("/epoch/{epoch_id}", epochsService.HandleUpdateEpoch)
+			protected.Delete("/epoch/{epoch_id}", epochsService.HandleDeleteEpoch)
+			protected.Post("/epoch", epochsService.HandleCreateEpoch)
+			protected.Delete("/epochs/day", epochsService.HandleDeleteEpochsDay)
+			protected.Post("/epochs/delete-batch", epochsService.HandleDeleteEpochsBatch)
+			protected.Post("/epochs/box-select", epochsService.HandleBoxSelectEpochs)
+			protected.Post("/epochs/translate-batch", epochsService.HandleTranslateEpochsBatch)
+			protected.Get("/playback-day", epochsService.HandlePlaybackDay)
+			protected.Get("/timelapse", epochsService.HandleTimelapseSummary)
+
+			// Rysunki na mapie
+			protected.Get("/drawings", featuresService.HandleListDrawings)
+			protected.Post("/drawings", featuresService.HandleSaveDrawing)
+			protected.Put("/drawings/{drawing_id}", featuresService.HandleUpdateDrawing)
+			protected.Delete("/drawings/{drawing_id}", featuresService.HandleDeleteDrawing)
+
+			// Eksport danych
+			protected.Get("/export-data", exportService.HandleExportData)
+			protected.Get("/export/download", exportService.HandleExportDownload)
+
+			// Import i parsowanie zadań w tle
+			protected.Post("/parser/upload", jobsManager.HandleUpload)
+			protected.Get("/parser/jobs", jobsManager.HandleGetJobs)
+			protected.Post("/parser/job/{job_id}/abort", jobsManager.HandleAbortJob)
+		})
 	})
 
 	addr := fmt.Sprintf("0.0.0.0:%d", cfg.Port)
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           r,
-		ReadHeaderTimeout: 30 * time.Second,
-		ReadTimeout:       0, // Bez limitu czasu na pobieranie wielusetmegabajtowych plików
-		WriteTimeout:      0, // Bez limitu czasu na długie strumienie zapisu
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Minute,
+		WriteTimeout:      30 * time.Minute,
 		IdleTimeout:       120 * time.Second,
 	}
 
 	go func() {
-		log.Printf("[NNAPER] Serwer uruchomiony na http://%s\n", addr)
+		log.Printf("[NNAPER] Serwer API uruchomiony na http://%s\n", addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("[NNAPER FATAL] Błąd serwera HTTP: %v", err)
 		}
@@ -229,27 +224,4 @@ func main() {
 		log.Printf("[NNAPER WARNING] Błąd zamykania serwera: %v\n", err)
 	}
 	log.Println("[NNAPER] Serwer zatrzymany.")
-}
-
-func fileServer(r chi.Router, path string, root http.FileSystem, isNoStore bool) {
-	if strings.ContainsAny(path, "{}*") {
-		panic("FileServer does not permit URL parameters.")
-	}
-
-	fs := http.StripPrefix(path, http.FileServer(root))
-
-	if path != "/" && path[len(path)-1] != '/' {
-		r.Get(path, http.RedirectHandler(path+"/", 301).ServeHTTP)
-		path += "/"
-	}
-	pattern := path + "*"
-
-	r.Get(pattern, func(w http.ResponseWriter, r *http.Request) {
-		if isNoStore {
-			w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Header().Set("Access-Control-Expose-Headers", "Content-Range, Accept-Ranges, Content-Length, ETag")
-		}
-		fs.ServeHTTP(w, r)
-	})
 }

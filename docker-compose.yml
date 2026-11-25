@@ -143,23 +143,5 @@ services:
       - PMTILES_FILE=${PMTILES_FILE:-pomorskie.pmtiles}
     restart: unless-stopped
 
-  open-browser:
-    image: alpine:latest
-    container_name: nnaper_browser_launcher
-    depends_on:
-      tiles-server:
-        condition: service_started
-    entrypoint: ["/bin/sh", "-c"]
-    environment:
-      - PUBLIC_MAP_URL=${TILES_PUBLIC_URL:-http://localhost:8080}/web/index.html
-    command: >
-      "echo '[DOCKER] Oczekiwanie na serwer mapy (tryb offline-safe)...' &&
-       until wget -q --spider http://tiles-server:8080/web/index.html 2>/dev/null; do
-         sleep 1;
-       done &&
-       echo '========================================================' &&
-       echo '  MAPA GOTOWA: '$${PUBLIC_MAP_URL}' ' &&
-       echo '========================================================'"
-
 volumes:
   nnaper_pgdata:

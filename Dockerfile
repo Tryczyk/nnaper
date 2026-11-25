@@ -15,8 +15,6 @@ RUN apk add --no-cache ca-certificates tzdata curl && \
 WORKDIR /app
 
 COPY --from=builder /out/nnaper-server /usr/local/bin/nnaper-server
-COPY web /app/web
-COPY assets /app/assets
 
 RUN chmod +x /usr/local/bin/nnaper-server && \
     chown -R appuser:appuser /app
