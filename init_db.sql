@@ -59,15 +59,7 @@ CREATE INDEX IF NOT EXISTS idx_epochs_geom_line ON epochs USING GIST (geom_line)
 CREATE INDEX IF NOT EXISTS idx_epochs_timestamp ON epochs (timestamp ASC);
 CREATE INDEX IF NOT EXISTS idx_epochs_profile_ts ON epochs (profile_id, timestamp DESC NULLS LAST);
 
-CREATE TABLE IF NOT EXISTS satellite (
-    satellite_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    epoch_id     UUID NOT NULL REFERENCES epochs(epoch_id) ON DELETE CASCADE,
-    prn          SMALLINT,
-    elevation    SMALLINT,
-    azimuth      SMALLINT
-);
-
-CREATE INDEX IF NOT EXISTS idx_satellite_epoch_id ON satellite (epoch_id);
+DROP TABLE IF EXISTS satellite CASCADE;
 
 -- ============================================================================
 -- 3. USTAWIENIA UŻYTKOWNIKA, PRESETY WARSTW I RYSUNKI NA MAPIE

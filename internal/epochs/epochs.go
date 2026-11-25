@@ -57,17 +57,7 @@ func (s *Service) HandleGetEpoch(w http.ResponseWriter, r *http.Request) {
 			'g_x', e.g_x,
 			'g_y', e.g_y,
 			'g_z', e.g_z,
-			'satellites', COALESCE(
-				e.satellites,
-				(SELECT jsonb_agg(jsonb_build_object(
-					'prn', sat.prn,
-					'elevation', sat.elevation,
-					'azimuth', sat.azimuth
-				) ORDER BY sat.prn)
-				 FROM satellite sat
-				 WHERE sat.epoch_id = e.epoch_id),
-				'[]'::jsonb
-			)
+			'satellites', COALESCE(e.satellites, '[]'::jsonb)
 		)::text
 		FROM epochs e
 		WHERE e.epoch_id = $1::uuid
@@ -394,21 +384,6 @@ func (s *Service) HandlePlaybackDay(w http.ResponseWriter, r *http.Request) {
 			ORDER BY %s
 			LIMIT $%d
 			OFFSET $%d
-		),
-		epoch_sats AS (
-			SELECT
-				s.epoch_id,
-				jsonb_agg(
-					jsonb_build_object(
-						'prn', s.prn,
-						'elevation', s.elevation,
-						'azimuth', s.azimuth
-					) ORDER BY s.prn ASC
-				) AS satellites
-			FROM satellite s
-			JOIN day_epochs de ON de.epoch_id = s.epoch_id
-			WHERE de.satellites IS NULL
-			GROUP BY s.epoch_id
 		)
 		SELECT COALESCE(json_agg(
 			json_build_object(
@@ -421,11 +396,10 @@ func (s *Service) HandlePlaybackDay(w http.ResponseWriter, r *http.Request) {
 				'g_x', de.g_x,
 				'g_y', de.g_y,
 				'g_z', de.g_z,
-				'satellites', COALESCE(de.satellites, es.satellites, '[]'::jsonb)
+				'satellites', COALESCE(de.satellites, '[]'::jsonb)
 			) ORDER BY de.timestamp ASC
 		)::text, '[]')
-		FROM day_epochs de
-		LEFT JOIN epoch_sats es ON es.epoch_id = de.epoch_id;
+		FROM day_epochs de;
 	`, activeGeom, activeGeom, whereProfile, whereTime, orderClauseCTE, limitArg, offsetArg)
 
 	var resultJSON string
