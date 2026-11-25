@@ -87,13 +87,11 @@ type Manager struct {
 	mu          sync.RWMutex
 	jobs        map[string]*JobRecord
 	historyFile string
-	jobsFile    string
 }
 
 func NewManager(pool *pgxpool.Pool, cfg *config.Config, tilesService *tiles.Service) *Manager {
 	dbClient := parser.NewDBClientFromPool(pool)
 	parserEng := parser.NewEngine(dbClient, cfg.OSRMURL, cfg.OSRMConcurrency, cfg.MatchChunkSize)
-	jobsFile := filepath.Join(cfg.DataDir, "parser_jobs.json")
 
 	// Czyszczenie osieroconych plików uploadu starszych niż 24h
 	if entries, err := os.ReadDir(cfg.UploadDir); err == nil {
@@ -114,7 +112,6 @@ func NewManager(pool *pgxpool.Pool, cfg *config.Config, tilesService *tiles.Serv
 		parserEng:   parserEng,
 		jobs:        make(map[string]*JobRecord),
 		historyFile: cfg.HistoryFile,
-		jobsFile:    jobsFile,
 	}
 	mgr.loadJobs()
 	return mgr
@@ -149,21 +146,6 @@ func (m *Manager) loadJobs() {
 			}
 		}
 	}
-	if m.jobsFile == "" {
-		return
-	}
-	data, err := os.ReadFile(m.jobsFile)
-	if err != nil {
-		return
-	}
-	var loaded map[string]*JobRecord
-	if err := json.Unmarshal(data, &loaded); err == nil && loaded != nil {
-		for k, v := range loaded {
-			if _, exists := m.jobs[k]; !exists {
-				m.jobs[k] = v
-			}
-		}
-	}
 }
 
 func (m *Manager) persistJobToDB(job *JobRecord) {
@@ -194,12 +176,6 @@ func (m *Manager) persistJobToDB(job *JobRecord) {
 }
 
 func (m *Manager) saveJobLocked(job *JobRecord) {
-	if m.jobsFile != "" {
-		data, err := json.MarshalIndent(m.jobs, "", "  ")
-		if err == nil {
-			_ = os.WriteFile(m.jobsFile, data, 0o644)
-		}
-	}
 	if m.pool != nil && job != nil {
 		jCopy := *job
 		go m.persistJobToDB(&jCopy)
