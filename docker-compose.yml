@@ -128,11 +128,10 @@ services:
     ports:
       - "${TILES_PORT:-8080}:8080"
     volumes:
-      - ./web:/usr/share/caddy/web
+      - ./web:/usr/share/caddy/web:ro
       - ./assets:/usr/share/caddy/assets:ro
       - ./osm_data:/usr/share/caddy/osm_data:ro
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./entrypoint-caddy.sh:/entrypoint-caddy.sh:ro
     environment:
       - API_PUBLIC_URL=${API_PUBLIC_URL:-http://localhost:8000}
       - TILES_PUBLIC_URL=${TILES_PUBLIC_URL:-http://localhost:8080}
@@ -141,7 +140,6 @@ services:
       - PHOTON_BBOX=${PHOTON_BBOX:-14.1,53.9,19.9,55.9}
       - PHOTON_SEARCH_LIMIT=${PHOTON_SEARCH_LIMIT:-50}
       - PMTILES_FILE=${PMTILES_FILE:-pomorskie.pmtiles}
-    command: ["sh", "/entrypoint-caddy.sh"]
     restart: unless-stopped
 
   open-browser:

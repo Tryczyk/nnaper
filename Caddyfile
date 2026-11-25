@@ -14,20 +14,41 @@
     }
     respond @blocked 403
 
-    file_server
-
-    header {
-        Access-Control-Allow-Origin *
-        Access-Control-Expose-Headers "Content-Range, Accept-Ranges, Content-Length, ETag"
+    # Dynamiczna konfiguracja środowiskowa serwowana w pamięci (bez modyfikowania plików na dysku)
+    @runtime_config path /web/runtime-config.local.js /runtime-config.local.js
+    handle @runtime_config {
+        header Content-Type "application/javascript; charset=utf-8"
+        header Cache-Control "no-cache, must-revalidate"
+        header Access-Control-Allow-Origin *
+        respond <<EOF
+window.NNAPER_CONFIG = Object.assign(window.NNAPER_CONFIG || {}, {
+  API_BASE_URL: '{$API_PUBLIC_URL:http://localhost:8000}',
+  TILES_BASE_URL: '{$TILES_PUBLIC_URL:http://localhost:8080}',
+  OSRM_URL: '{$OSRM_PUBLIC_URL:http://localhost:5000}',
+  PHOTON_URL: '{$PHOTON_URL:http://localhost:8000/api/geocode}',
+  PHOTON_BBOX: '{$PHOTON_BBOX:14.1,53.9,19.9,55.9}',
+  PHOTON_SEARCH_LIMIT: {$PHOTON_SEARCH_LIMIT:50},
+  PMTILES_FILE: '{$PMTILES_FILE:pomorskie.pmtiles}'
+});
+EOF 200
     }
 
-    @pmtiles path *.pmtiles
-    header @pmtiles {
-        Cache-Control "no-store, no-cache, must-revalidate"
-    }
+    handle {
+        file_server
 
-    @nocache path *.js *.html *.css
-    header @nocache {
-        Cache-Control "no-cache, must-revalidate"
+        header {
+            Access-Control-Allow-Origin *
+            Access-Control-Expose-Headers "Content-Range, Accept-Ranges, Content-Length, ETag"
+        }
+
+        @pmtiles path *.pmtiles
+        header @pmtiles {
+            Cache-Control "no-store, no-cache, must-revalidate"
+        }
+
+        @nocache path *.js *.html *.css
+        header @nocache {
+            Cache-Control "no-cache, must-revalidate"
+        }
     }
 }
