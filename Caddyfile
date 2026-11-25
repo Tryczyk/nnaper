@@ -8,6 +8,16 @@
     redir /maps/ /web/ 301
     redir /maps/* /web/ 301
 
+    # Reverse proxy do backendu Go dla całego API (ujednolicony port 8080, brak problemów z CORS)
+    handle /api/* {
+        reverse_proxy api:8000 {
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
     # Blokada dostępu do wrażliwych plików, katalogów i źródeł
     @blocked {
         path /.* /.env* /*.sql /data/* /osm_data/sources/* /internal/* /Dockerfile* /go.*
@@ -22,10 +32,10 @@
         header Access-Control-Allow-Origin *
         respond <<EOF
 window.NNAPER_CONFIG = Object.assign(window.NNAPER_CONFIG || {}, {
-  API_BASE_URL: '{$API_PUBLIC_URL:http://localhost:8000}',
+  API_BASE_URL: '{$API_PUBLIC_URL:http://localhost:8080}',
   TILES_BASE_URL: '{$TILES_PUBLIC_URL:http://localhost:8080}',
   OSRM_URL: '{$OSRM_PUBLIC_URL:http://localhost:5000}',
-  PHOTON_URL: '{$PHOTON_URL:http://localhost:8000/api/geocode}',
+  PHOTON_URL: '{$PHOTON_URL:http://localhost:8080/api/geocode}',
   PHOTON_BBOX: '{$PHOTON_BBOX:14.1,53.9,19.9,55.9}',
   PHOTON_SEARCH_LIMIT: {$PHOTON_SEARCH_LIMIT:50},
   PMTILES_FILE: '{$PMTILES_FILE:pomorskie.pmtiles}'

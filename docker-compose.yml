@@ -28,6 +28,7 @@ services:
     working_dir: /app
     volumes:
       - ./osm_data:/app/osm_data
+      - ./data:/app/data
     ports:
       - "${API_PORT:-8000}:8000"
     environment:
@@ -133,7 +134,7 @@ services:
       - ./osm_data:/usr/share/caddy/osm_data:ro
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
     environment:
-      - API_PUBLIC_URL=${API_PUBLIC_URL:-http://localhost:8000}
+      - API_PUBLIC_URL=${API_PUBLIC_URL:-http://localhost:8080}
       - TILES_PUBLIC_URL=${TILES_PUBLIC_URL:-http://localhost:8080}
       - OSRM_PUBLIC_URL=${OSRM_PUBLIC_URL:-http://localhost:5000}
       - PHOTON_URL=${PHOTON_URL:-http://localhost:8000/api/geocode}
